@@ -110,6 +110,25 @@ def tile_shown(key):
     return item.clip.contains(item.rect.x, item.rect.y) and item.clip.contains(item.rect.x + item.rect.w, item.rect.top)
 
 
+def shown(key):
+    if not has(key):
+        return False
+    item = control(key)
+    return item.clip is None or (item.clip.contains(item.rect.x, item.rect.y) and item.clip.contains(item.rect.x + item.rect.w, item.rect.top))
+
+
+def reveal(window, region, key, panel='PROPERTIES'):
+    for _ in range(30):
+        if shown(key):
+            break
+        viewport = editor._active.workspace.scroll_areas[panel][0]
+        x, y = region.x + viewport.x + viewport.w / 2, region.y + viewport.y + viewport.h / 2
+        window.event_simulate(type='MOUSEMOVE', value='NOTHING', x=int(x), y=int(y))
+        window.event_simulate(type='WHEELDOWNMOUSE', value='PRESS', x=int(x), y=int(y))
+        yield 0.1
+    check(shown(key), key + ' scrolls into view')
+
+
 def png_pixels(path):
     image = bpy.data.images.load(str(path))
     values = numpy.empty(len(image.pixels), dtype=numpy.float32)
@@ -516,7 +535,10 @@ def journey():
     click(window, region, 'TEXTURE_DIR')
     yield 0.2
     type_text(window, str(textures), *spot(region, 'TEXTURE_DIR'))
-    yield 0.6
+    for _ in range(15):
+        yield 0.2
+        if sum(item.key.startswith('ITEM.') for item in editor._active.workspace.controls) == 4:
+            break
     check(library.texture_folder() == str(textures) and sum(item.key.startswith('ITEM.') for item in editor._active.workspace.controls) == 4,
           'typing a folder lists its textures in the shelf')
     for _ in range(20):
@@ -752,6 +774,53 @@ def journey():
           'the normal map bakes the high-poly surface in tangent space')
     check(cube.mode == 'TEXTURE_PAINT' and bpy.context.view_layer.objects.active == cube, 'baking keeps the painted mesh active')
     bpy.data.objects.remove(high)
+
+    click(window, region, f'ITEM.{shelf_index("Steel")}')
+    yield 0.6
+    steel = next(layer for layer in data.layers if layer.uid == data.active_uid)
+    check(has('GENERATOR') and control('GENERATOR').text == 'None', 'every layer offers a mask generator')
+    yield from reveal(window, region, 'GENERATOR')
+    click(window, region, 'GENERATOR')
+    yield 0.3
+    click(window, region, 'SET_GENERATOR.EDGE_WEAR')
+    yield 0.6
+    nodes = data.material.node_tree.nodes
+    check(steel.generator == 'EDGE_WEAR' and steel.uid + '.gen.range' in nodes and has('GEN_LEVEL') and has('GEN_INVERT'),
+          'Edge wear masks the layer from the baked curvature')
+    sampled = [node for node in nodes if node.type == 'TEX_IMAGE' and node.image == data.maps['curvature'].image]
+    check(len(sampled) == 1, 'the generator samples the curvature map in the material')
+    yield from reveal(window, region, 'GEN_INVERT')
+    rect = control('GEN_LEVEL').rect
+    press(window, 'LEFTMOUSE', region.x + rect.x + rect.w * .5, region.y + rect.y + rect.h / 2)
+    yield 0.4
+    ranged = data.material.node_tree.nodes[steel.uid + '.gen.range']
+    check(abs(steel.gen_level - .5) < .05 and ranged.inputs['From Min'].default_value < steel.gen_level < ranged.inputs['From Max'].default_value,
+          'the level slider moves the generator threshold')
+    yield from reveal(window, region, 'GEN_INVERT')
+    click(window, region, 'GEN_INVERT')
+    yield 0.4
+    check(steel.gen_invert and data.material.node_tree.nodes[steel.uid + '.gen.range'].inputs['To Min'].default_value == 1.0, 'Invert flips the generated mask')
+    click(window, region, 'SHELF_TAB.MASKS')
+    yield 0.4
+    for _ in range(60):
+        if control('ITEM.0').preview is not None:
+            break
+        yield 0.3
+    check(control('ITEM.0').preview is not None, 'smart masks show rendered previews')
+    click(window, region, f'ITEM.{shelf_index("Dirt")}')
+    yield 0.6
+    check(steel.generator == 'DIRT' and abs(steel.gen_level - .3) < 1e-4 and not steel.gen_invert
+          and any(node.type == 'TEX_IMAGE' and node.image == data.maps['ao'].image for node in data.material.node_tree.nodes),
+          'clicking the Dirt smart mask drives the layer from the ambient occlusion map')
+    click(window, region, 'SHELF_TAB.MATERIALS')
+    yield 0.3
+    yield from reveal(window, region, 'GENERATOR')
+    click(window, region, 'GENERATOR')
+    yield 0.3
+    click(window, region, 'SET_GENERATOR.NONE')
+    yield 0.5
+    check(steel.generator == 'NONE' and steel.uid + '.gen.range' not in data.material.node_tree.nodes and not has('GEN_LEVEL'),
+          'setting the generator to None removes it')
 
     click(window, region, 'SHELF_TOGGLE')
     yield 0.3

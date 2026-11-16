@@ -1,5 +1,6 @@
 import bpy
 from .blending import BLEND_MODES, CHANNEL, CHANNELS
+from .masks import GENERATORS
 from .procedural import PATTERNS
 
 RESOLUTIONS = (1024, 2048, 4096)
@@ -45,6 +46,12 @@ class DEVIL_PAINTER_PG_layer(bpy.types.PropertyGroup):
     visible: bpy.props.BoolProperty(default=True)
     opacity: bpy.props.FloatProperty(default=1.0, min=0.0, max=1.0)
     projection: bpy.props.EnumProperty(items=PROJECTIONS)
+    generator: bpy.props.EnumProperty(items=[('NONE', 'None', '')] + [(item.key, item.label, '') for item in GENERATORS])
+    gen_level: bpy.props.FloatProperty(default=.2, min=-1.0, max=1.0)
+    gen_contrast: bpy.props.FloatProperty(default=.5, min=0.0, max=1.0)
+    gen_noise: bpy.props.FloatProperty(default=.3, min=0.0, max=1.0)
+    gen_scale: bpy.props.FloatProperty(default=20.0, min=.5, max=200.0)
+    gen_invert: bpy.props.BoolProperty(default=False)
     tiling: bpy.props.FloatProperty(default=1.0, min=0.05, max=100.0)
     slots: bpy.props.CollectionProperty(type=DEVIL_PAINTER_PG_slot)
     image: bpy.props.PointerProperty(type=bpy.types.Image)

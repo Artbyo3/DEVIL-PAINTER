@@ -1,4 +1,5 @@
 from .document import children, set_channels, shown_layers, slot_value, uses_coordinates
+from .masks import generator_mask, write_generator
 from .procedural import contrast_range, pattern_node, set_pattern_values
 
 SIGNATURE_KEY = 'devil_painter_signature'
@@ -28,12 +29,13 @@ def slot_signature(slot):
 
 def signature(data):
     channels = ','.join(channel.key for channel in set_channels(data))
-    layers = '|'.join(':'.join((layer.uid, layer.kind, layer.parent, layer.projection, layer.image.name if layer.image else '',
+    maps = ','.join(item.name for item in data.maps if item.image is not None)
+    layers = '|'.join(':'.join((layer.uid, layer.kind, layer.parent, layer.projection, layer.generator, layer.image.name if layer.image else '',
                                 layer.mask.name if layer.mask else '', *(slot_signature(slot) for slot in layer.slots if slot.enabled)))
                       for layer in shown_layers(data.layers))
     stroke = stroke_link(data)
     owner = f'{stroke[0]}:{",".join(stroke[2])}' if stroke else ''
-    return f'{channels};{data.solo};{layers};{owner}'
+    return f'{channels};{data.solo};{layers};{owner};{maps}'
 
 
 def math_node(nodes, links, operation, first, second, x, y, name=''):
@@ -67,7 +69,7 @@ def stroke_over(nodes, links, image, alpha, color, x):
     return total, socket(mix.outputs, 'Result', 'RGBA'), weight
 
 
-def layer_coverage(nodes, links, layer, x, stroke=None):
+def layer_coverage(nodes, links, layer, x, stroke=None, masking=None):
     factor = nodes.new('ShaderNodeMath')
     factor.name = layer.uid + '.opacity'
     factor.operation = 'MULTIPLY'
@@ -92,6 +94,10 @@ def layer_coverage(nodes, links, layer, x, stroke=None):
         links.new(coverage, masked.inputs[0])
         links.new(mask.outputs['Alpha'], masked.inputs[1])
         coverage = masked.outputs[0]
+    if masking is not None and layer.generator != 'NONE':
+        generated = generator_mask(nodes, links, layer, *masking)
+        if generated is not None:
+            coverage = math_node(nodes, links, 'MULTIPLY', coverage, generated, x - 50, -1250)
     return coverage, source, weight
 
 
@@ -184,9 +190,9 @@ def scaled(nodes, links, factor, name, x, y):
     return node.outputs[0]
 
 
-def compose_layer(nodes, links, channels, layer, results, x, stroke):
+def compose_layer(nodes, links, channels, layer, results, x, stroke, masking):
     owner = stroke is not None and stroke[0] == layer.uid
-    coverage, painted, weight = layer_coverage(nodes, links, layer, x, stroke[1] if owner else None)
+    coverage, painted, weight = layer_coverage(nodes, links, layer, x, stroke[1] if owner else None, masking)
     vector = layer_coordinates(nodes, links, layer, x) if uses_coordinates(layer) else None
     for row, channel in enumerate(channels):
         slot = layer.slots[channel.key]
@@ -211,18 +217,18 @@ def compose_layer(nodes, links, channels, layer, results, x, stroke):
         results[channel.key] = socket(node.outputs, 'Result', 'RGBA')
 
 
-def compose(nodes, links, channels, layers, parent, results, column, stroke=None):
+def compose(nodes, links, channels, layers, parent, results, column, stroke=None, masking=None):
     for layer in children(layers, parent):
         if not layer.visible:
             continue
         x = 300 * column[0]
         column[0] += 1
         if layer.kind != 'FOLDER':
-            compose_layer(nodes, links, channels, layer, results, x, stroke)
+            compose_layer(nodes, links, channels, layer, results, x, stroke, masking)
             continue
         below = dict(results)
-        inner = compose(nodes, links, channels, layers, layer.uid, dict(results), column, stroke)
-        coverage, _, _ = layer_coverage(nodes, links, layer, 300 * column[0])
+        inner = compose(nodes, links, channels, layers, layer.uid, dict(results), column, stroke, masking)
+        coverage, _, _ = layer_coverage(nodes, links, layer, 300 * column[0], None, masking)
         for row, channel in enumerate(channels):
             if inner[channel.key] is not below[channel.key]:
                 node = channel_mix(nodes, links, f'{layer.uid}.{channel.key}', below[channel.key], coverage, 'MIX', 300 * column[0], 300 - 250 * row)
@@ -232,7 +238,7 @@ def compose(nodes, links, channels, layers, parent, results, column, stroke=None
     return results
 
 
-def build_tree(tree, channels, layers, solo=None, raw=False, stroke=None):
+def build_tree(tree, channels, layers, solo=None, raw=False, stroke=None, masking=None):
     nodes, links = tree.nodes, tree.links
     nodes.clear()
     output = nodes.new('ShaderNodeOutputMaterial')
@@ -244,7 +250,7 @@ def build_tree(tree, channels, layers, solo=None, raw=False, stroke=None):
         node.location = (-400, 300 - 250 * row)
         results[channel.key] = node.outputs[0]
     column = [0]
-    results = compose(nodes, links, channels, layers, '', results, column, stroke)
+    results = compose(nodes, links, channels, layers, '', results, column, stroke, masking)
     end = 300 * column[0]
     output.location, shader.location = (end + 600, 0), (end + 300, 0)
     for key, name in SHADER_INPUTS.items():
@@ -264,6 +270,8 @@ def write_values(nodes, channels, layers, brush=None):
         nodes['stroke.opacity'].inputs[1].default_value = brush[0]
     for layer in shown_layers(layers):
         nodes[layer.uid + '.opacity'].inputs[1].default_value = layer.opacity
+        if layer.generator != 'NONE' and layer.uid + '.gen.range' in nodes:
+            write_generator(nodes, layer)
         if layer.kind == 'FOLDER':
             continue
         if uses_coordinates(layer):
@@ -324,7 +332,9 @@ def viewed_map(data):
 
 def rebuild(data, solo=None, raw=False):
     material = data.material
-    build_tree(material.node_tree, set_channels(data), list(data.layers), solo or solo_channel(data), raw, None if raw else stroke_link(data))
+    maps = {item.name: item.image for item in data.maps if item.image is not None}
+    build_tree(material.node_tree, set_channels(data), list(data.layers), solo or solo_channel(data), raw, None if raw else stroke_link(data),
+               (maps, False, 1.0))
     if not raw and solo is None and viewed_map(data) is not None:
         show_map(material.node_tree, viewed_map(data))
     material[SIGNATURE_KEY] = '' if raw else signature(data)

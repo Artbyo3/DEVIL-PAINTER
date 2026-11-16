@@ -2,13 +2,14 @@ import json
 import bpy
 import numpy
 from . import baking, brushes, compositing, library, meshmaps, painting, strokes
+from .masks import GENERATOR, GENERATOR_FIELDS
 from .meshmaps import MESH_MAP
 from .blending import BLEND_MODES, CHANNEL
 from .procedural import PATTERN
 from .document import SLOT_FIELDS, active_layer, add_set_channels, add_slots, children, descendants, fill_slots, find_layer, layer_index, set_slot_value
 
 KIND_NAMES = {'PAINT': 'Paint', 'FILL': 'Fill', 'FOLDER': 'Folder'}
-LAYER_FIELDS = ('kind', 'visible', 'opacity', 'projection', 'tiling', 'material')
+LAYER_FIELDS = ('kind', 'visible', 'opacity', 'projection', 'tiling', 'material') + GENERATOR_FIELDS
 
 
 def image_for(obj, data, label, opaque):
@@ -346,6 +347,21 @@ def bake_mesh_maps(context, obj, data, keys):
 def set_bake_source(context, obj, data, name):
     data.bake_source = bpy.data.objects.get(name) if name else None
     return refresh(context, obj, data, f'Normal maps bake from {name}.' if name else 'No high-poly source.')
+
+
+def set_generator(context, obj, data, values):
+    layer = active_layer(data)
+    library.apply_generator(layer, values)
+    if layer.generator == 'NONE':
+        return refresh(context, obj, data, f'{layer.name} has no generator.')
+    generator = GENERATOR[layer.generator]
+    missing = '' if generator.map_key in data.maps and data.maps[generator.map_key].image else f' Bake the {MESH_MAP[generator.map_key].label.lower()} map to see it.'
+    return refresh(context, obj, data, f'{generator.label} masks {layer.name}.{missing}')
+
+
+def set_generator_value(context, obj, data, field, value):
+    setattr(active_layer(data), field, value)
+    compositing.update_values(data)
 
 
 def add_mask(context, obj, data, white):

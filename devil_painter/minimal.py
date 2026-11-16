@@ -8,6 +8,7 @@ from .blending import BLEND_MODES, CHANNEL, linear_to_srgb
 from .canvas import Layout, Rect
 from .document import PROJECTIONS, RESOLUTIONS, active_layer, children, editing_mask, set_channels, slot_value, uses_coordinates
 from .library import capture, texture_folder
+from .masks import GENERATOR
 from .meshmaps import MESH_MAP, MESH_MAPS
 from .painting import TOOLS
 from .shell import GAP, distribute, zones
@@ -391,6 +392,46 @@ def layer_mask_section(flow, data, layer, w):
         flow.add('SELECT_MASK', Rect(x, y, w, h), 'CHIP', label='Edit mask', tip='Select the mask to paint and edit it')
 
 
+GENERATOR_SLIDERS = (('GEN_LEVEL', 'Level', 'gen_level', 1.0), ('GEN_CONTRAST', 'Contrast', 'gen_contrast', 1.0),
+                     ('GEN_NOISE', 'Noise', 'gen_noise', 1.0), ('GEN_SCALE', 'Scale', 'gen_scale', 200.0))
+
+
+def generator_ready(data, layer):
+    key = GENERATOR[layer.generator].map_key
+    return key in data.maps and data.maps[key].image is not None
+
+
+def generator_section(flow, data, layer, w):
+    s = flow.layout.scale
+    x, y, h = flow.field()
+    label = GENERATOR[layer.generator].label if layer.generator != 'NONE' else 'None'
+    flow.add('GENERATOR', Rect(x, y, w, h), 'DROPDOWN', label='Generator', text=label,
+             tip='Mask this layer from the baked mesh maps: edge wear, cavity, dirt, ground gradient, or thickness')
+    if layer.generator == 'NONE':
+        return
+    if not generator_ready(data, layer):
+        x, y, h = flow.field()
+        flow.add('GEN_MISSING', Rect(x, y, w - 106 * s, h), 'NOTE', label=f'Needs the {MESH_MAP[GENERATOR[layer.generator].map_key].label.lower()} map')
+        flow.add('OPEN_BAKE', Rect(x + w - 100 * s, y, 100 * s, h), 'CHIP', label='Bake maps', tip='Open the bake card')
+        return
+    half = (w - 4 * s) / 2
+    for row in range(2):
+        x, y, h = flow.field()
+        for column, (key, text, field, top) in enumerate(GENERATOR_SLIDERS[row * 2:row * 2 + 2]):
+            width = half if row == 0 else (w - 8 * s - 80 * s) / 2
+            value = getattr(layer, field)
+            flow.add(key, Rect(x + column * (width + 4 * s), y, width, h), 'SLIDER', label=text, value=value / top,
+                     text=f'{value:.0f}' if key == 'GEN_SCALE' else f'{value:.2f}')
+    flow.add('GEN_INVERT', Rect(x + w - 80 * s, y, 80 * s, h), 'TOGGLE', label='Invert', active=layer.gen_invert, tip='Swap revealed and hidden areas')
+
+
+def generator_lines(data):
+    layer = active_layer(data)
+    if layer.generator == 'NONE':
+        return 1
+    return 3 if generator_ready(data, layer) else 2
+
+
 def mask_section(flow, data, layer, w):
     s = flow.layout.scale
     x, y, h = flow.field()
@@ -424,9 +465,10 @@ def material_lines(data):
 
 
 PROPERTY_SECTIONS = {'LAYER': (Section(one_line, opacity_section), Section(material_lines, material_section), Section(projection_lines, projection_section),
-                               Section(channel_lines, channels_section), Section(one_line, layer_mask_section)),
-                     'FOLDER': (Section(one_line, opacity_section), Section(one_line, layer_mask_section)),
-                     'MASK': (Section(two_lines, mask_section),)}
+                               Section(channel_lines, channels_section), Section(one_line, layer_mask_section),
+                               Section(generator_lines, generator_section)),
+                     'FOLDER': (Section(one_line, opacity_section), Section(one_line, layer_mask_section), Section(generator_lines, generator_section)),
+                     'MASK': (Section(two_lines, mask_section), Section(generator_lines, generator_section))}
 
 
 def fill_properties(layout, state, data, flow):

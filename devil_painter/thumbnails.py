@@ -78,13 +78,17 @@ def material_texture(definition, owner=''):
     return _owned.get(owner)
 
 
-def preview_sphere():
+def preview_mesh(rounded_cube):
     mesh = bpy.data.meshes.new('DP Thumbnail')
     shape = bmesh.new()
     shape.loops.layers.uv.new('UVMap')
-    bmesh.ops.create_uvsphere(shape, u_segments=48, v_segments=24, radius=1.0, calc_uvs=True)
-    for face in shape.faces:
-        face.smooth = True
+    if rounded_cube:
+        bmesh.ops.create_cube(shape, size=1.25, calc_uvs=True)
+        bmesh.ops.bevel(shape, geom=list(shape.verts) + list(shape.edges), offset=.12, segments=3, affect='EDGES')
+    else:
+        bmesh.ops.create_uvsphere(shape, u_segments=48, v_segments=24, radius=1.0, calc_uvs=True)
+        for face in shape.faces:
+            face.smooth = True
     shape.to_mesh(mesh)
     shape.free()
     return mesh
@@ -93,7 +97,8 @@ def preview_sphere():
 def render(path, definition):
     path.parent.mkdir(parents=True, exist_ok=True)
     scene = bpy.data.scenes.new('DP Thumbnail')
-    mesh = preview_sphere()
+    definitions = definition.get('layers', [definition])
+    mesh = preview_mesh(any('generator' in item for item in definitions))
     sphere = bpy.data.objects.new('DP Thumbnail', mesh)
     camera_data = bpy.data.cameras.new('DP Thumbnail')
     camera = bpy.data.objects.new('DP Thumbnail Camera', camera_data)
@@ -104,12 +109,16 @@ def render(path, definition):
         scene.collection.objects.link(sphere)
         scene.collection.objects.link(camera)
         mesh.materials.append(material)
-        layer = sphere.devil_painter.layers.add()
-        layer.uid, layer.kind = 'T', 'FILL'
-        add_slots(layer)
-        apply_definition(layer, definition)
-        build_tree(material.node_tree, CHANNELS, [layer])
-        write_values(material.node_tree.nodes, CHANNELS, [layer])
+        layers = sphere.devil_painter.layers
+        for index, item in enumerate(definitions):
+            layer = layers.add()
+            layer.uid, layer.kind = f'T{index}', 'FILL'
+            add_slots(layer)
+            apply_definition(layer, item)
+        build_tree(material.node_tree, CHANNELS, list(layers), masking=({}, True, 2.0))
+        write_values(material.node_tree.nodes, CHANNELS, list(layers))
+        if any('generator' in item for item in definitions):
+            sphere.rotation_euler = (.5, 0.0, .7)
         camera_data.type, camera_data.ortho_scale = 'ORTHO', 2.1
         camera.location, camera.rotation_euler = (0.0, -5.0, 0.0), (1.5708, 0.0, 0.0)
         scene.camera = camera

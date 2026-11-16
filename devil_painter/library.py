@@ -6,6 +6,7 @@ import bpy
 from .blending import CHANNEL
 from .compositing import assign_image_colorspace
 from .document import SLOT_FIELDS
+from .masks import GENERATOR_FIELDS
 
 IMAGE_SUFFIXES = {'.png', '.jpg', '.jpeg', '.tga', '.tif', '.tiff', '.bmp', '.webp'}
 MAX_FILES = 600
@@ -202,9 +203,16 @@ def load_image(path, channel):
     return image
 
 
+def apply_generator(layer, values):
+    for field in GENERATOR_FIELDS:
+        if field in values:
+            setattr(layer, field, values[field])
+
+
 def apply_definition(layer, definition):
     layer.projection = definition.get('projection', 'UV')
     layer.tiling = definition.get('tiling', 1.0)
+    apply_generator(layer, definition.get('generator', dict(generator='NONE')))
     for slot in layer.slots:
         values = definition['slots'].get(slot.name)
         slot.enabled = values is not None
@@ -247,4 +255,7 @@ def capture(layer):
             else:
                 values['source'] = 'VALUE'
         slots[slot.name] = values
-    return material(layer.name, layer.projection, layer.tiling, **slots)
+    result = material(layer.name, layer.projection, layer.tiling, **slots)
+    if layer.generator != 'NONE':
+        result['generator'] = {field: getattr(layer, field) for field in GENERATOR_FIELDS}
+    return result

@@ -112,6 +112,13 @@ Blender's native painting.
   from a chosen high-poly source. Samples are adjustable. Baked maps appear as
   thumbnails in the Mesh maps panel, and clicking one, or picking it in the
   View menu, shows it on the model.
+- Mask generators: any layer or folder can be masked by a generator driven
+  by the baked maps: Edge wear (convex curvature), Cavity (concave
+  curvature), Dirt (ambient occlusion), Ground gradient (height from the
+  position map), and Thickness. Each has level, contrast, noise breakup,
+  noise scale, and invert, and multiplies with the painted mask so painting
+  refines it. The Masks shelf tab holds smart mask presets whose thumbnails
+  render the generator live on a beveled cube.
 - Live preview: the stack compiles into the material's node tree. Normal feeds
   a normal map, height feeds a bump on top of it, emission and opacity feed the
   shader's emission and alpha. Value edits update node inputs without
@@ -158,7 +165,6 @@ Planned stages, each shipped as a tested increment:
 ## Not in the MVP
 
 - Painting normal detail with the brush (normal is a fill value per layer).
-- Generators and smart masks driven by the baked maps.
 - Multiple texture sets per object, UDIMs, and keeping other materials on a
   multi-material mesh. Start painting replaces the mesh's material slots.
 - Smart materials that save a whole layer stack with masks.

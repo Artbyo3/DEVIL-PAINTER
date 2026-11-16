@@ -9,8 +9,9 @@ from .blending import BLEND_MODES, CHANNEL, CHANNELS, linear_to_srgb, srgb_to_li
 from .canvas import Rect
 from .document import active_layer, set_channels, slot_value, texture_set
 from .draw import Renderer
+from .masks import GENERATORS
 from .meshmaps import MESH_MAPS
-from .minimal import BRUSH_SLIDERS, BRUSH_TOGGLES, MAX_BRUSH_SIZE, REPLACE_TARGET, SCALE_RANGE, TILING_RANGE, from_slider, painter_layout
+from .minimal import BRUSH_SLIDERS, BRUSH_TOGGLES, GENERATOR_SLIDERS, MAX_BRUSH_SIZE, REPLACE_TARGET, SCALE_RANGE, TILING_RANGE, from_slider, painter_layout
 from .shell import MARGIN, clamp_column, clamp_split
 from .state import Popover, TextEdit, WorkspaceState
 
@@ -23,6 +24,7 @@ MOVES = {'MOVE_UP': 1, 'MOVE_DOWN': -1}
 PROJECTION_LABELS = {'UV': 'UV', 'TRIPLANAR': 'Tri-planar'}
 BRUSH_RANGES = {key: (field, top, .01 if key == 'BRUSH_FLOW' else 1.0 if key == 'BRUSH_SPACING' else 0.0) for key, _, field, top, _ in BRUSH_SLIDERS}
 BRUSH_FLAGS = {key: field for key, _, field in BRUSH_TOGGLES}
+GENERATOR_RANGES = {key: (field, top) for key, _, field, top in GENERATOR_SLIDERS}
 _active = None
 
 
@@ -389,6 +391,11 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         elif key in BRUSH_RANGES and data is not None:
             setattr(data, BRUSH_RANGES[key][0], max(BRUSH_RANGES[key][2], x * BRUSH_RANGES[key][1]))
             self.brush_changed(context, data)
+        elif key in GENERATOR_RANGES and data is not None:
+            field, top = GENERATOR_RANGES[key]
+            actions.set_generator_value(context, obj, data, field, max(.5, x * top) if key == 'GEN_SCALE' else x * top)
+            if release:
+                self.message = actions.commit_value(context, obj, data, 'Generator')
         elif key == 'BAKE_SAMPLES' and data is not None:
             data.bake_samples = max(1, round(x * 128))
         elif key.startswith('BRUSHVAL.') and data is not None:
@@ -494,6 +501,14 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         elif key == 'REDO':
             self.history_step(context, redo=True)
             bpy.ops.ed.redo()
+        elif key == 'GENERATOR':
+            current = active_layer(data).generator
+            self.state.popover = Popover('MENU', control.rect, items=(('SET_GENERATOR.NONE', 'None', current == 'NONE'),) + tuple(
+                (f'SET_GENERATOR.{item.key}', item.label, current == item.key) for item in GENERATORS))
+        elif key.startswith('SET_GENERATOR.'):
+            self.message = actions.set_generator(context, obj, data, dict(generator=key.removeprefix('SET_GENERATOR.')))
+        elif key == 'GEN_INVERT':
+            self.message = actions.set_generator(context, obj, data, dict(gen_invert=not active_layer(data).gen_invert))
         elif key in {'BAKE', 'OPEN_BAKE'}:
             self.state.popover = None if self.state.popover is not None and self.state.popover.kind == 'BAKE' else Popover('BAKE', control.rect)
         elif key.startswith('BAKEMAP.'):
@@ -669,6 +684,10 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             return actions.replace_material(context, obj, data, item.payload)
         armed = '' if armed == REPLACE_TARGET else armed
         target = armed if armed and layer is not None and layer.kind == 'FILL' else ''
+        if item.kind == 'MASK':
+            if layer is None:
+                return 'Select a layer to mask.'
+            return actions.set_generator(context, obj, data, {key: value for key, value in item.payload.items() if key != 'name'})
         if item.kind == 'BRUSH':
             brushes.apply_preset(context, data, item.payload)
             compositing.sync(data)
