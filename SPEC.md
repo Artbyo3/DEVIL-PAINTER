@@ -38,6 +38,15 @@ Blender's native painting.
   - Paint layers: one RGBA image. Painted color is the base color and painted
     alpha is the coverage of every other enabled channel, so one stroke paints
     color, roughness, metallic, height, and the rest together.
+  - Folders group layers. A folder composites its layers as a group, then
+    mixes the result into the stack with its own opacity and mask. Layers move
+    into and out of folders from the context menu, folders fold, and deleting
+    or duplicating a folder covers everything inside.
+  - Every channel slot also has its own opacity.
+  - Material layers: a fill layer added from a material remembers it. Its row
+    shows the rendered material, and Properties offers Replace (swap in
+    another shelf material, keeping the mask) and Reset (restore the material
+    values).
   - Fill layers: each channel takes a plain value, an image texture, or a
     procedural pattern (noise, grunge, cells, cracks, wood, stripes, bricks,
     checker) with two values, scale, detail, and contrast. Textures and
@@ -67,12 +76,15 @@ Blender's native painting.
     Layers rename inline. Rows outside the scrolled view are not built. Blender's own header, tool
   header, toolbar, brush shelf, and navigation gizmo are hidden while the
   workspace is open. The only native Blender UI is the folder picker behind
-  Browse in the export card and in the shelf's Textures tab.
+  Browse in the export card, and Browse and Import in the shelf's Textures tab.
 - Shelf: a collapsible zone under the stage with Materials, Textures, and
   Patterns tabs of rendered thumbnails. Clicking a material adds it as a fill
   layer. Built-in materials ship with the add-on, and any fill layer can be
-  saved as a user material from its context menu. The Textures tab browses a
-  texture folder (typed or picked with the OS folder picker). PBR texture sets
+  saved as a user material from its context menu. The Textures tab lists the user
+  texture library (Import copies image files in, right-click removes them)
+  and a browsed texture folder (typed or picked with the OS folder picker).
+  Right-clicking a texture uses it for any channel of the selected fill layer
+  or starts a new fill layer. PBR texture sets
   in that folder (color, roughness, metallic, normal, height, emission, opacity
   maps named by suffix) appear as materials. A channel's source button picks a
   texture or pattern from the shelf for that channel. Material and pattern

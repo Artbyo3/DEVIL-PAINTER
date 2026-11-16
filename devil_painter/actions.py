@@ -1,12 +1,13 @@
+import json
 import bpy
 import numpy
 from . import baking, compositing, library, painting
 from .blending import BLEND_MODES, CHANNEL
 from .procedural import PATTERN
-from .document import SLOT_FIELDS, active_layer, add_set_channels, add_slots, find_layer, layer_index, set_slot_value
+from .document import SLOT_FIELDS, active_layer, add_set_channels, add_slots, children, descendants, find_layer, layer_index, set_slot_value
 
-KIND_NAMES = {'PAINT': 'Paint', 'FILL': 'Fill'}
-LAYER_FIELDS = ('kind', 'visible', 'opacity', 'projection', 'tiling')
+KIND_NAMES = {'PAINT': 'Paint', 'FILL': 'Fill', 'FOLDER': 'Folder'}
+LAYER_FIELDS = ('kind', 'visible', 'opacity', 'projection', 'tiling', 'material')
 
 
 def image_for(obj, data, label, opaque):
@@ -64,12 +65,15 @@ def start(context, obj, resolution):
 
 def new_layer(data, kind):
     data.serial += 1
-    insert_at = layer_index(data, data.active_uid) + 1
+    active = active_layer(data)
+    index = layer_index(data, data.active_uid)
+    parent = '' if active is None else active.uid if active.kind == 'FOLDER' else active.parent
     layer = data.layers.add()
     layer.uid = f'L{data.serial}'
     layer.kind = kind
-    data.layers.move(len(data.layers) - 1, insert_at)
-    layer = data.layers[insert_at]
+    layer.parent = parent
+    data.layers.move(len(data.layers) - 1, index + 1)
+    layer = data.layers[index + 1]
     data.active_uid = layer.uid
     data.target = 'CONTENT'
     return layer
@@ -78,18 +82,43 @@ def new_layer(data, kind):
 def add_layer(context, obj, data, kind):
     layer = new_layer(data, kind)
     layer.name = f'{KIND_NAMES[kind]} {sum(1 for item in data.layers if item.kind == kind)}'
-    add_slots(layer)
+    if kind != 'FOLDER':
+        add_slots(layer)
     if kind == 'PAINT':
         layer.image = image_for(obj, data, layer.uid, False)
     return refresh(context, obj, data, f'Added {layer.name}.')
+
+
+def apply_material(layer, definition):
+    layer.material = json.dumps(definition)
+    library.apply_definition(layer, definition)
 
 
 def add_material(context, obj, data, definition):
     layer = new_layer(data, 'FILL')
     layer.name = definition['name']
     add_slots(layer)
-    library.apply_definition(layer, definition)
+    apply_material(layer, definition)
     return refresh(context, obj, data, f'Added {layer.name}.')
+
+
+def replace_material(context, obj, data, definition):
+    layer = active_layer(data)
+    apply_material(layer, definition)
+    layer.name = definition['name']
+    return refresh(context, obj, data, f'{layer.name} now carries the {definition["name"]} material and keeps its mask.')
+
+
+def reset_material(context, obj, data):
+    layer = active_layer(data)
+    apply_material(layer, json.loads(layer.material))
+    return refresh(context, obj, data, f'{layer.name} reset to its material.')
+
+
+def remove_images(layer):
+    for image in (layer.image, layer.mask):
+        if image is not None:
+            bpy.data.images.remove(image)
 
 
 def delete_layer(context, obj, data):
@@ -97,23 +126,54 @@ def delete_layer(context, obj, data):
     if index < 0:
         return 'No layer to delete.'
     layer = data.layers[index]
-    name = layer.name
-    for image in (layer.image, layer.mask):
-        if image is not None:
-            bpy.data.images.remove(image)
-    data.layers.remove(index)
-    data.active_uid = data.layers[max(0, min(index, len(data.layers) - 1))].uid if data.layers else ''
+    name, parent = layer.name, layer.parent
+    doomed = {layer.uid, *descendants(data.layers, layer.uid)}
+    for position in range(len(data.layers) - 1, -1, -1):
+        if data.layers[position].uid in doomed:
+            remove_images(data.layers[position])
+            data.layers.remove(position)
+    siblings = children(data.layers, parent)
+    data.active_uid = siblings[-1].uid if siblings else find_layer(data, parent).uid if parent else data.layers[-1].uid if data.layers else ''
     data.target = 'CONTENT'
     return refresh(context, obj, data, f'Deleted {name}.')
 
 
 def move_layer(context, obj, data, step):
-    index = layer_index(data, data.active_uid)
-    target = index + step
-    if index < 0 or not 0 <= target < len(data.layers):
-        return 'The layer is already at the edge of the stack.'
-    data.layers.move(index, target)
-    return refresh(context, obj, data, 'Moved ' + data.layers[target].name + (' up.' if step > 0 else ' down.'))
+    layer = active_layer(data)
+    siblings = [index for index, item in enumerate(data.layers) if item.parent == layer.parent]
+    position = siblings.index(layer_index(data, layer.uid))
+    if not 0 <= position + step < len(siblings):
+        return 'The layer is already at the edge of its stack.'
+    name = layer.name
+    data.layers.move(siblings[position], siblings[position + step])
+    return refresh(context, obj, data, f'Moved {name} {"up" if step > 0 else "down"}.')
+
+
+def folder_below(data, layer):
+    siblings = [item for item in data.layers if item.parent == layer.parent]
+    position = next(index for index, item in enumerate(siblings) if item.uid == layer.uid)
+    return next((item for item in reversed(siblings[:position]) if item.kind == 'FOLDER'), None)
+
+
+def move_into_folder(context, obj, data):
+    layer = active_layer(data)
+    folder = folder_below(data, layer)
+    if folder is None:
+        return 'There is no folder under this layer to move it into.'
+    layer.parent = folder.uid
+    return refresh(context, obj, data, f'Moved {layer.name} into {folder.name}.')
+
+
+def move_out_of_folder(context, obj, data):
+    layer = active_layer(data)
+    folder = find_layer(data, layer.parent)
+    if folder is None:
+        return 'The layer is not in a folder.'
+    layer.parent = folder.parent
+    message = f'Moved {layer.name} out of {folder.name}.'
+    source, target = layer_index(data, layer.uid), layer_index(data, folder.uid)
+    data.layers.move(source, target + 1 if source > target else target)
+    return refresh(context, obj, data, message)
 
 
 def select_layer(context, obj, data, uid, mask=False):
@@ -142,29 +202,42 @@ def rename_layer(context, obj, data, uid, name):
     return refresh(context, obj, data, f'Renamed to {layer.name}.')
 
 
-def duplicate_layer(context, obj, data):
-    source = active_layer(data)
-    if source is None:
-        return 'No layer to duplicate.'
-    name = source.name
+def copy_layer(obj, data, source, parent, position):
+    data.serial += 1
     values = {key: getattr(source, key) for key in LAYER_FIELDS}
     slots = [(slot.name, {key: getattr(slot, key) for key in SLOT_FIELDS + ('image',)}) for slot in source.slots]
     images = {key: getattr(source, key) for key in ('image', 'mask')}
-    layer = new_layer(data, values['kind'])
+    name, uid = source.name, source.uid
+    layer = data.layers.add()
     for key, value in values.items():
         setattr(layer, key, value)
+    layer.uid, layer.parent, layer.name = f'L{data.serial}', parent, name + (' copy' if position is not None else '')
     for slot_name, slot_values in slots:
         slot = layer.slots.add()
         slot.name = slot_name
         for key, value in slot_values.items():
             setattr(slot, key, value)
-    layer.name = name + ' copy'
     for key, image in images.items():
         if image is not None:
             copy = image.copy()
             copy.name = f'DP {obj.name} {layer.uid}' + (' mask' if key == 'mask' else '')
             copy.pack()
             setattr(layer, key, copy)
+    new_uid = layer.uid
+    if position is not None:
+        data.layers.move(len(data.layers) - 1, position)
+    for child in [item.uid for item in data.layers if item.parent == uid]:
+        copy_layer(obj, data, find_layer(data, child), new_uid, None)
+    return new_uid
+
+
+def duplicate_layer(context, obj, data):
+    source = active_layer(data)
+    if source is None:
+        return 'No layer to duplicate.'
+    name = source.name
+    data.active_uid = copy_layer(obj, data, source, source.parent, layer_index(data, source.uid) + 1)
+    data.target = 'CONTENT'
     return refresh(context, obj, data, f'Duplicated {name}.')
 
 

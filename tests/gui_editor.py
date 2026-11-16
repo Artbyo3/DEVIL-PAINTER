@@ -499,6 +499,113 @@ def journey():
     check(editor._active.message.startswith('Exported 6 textures') and match.mean() > .3,
           'export bakes the texture set normal map into the normal channel')
 
+    def active():
+        return next(layer for layer in data.layers if layer.uid == data.active_uid)
+
+    def drag_to(key, fraction):
+        rect = control(key).rect
+        press(window, 'LEFTMOUSE', region.x + rect.x + rect.w * fraction, region.y + rect.y + rect.h / 2)
+
+    click(window, region, 'ADD_FOLDER')
+    yield 0.5
+    folder = active()
+    folder_uid = folder.uid
+    check(folder.kind == 'FOLDER' and has('FOLD_' + folder.uid) and has('OPACITY') and has('ADD_MASK_BLACK') and not has('USE.base_color'),
+          '+ Folder adds a folder with its own opacity and mask')
+    click(window, region, f'ITEM.{shelf_index("Copper")}')
+    yield 0.8
+    copper = active()
+    check(copper.parent == folder.uid and control('MATERIAL_NAME').label == 'Material · Copper',
+          'a material added while a folder is selected lands inside it as a material layer')
+    for _ in range(40):
+        if control('ROW_' + copper.uid).preview is not None:
+            break
+        yield 0.3
+    check(control('ROW_' + copper.uid).preview is not None, 'the material layer row shows its rendered material')
+    drag_to('CHOPACITY.roughness', .5)
+    yield 0.4
+    nodes = data.material.node_tree.nodes
+    check(abs(copper.slots['roughness'].opacity - .5) < .05 and abs(nodes[copper.uid + '.roughness.opacity'].inputs[1].default_value - copper.slots['roughness'].opacity) < 1e-5,
+          'the per-channel opacity slider sets that channel opacity in the material')
+    drag_to('VALUE.metallic', .02)
+    yield 0.4
+    check(copper.slots['metallic'].value < .1, 'editing the material layer changes its channel')
+    click(window, region, 'RESET_MATERIAL')
+    yield 0.5
+    check(copper.slots['metallic'].value == 1.0, 'Reset restores the material values')
+    click(window, region, 'ADD_MASK_BLACK')
+    yield 0.5
+    mask = copper.mask
+    click(window, region, 'SELECT_LAYER')
+    yield 0.3
+    click(window, region, 'REPLACE_MATERIAL')
+    yield 0.3
+    check(editor._active.state.armed and editor._active.state.shelf_tab == 'MATERIALS' and has('ARM_INFO'), 'Replace asks for a material from the shelf')
+    click(window, region, f'ITEM.{shelf_index("Gold")}')
+    yield 0.6
+    check(copper.name == 'Gold' and abs(copper.slots['base_color'].color[2] - .336) < 1e-3 and copper.mask == mask,
+          'replacing the material swaps every channel and keeps the mask')
+    material_uid = copper.uid
+    click(window, region, 'ROW_' + material_uid, kind='RIGHTMOUSE')
+    yield 0.3
+    click(window, region, 'MOVE_OUT')
+    yield 0.5
+    moved = next(layer for layer in data.layers if layer.uid == material_uid)
+    order = [layer.uid for layer in data.layers]
+    check(moved.parent == '' and order.index(material_uid) > order.index(folder_uid), 'Move out of folder puts the layer above the folder')
+    click(window, region, 'ROW_' + material_uid, kind='RIGHTMOUSE')
+    yield 0.3
+    click(window, region, 'MOVE_INTO')
+    yield 0.5
+    moved = next(layer for layer in data.layers if layer.uid == material_uid)
+    check(moved.parent == folder_uid, 'Move into folder below puts it back inside')
+    click(window, region, 'FOLD_' + folder_uid)
+    yield 0.3
+    check(not has('ROW_' + material_uid), 'folding the folder hides its layers')
+    click(window, region, 'FOLD_' + folder_uid)
+    yield 0.3
+    check(has('ROW_' + material_uid), 'unfolding shows them again')
+    click(window, region, 'ROW_' + folder_uid)
+    yield 0.3
+    drag_to('OPACITY', .3)
+    yield 0.4
+    nodes = data.material.node_tree.nodes
+    check(abs(nodes[folder_uid + '.opacity'].inputs[1].default_value - next(layer for layer in data.layers if layer.uid == folder_uid).opacity) < 1e-5 and next(layer for layer in data.layers if layer.uid == folder_uid).opacity < .4
+          and folder_uid + '.base_color' in nodes, 'folder opacity mixes the whole folder into the stack')
+
+    library.import_textures([textures / 'lone.png'])
+    with bpy.context.temp_override(window=window, area=area, region=region):
+        bpy.ops.devil_painter.import_textures(directory=str(textures), files=[{'name': 'brick_roughness.png'}])
+    click(window, region, 'SHELF_TAB.TEXTURES')
+    yield 0.4
+    check(has('TEXTURE_IMPORT'), 'the texture tab offers Import')
+    managed = [item for item in shelf.items('TEXTURES') if item.managed]
+    check(len(managed) == 2 and all(library.is_managed(item.payload) for item in managed), 'Import copies textures into the library')
+    click(window, region, 'ROW_' + material_uid)
+    yield 0.3
+    click(window, region, 'ITEM.0', kind='RIGHTMOUSE')
+    yield 0.3
+    check(has('ASSIGN_TEXTURE.roughness.0') and has('REMOVE_TEXTURE.0') and has('TEXTURE_FILL.0'), 'right-clicking a texture lists every channel to use it for')
+    click(window, region, 'ASSIGN_TEXTURE.roughness.0')
+    yield 0.5
+    moved = next(layer for layer in data.layers if layer.uid == material_uid)
+    check(moved.slots['roughness'].source == 'IMAGE' and moved.slots['roughness'].image.colorspace_settings.is_data,
+          'Use for roughness assigns the texture as non-color data')
+    removed = shelf.items('TEXTURES')[0].payload
+    click(window, region, 'ITEM.0', kind='RIGHTMOUSE')
+    yield 0.3
+    click(window, region, 'REMOVE_TEXTURE.0')
+    yield 0.4
+    check(not Path(removed).exists() and len([item for item in shelf.items('TEXTURES') if item.managed]) == 1, 'Remove from library deletes the imported copy')
+    click(window, region, 'SHELF_TAB.MATERIALS')
+    yield 0.3
+
+    click(window, region, 'ROW_' + folder_uid, kind='RIGHTMOUSE')
+    yield 0.3
+    click(window, region, 'DELETE')
+    yield 0.5
+    check(not any(layer.uid in {folder_uid, material_uid} for layer in data.layers), 'deleting a folder deletes the layers inside it')
+
     click(window, region, 'SHELF_TOGGLE')
     yield 0.3
     check(not editor._active.state.shelf_open and not has('ITEM.0') and has('SHELF_TAB.MATERIALS'), 'the shelf collapses to its tabs')

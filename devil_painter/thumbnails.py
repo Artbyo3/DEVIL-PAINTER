@@ -19,6 +19,7 @@ WORLD_STRENGTH = .7
 _state = dict(collection=None, budget=LOAD_BUDGET, starved=False)
 _textures = {}
 _queue = {}
+_owned = {}
 
 
 def begin_frame():
@@ -66,12 +67,15 @@ def cache_path(definition):
     return library_root() / 'thumbnails' / f'{digest}.png'
 
 
-def material_texture(definition):
+def material_texture(definition, owner=''):
     path = cache_path(definition)
     if path.is_file():
-        return file_texture(path)
-    _queue.setdefault(path, definition)
-    return None
+        texture = file_texture(path)
+        if owner and texture is not None:
+            _owned[owner] = texture
+        return texture if texture is not None else _owned.get(owner)
+    _queue[owner or str(path)] = (path, definition)
+    return _owned.get(owner)
 
 
 def preview_sphere():
@@ -134,9 +138,8 @@ def render(path, definition):
 def render_next():
     if not _queue:
         return False
-    path = next(iter(_queue))
-    definition = _queue.pop(path)
-    render(Path(path), definition)
+    path, definition = _queue.pop(next(iter(_queue)))
+    render(path, definition)
     return True
 
 
@@ -146,3 +149,4 @@ def release():
         _state['collection'] = None
     _textures.clear()
     _queue.clear()
+    _owned.clear()

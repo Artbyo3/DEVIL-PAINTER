@@ -1,5 +1,6 @@
 import json
 import re
+import shutil
 from pathlib import Path
 import bpy
 from .blending import CHANNEL
@@ -135,19 +136,60 @@ def texture_sets(files):
     return result
 
 
+def managed_folder():
+    folder = library_root() / 'textures'
+    folder.mkdir(exist_ok=True)
+    return folder
+
+
+def image_files(root):
+    files = []
+    if root is not None and root.is_dir():
+        for path in sorted(root.rglob('*')):
+            if path.suffix.lower() in IMAGE_SUFFIXES and path.is_file():
+                files.append(path)
+                if len(files) >= MAX_FILES:
+                    break
+    return files
+
+
 def scan():
     folder = texture_folder()
     if _cache.get('scan', (None,))[0] != folder:
-        root = Path(folder) if folder else None
-        files = []
-        if root is not None and root.is_dir():
-            for path in sorted(root.rglob('*')):
-                if path.suffix.lower() in IMAGE_SUFFIXES and path.is_file():
-                    files.append(path)
-                    if len(files) >= MAX_FILES:
-                        break
+        managed = image_files(managed_folder())
+        browsed = [path for path in image_files(Path(folder) if folder else None) if path not in managed]
+        files = managed + browsed
         _cache['scan'] = (folder, files, texture_sets(files))
     return _cache['scan'][1:]
+
+
+def is_managed(path):
+    return Path(path).resolve().parent == managed_folder().resolve()
+
+
+def import_textures(paths):
+    folder = managed_folder()
+    imported = 0
+    for source in paths:
+        source = Path(source)
+        if source.suffix.lower() not in IMAGE_SUFFIXES or not source.is_file():
+            continue
+        target, number = folder / source.name, 1
+        while target.exists():
+            number += 1
+            target = folder / f'{source.stem} {number}{source.suffix}'
+        shutil.copyfile(source, target)
+        imported += 1
+    rescan()
+    return imported
+
+
+def remove_texture(path):
+    if not is_managed(path):
+        raise ValueError('Only imported textures can be removed from the library.')
+    Path(path).unlink()
+    rescan()
+    return Path(path).stem
 
 
 def rescan():
@@ -171,7 +213,7 @@ def apply_definition(layer, definition):
         channel = CHANNEL[slot.name]
         slot.source = values.get('source', 'VALUE')
         slot.blend = values.get('blend', 'MIX')
-        for field in ('pattern', 'scale', 'detail', 'contrast'):
+        for field in ('pattern', 'scale', 'detail', 'contrast', 'opacity'):
             if field in values:
                 setattr(slot, field, values[field])
         for field, target in (('value', ''), ('second', '_b')):

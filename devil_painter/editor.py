@@ -9,7 +9,7 @@ from .blending import BLEND_MODES, CHANNEL, CHANNELS, linear_to_srgb, srgb_to_li
 from .canvas import Rect
 from .document import active_layer, set_channels, slot_value, texture_set
 from .draw import Renderer
-from .minimal import MAX_BRUSH_SIZE, SCALE_RANGE, TILING_RANGE, from_slider, painter_layout
+from .minimal import MAX_BRUSH_SIZE, REPLACE_TARGET, SCALE_RANGE, TILING_RANGE, from_slider, painter_layout
 from .shell import MARGIN, clamp_column, clamp_split
 from .state import Popover, TextEdit, WorkspaceState
 
@@ -219,8 +219,18 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             return {'RUNNING_MODAL'}
         if control is not None and press and event.type == 'RIGHTMOUSE' and control.key.startswith('ITEM.'):
             item = self.shelf_item(control.key)
+            index = control.key.removeprefix('ITEM.')
             if item.user_index >= 0:
                 self.state.popover = Popover('MENU', control.rect, items=((f'DELETE_MATERIAL.{item.user_index}', 'Delete material', False),))
+            elif item.kind == 'TEXTURE':
+                obj, data = self.painted()
+                layer = active_layer(data) if data is not None else None
+                items = [(f'TEXTURE_FILL.{index}', 'New fill layer', False)]
+                if layer is not None and layer.kind == 'FILL':
+                    items += [(f'ASSIGN_TEXTURE.{channel.key}.{index}', f'Use for {channel.label.lower()}', False) for channel in set_channels(data)]
+                if item.managed:
+                    items.append((f'REMOVE_TEXTURE.{index}', 'Remove from library', False))
+                self.state.popover = Popover('MENU', control.rect, items=tuple(items))
             return {'RUNNING_MODAL'}
         if control is not None and event.type == 'LEFTMOUSE' and event.value in {'PRESS', 'DOUBLE_CLICK'}:
             try:
@@ -241,7 +251,11 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         else:
             items.append(('REMOVE_MASK', 'Remove mask', False))
         if layer.kind == 'FILL':
-            items.append(('SAVE_MATERIAL', 'Save as material', False))
+            items += [('REPLACE_MATERIAL', 'Replace material', False), ('SAVE_MATERIAL', 'Save as material', False)]
+        if actions.folder_below(data, layer) is not None:
+            items.append(('MOVE_INTO', 'Move into folder below', False))
+        if layer.parent:
+            items.append(('MOVE_OUT', 'Move out of folder', False))
         items += [('MOVE_UP', 'Move up', False), ('MOVE_DOWN', 'Move down', False), ('DELETE', 'Delete', False)]
         self.state.popover = Popover('MENU', anchor, items=tuple(items))
 
@@ -341,6 +355,11 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             actions.set_channel_value(context, obj, data, channel, (x,), second=kind == 'VALUEB')
             if release:
                 self.message = actions.commit_value(context, obj, data, CHANNEL[channel].label)
+        elif key.startswith('CHOPACITY.') and data is not None:
+            channel = key.removeprefix('CHOPACITY.')
+            actions.set_slot_field(context, obj, data, channel, 'opacity', x)
+            if release:
+                self.message = actions.commit_value(context, obj, data, f'{CHANNEL[channel].label} opacity')
         elif key.startswith(('SCALE.', 'DETAIL.', 'CONTRAST.')) and data is not None:
             kind, channel = key.split('.')
             value = {'SCALE': from_slider(x, SCALE_RANGE), 'DETAIL': x, 'CONTRAST': x * .98}[kind]
@@ -444,6 +463,16 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             bpy.ops.devil_painter.choose_texture_folder('INVOKE_DEFAULT')
         elif key.startswith('ITEM.'):
             self.message = self.use_shelf_item(context, obj, data, self.shelf_item(key))
+        elif key == 'TEXTURE_IMPORT':
+            bpy.ops.devil_painter.import_textures('INVOKE_DEFAULT')
+        elif key.startswith('TEXTURE_FILL.'):
+            self.message = actions.add_material(context, obj, data, shelf.texture_definition(self.shelf_item('ITEM.' + key.removeprefix('TEXTURE_FILL.')).payload))
+        elif key.startswith('ASSIGN_TEXTURE.'):
+            _, channel, index = key.split('.')
+            path = self.shelf_item('ITEM.' + index).payload
+            self.message = actions.assign_image(context, obj, data, channel, library.load_image(path, CHANNEL[channel]))
+        elif key.startswith('REMOVE_TEXTURE.'):
+            self.message = f'Removed {library.remove_texture(self.shelf_item("ITEM." + key.removeprefix("REMOVE_TEXTURE.")).payload)} from the library.'
         elif key.startswith('DELETE_MATERIAL.'):
             self.message = f'Deleted {library.remove_user_material(int(key.removeprefix("DELETE_MATERIAL.")))}.'
         elif key == 'SAVE_MATERIAL':
@@ -499,7 +528,19 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
                 self.begin_text(f'NAME_{uid}', active_layer(data).name)
         elif key.startswith('EYE_'):
             self.message = actions.toggle_visible(context, obj, data, key.removeprefix('EYE_'))
-        elif key in {'ADD_PAINT', 'ADD_FILL'}:
+        elif key.startswith('FOLD_'):
+            self.state.collapsed ^= {key}
+        elif key == 'MOVE_INTO':
+            self.message = actions.move_into_folder(context, obj, data)
+        elif key == 'MOVE_OUT':
+            self.message = actions.move_out_of_folder(context, obj, data)
+        elif key == 'REPLACE_MATERIAL':
+            self.state.armed = REPLACE_TARGET
+            self.state.shelf_open, self.state.shelf_tab = True, 'MATERIALS'
+            self.message = 'Click a material in the shelf to put into ' + active_layer(data).name + '.'
+        elif key == 'RESET_MATERIAL':
+            self.message = actions.reset_material(context, obj, data)
+        elif key in {'ADD_PAINT', 'ADD_FILL', 'ADD_FOLDER'}:
             self.message = actions.add_layer(context, obj, data, key.removeprefix('ADD_'))
         elif key == 'DELETE':
             self.message = actions.delete_layer(context, obj, data)
@@ -524,6 +565,9 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         armed = self.state.armed
         self.state.armed = ''
         layer = active_layer(data)
+        if armed == REPLACE_TARGET and item.kind == 'MATERIAL' and layer is not None and layer.kind == 'FILL':
+            return actions.replace_material(context, obj, data, item.payload)
+        armed = '' if armed == REPLACE_TARGET else armed
         target = armed if armed and layer is not None and layer.kind == 'FILL' else ''
         if item.kind == 'TEXTURE' and target:
             return actions.assign_image(context, obj, data, target, library.load_image(item.payload, CHANNEL[target]))

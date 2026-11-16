@@ -5,7 +5,8 @@ from .procedural import PATTERNS
 RESOLUTIONS = (1024, 2048, 4096)
 SOURCES = (('VALUE', 'Value', ''), ('IMAGE', 'Texture', ''), ('PATTERN', 'Pattern', ''))
 PROJECTIONS = (('UV', 'UV', ''), ('TRIPLANAR', 'Tri-planar', ''))
-SLOT_FIELDS = ('enabled', 'source', 'color', 'value', 'color_b', 'value_b', 'blend', 'pattern', 'scale', 'detail', 'contrast')
+SLOT_FIELDS = ('enabled', 'source', 'color', 'value', 'color_b', 'value_b', 'blend', 'opacity', 'pattern', 'scale', 'detail', 'contrast')
+LAYER_KINDS = (('PAINT', 'Paint', ''), ('FILL', 'Fill', ''), ('FOLDER', 'Folder', ''))
 
 
 class DEVIL_PAINTER_PG_slot(bpy.types.PropertyGroup):
@@ -13,6 +14,7 @@ class DEVIL_PAINTER_PG_slot(bpy.types.PropertyGroup):
     color: bpy.props.FloatVectorProperty(size=3, default=(0.8, 0.8, 0.8), min=0.0, max=1.0)
     value: bpy.props.FloatProperty(default=0.5, min=0.0, max=1.0)
     blend: bpy.props.EnumProperty(items=[(key, label, '') for key, label in BLEND_MODES])
+    opacity: bpy.props.FloatProperty(default=1.0, min=0.0, max=1.0)
     source: bpy.props.EnumProperty(items=SOURCES)
     image: bpy.props.PointerProperty(type=bpy.types.Image)
     pattern: bpy.props.EnumProperty(items=[(pattern.key, pattern.label, '') for pattern in PATTERNS])
@@ -29,7 +31,9 @@ class DEVIL_PAINTER_PG_channel(bpy.types.PropertyGroup):
 
 class DEVIL_PAINTER_PG_layer(bpy.types.PropertyGroup):
     uid: bpy.props.StringProperty()
-    kind: bpy.props.EnumProperty(items=(('PAINT', 'Paint', ''), ('FILL', 'Fill', '')))
+    kind: bpy.props.EnumProperty(items=LAYER_KINDS)
+    parent: bpy.props.StringProperty()
+    material: bpy.props.StringProperty()
     visible: bpy.props.BoolProperty(default=True)
     opacity: bpy.props.FloatProperty(default=1.0, min=0.0, max=1.0)
     projection: bpy.props.EnumProperty(items=PROJECTIONS)
@@ -98,6 +102,33 @@ def uses_coordinates(layer):
     return any(slot.enabled and slot.source != 'VALUE' for slot in layer.slots)
 
 
+def children(layers, parent):
+    return [layer for layer in layers if layer.parent == parent]
+
+
+def descendants(layers, uid):
+    found, pending = [], [uid]
+    while pending:
+        current = pending.pop()
+        for layer in layers:
+            if layer.parent == current:
+                found.append(layer.uid)
+                pending.append(layer.uid)
+    return found
+
+
+def shown_layers(layers):
+    by_uid = {layer.uid: layer for layer in layers}
+
+    def shown(layer):
+        while layer is not None:
+            if not layer.visible:
+                return False
+            layer = by_uid.get(layer.parent)
+        return True
+    return [layer for layer in layers if shown(layer)]
+
+
 def layer_index(data, uid):
     return next((index for index, layer in enumerate(data.layers) if layer.uid == uid), -1)
 
@@ -120,7 +151,7 @@ def paint_target(data):
     layer = active_layer(data)
     if layer is None:
         return None
-    if editing_mask(data) or layer.kind == 'FILL':
+    if editing_mask(data) or layer.kind != 'PAINT':
         return layer.mask
     return layer.image
 

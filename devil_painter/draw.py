@@ -344,7 +344,11 @@ class Renderer:
         size = THUMBNAIL * s
         y = rect.y + (rect.h - size) / 2
         x = rect.x + 30 * s
-        self.thumbnail(Rect(x, y, size, size), control.preview, control.color, False, control.second > 0)
+        if control.icon:
+            self.round_rect(Rect(x, y, size, size), BG_WELL, radius=metrics.regular)
+            self.draw_icon(control.icon, x + size / 2, y + size / 2, 18, ACCENT if control.second > 0 else TEXT_SECONDARY)
+        else:
+            self.thumbnail(Rect(x, y, size, size), control.preview, control.color, False, control.second > 0)
         if control.mask is not None:
             x += size + 4 * s
         x += size + 8 * s

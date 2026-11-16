@@ -1,3 +1,4 @@
+from pathlib import Path
 import bpy
 from . import library
 from .document import texture_set
@@ -39,4 +40,23 @@ class DEVIL_PAINTER_OT_choose_texture_folder(bpy.types.Operator):
         return {'FINISHED'}
 
 
-CLASSES = (DEVIL_PAINTER_OT_choose_export_folder, DEVIL_PAINTER_OT_choose_texture_folder)
+class DEVIL_PAINTER_OT_import_textures(bpy.types.Operator):
+    bl_idname = 'devil_painter.import_textures'
+    bl_label = 'Import Textures'
+    bl_description = 'Copy image files into the Devil Painter texture library'
+    directory: bpy.props.StringProperty(subtype='DIR_PATH')
+    files: bpy.props.CollectionProperty(type=bpy.types.OperatorFileListElement)
+    filter_image: bpy.props.BoolProperty(default=True, options={'HIDDEN'})
+    filter_folder: bpy.props.BoolProperty(default=True, options={'HIDDEN'})
+
+    def invoke(self, context, event):
+        context.window_manager.fileselect_add(self)
+        return {'RUNNING_MODAL'}
+
+    def execute(self, context):
+        count = library.import_textures(Path(self.directory) / item.name for item in self.files)
+        self.report({'INFO'}, f'Imported {count} textures into the library.')
+        return {'FINISHED'}
+
+
+CLASSES = (DEVIL_PAINTER_OT_choose_export_folder, DEVIL_PAINTER_OT_choose_texture_folder, DEVIL_PAINTER_OT_import_textures)

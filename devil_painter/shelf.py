@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 from . import thumbnails
-from .library import BUILTIN_MATERIALS, material, pattern, plain, scan, texture, user_materials
+from .library import BUILTIN_MATERIALS, is_managed, material, pattern, plain, scan, texture, user_materials
 from .procedural import PATTERN, PATTERNS
 
 TABS = (('MATERIALS', 'Materials'), ('TEXTURES', 'Textures'), ('PATTERNS', 'Patterns'))
@@ -14,6 +14,7 @@ class Item:
     payload: object
     user_index: int = -1
     preview_file: str = ''
+    managed: bool = False
 
 
 def pattern_definition(key):
@@ -33,7 +34,7 @@ def items(tab):
                 + [Item(definition['name'], 'MATERIAL', definition, preview_file=definition['slots']['base_color']['image']) for definition in sets])
     if tab == 'TEXTURES':
         files, _ = scan()
-        return [Item(path.stem, 'TEXTURE', path) for path in files]
+        return [Item(path.stem, 'TEXTURE', path, managed=is_managed(path)) for path in files]
     return [Item(entry.label, 'PATTERN', entry.key) for entry in PATTERNS]
 
 

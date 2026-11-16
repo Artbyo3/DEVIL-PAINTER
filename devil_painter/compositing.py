@@ -1,4 +1,4 @@
-from .document import set_channels, slot_value, uses_coordinates
+from .document import children, set_channels, shown_layers, slot_value, uses_coordinates
 from .procedural import contrast_range, pattern_node, set_pattern_values
 
 SIGNATURE_KEY = 'devil_painter_signature'
@@ -17,10 +17,6 @@ def rgba(value):
     return (*value, 1.0) if len(value) == 3 else (value[0], value[0], value[0], 1.0)
 
 
-def visible_layers(data):
-    return [layer for layer in data.layers if layer.visible]
-
-
 def slot_signature(slot):
     source = slot.source
     if source == 'IMAGE':
@@ -32,9 +28,9 @@ def slot_signature(slot):
 
 def signature(data):
     channels = ','.join(channel.key for channel in set_channels(data))
-    layers = '|'.join(':'.join((layer.uid, layer.kind, layer.projection, layer.image.name if layer.image else '',
+    layers = '|'.join(':'.join((layer.uid, layer.kind, layer.parent, layer.projection, layer.image.name if layer.image else '',
                                 layer.mask.name if layer.mask else '', *(slot_signature(slot) for slot in layer.slots if slot.enabled)))
-                      for layer in visible_layers(data))
+                      for layer in shown_layers(data.layers))
     return f'{channels};{data.solo};{layers}'
 
 
@@ -132,41 +128,80 @@ def solo_shader(nodes, links, channel, result, x, raw):
     return emission.outputs[0]
 
 
+def channel_mix(nodes, links, name, below, factor, mode, x, y):
+    node = nodes.new('ShaderNodeMix')
+    node.name = name
+    node.data_type = 'RGBA'
+    node.blend_type = mode
+    node.clamp_result = True
+    node.location = (x, y)
+    links.new(below, socket(node.inputs, 'A', 'RGBA'))
+    links.new(factor, socket(node.inputs, 'Factor', 'VALUE'))
+    return node
+
+
+def scaled(nodes, links, factor, name, x, y):
+    node = nodes.new('ShaderNodeMath')
+    node.name = name
+    node.operation = 'MULTIPLY'
+    node.location = (x, y)
+    links.new(factor, node.inputs[0])
+    return node.outputs[0]
+
+
+def compose_layer(nodes, links, channels, layer, results, x):
+    coverage, painted = layer_coverage(nodes, links, layer, x)
+    vector = layer_coordinates(nodes, links, layer, x) if uses_coordinates(layer) else None
+    for row, channel in enumerate(channels):
+        slot = layer.slots[channel.key]
+        if not slot.enabled:
+            continue
+        name = f'{layer.uid}.{channel.key}'
+        y = 300 - 250 * row
+        factor = scaled(nodes, links, coverage, name + '.opacity', x - 100, y - 60)
+        node = channel_mix(nodes, links, name, results[channel.key], factor, slot.blend, x, y)
+        content = painted if channel.key == 'base_color' and painted is not None else slot_content(nodes, links, layer, slot, vector, name, x, y)
+        if content is not None:
+            links.new(content, socket(node.inputs, 'B', 'RGBA'))
+        results[channel.key] = socket(node.outputs, 'Result', 'RGBA')
+
+
+def compose(nodes, links, channels, layers, parent, results, column):
+    for layer in children(layers, parent):
+        if not layer.visible:
+            continue
+        x = 300 * column[0]
+        column[0] += 1
+        if layer.kind != 'FOLDER':
+            compose_layer(nodes, links, channels, layer, results, x)
+            continue
+        below = dict(results)
+        inner = compose(nodes, links, channels, layers, layer.uid, dict(results), column)
+        coverage, _ = layer_coverage(nodes, links, layer, 300 * column[0])
+        for row, channel in enumerate(channels):
+            if inner[channel.key] is not below[channel.key]:
+                node = channel_mix(nodes, links, f'{layer.uid}.{channel.key}', below[channel.key], coverage, 'MIX', 300 * column[0], 300 - 250 * row)
+                links.new(inner[channel.key], socket(node.inputs, 'B', 'RGBA'))
+                results[channel.key] = socket(node.outputs, 'Result', 'RGBA')
+        column[0] += 1
+    return results
+
+
 def build_tree(tree, channels, layers, solo=None, raw=False):
     nodes, links = tree.nodes, tree.links
     nodes.clear()
-    end = 300 * len(layers)
     output = nodes.new('ShaderNodeOutputMaterial')
     shader = nodes.new('ShaderNodeBsdfPrincipled')
-    output.location, shader.location = (end + 600, 0), (end + 300, 0)
     results = {}
     for row, channel in enumerate(channels):
         node = nodes.new('ShaderNodeRGB')
         node.outputs[0].default_value = rgba(channel.default)
         node.location = (-400, 300 - 250 * row)
         results[channel.key] = node.outputs[0]
-    for index, layer in enumerate(layers):
-        x = 300 * index
-        coverage, painted = layer_coverage(nodes, links, layer, x)
-        vector = layer_coordinates(nodes, links, layer, x) if uses_coordinates(layer) else None
-        for row, channel in enumerate(channels):
-            slot = layer.slots[channel.key]
-            if not slot.enabled:
-                continue
-            name = f'{layer.uid}.{channel.key}'
-            y = 300 - 250 * row
-            node = nodes.new('ShaderNodeMix')
-            node.name = name
-            node.data_type = 'RGBA'
-            node.blend_type = slot.blend
-            node.clamp_result = True
-            node.location = (x, y)
-            links.new(results[channel.key], socket(node.inputs, 'A', 'RGBA'))
-            links.new(coverage, socket(node.inputs, 'Factor', 'VALUE'))
-            content = painted if channel.key == 'base_color' and painted is not None else slot_content(nodes, links, layer, slot, vector, name, x, y)
-            if content is not None:
-                links.new(content, socket(node.inputs, 'B', 'RGBA'))
-            results[channel.key] = socket(node.outputs, 'Result', 'RGBA')
+    column = [0]
+    results = compose(nodes, links, channels, layers, '', results, column)
+    end = 300 * column[0]
+    output.location, shader.location = (end + 600, 0), (end + 300, 0)
     for key, name in SHADER_INPUTS.items():
         if key in results:
             links.new(results[key], shader.inputs[name])
@@ -180,15 +215,20 @@ def build_tree(tree, channels, layers, solo=None, raw=False):
 
 
 def write_values(nodes, channels, layers):
-    for layer in layers:
+    for layer in shown_layers(layers):
         nodes[layer.uid + '.opacity'].inputs[1].default_value = layer.opacity
+        if layer.kind == 'FOLDER':
+            continue
         if uses_coordinates(layer):
             nodes[layer.uid + '.mapping'].inputs['Scale'].default_value = (layer.tiling,) * 3
         for channel in channels:
             slot = layer.slots[channel.key]
-            if not slot.enabled or (channel.key == 'base_color' and layer.kind == 'PAINT'):
+            if not slot.enabled:
                 continue
             name = f'{layer.uid}.{channel.key}'
+            nodes[name + '.opacity'].inputs[1].default_value = slot.opacity
+            if channel.key == 'base_color' and layer.kind == 'PAINT':
+                continue
             if slot.source == 'PATTERN':
                 mix = nodes[name + '.pattern']
                 socket(mix.inputs, 'A', 'RGBA').default_value = rgba(slot_value(slot))
@@ -206,12 +246,12 @@ def solo_channel(data):
 
 def rebuild(data, solo=None, raw=False):
     material = data.material
-    build_tree(material.node_tree, set_channels(data), visible_layers(data), solo or solo_channel(data), raw)
+    build_tree(material.node_tree, set_channels(data), list(data.layers), solo or solo_channel(data), raw)
     material[SIGNATURE_KEY] = '' if raw else signature(data)
 
 
 def update_values(data):
-    write_values(data.material.node_tree.nodes, set_channels(data), visible_layers(data))
+    write_values(data.material.node_tree.nodes, set_channels(data), list(data.layers))
 
 
 def sync(data):

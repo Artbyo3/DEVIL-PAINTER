@@ -1,12 +1,13 @@
 import colorsys
 from dataclasses import dataclass
+import json
 import math
 import numpy
-from . import shelf
+from . import shelf, thumbnails
 from .blending import BLEND_MODES, CHANNEL, linear_to_srgb
 from .canvas import Layout, Rect
-from .document import PROJECTIONS, RESOLUTIONS, active_layer, editing_mask, set_channels, slot_value, uses_coordinates
-from .library import texture_folder
+from .document import PROJECTIONS, RESOLUTIONS, active_layer, children, editing_mask, set_channels, slot_value, uses_coordinates
+from .library import capture, texture_folder
 from .painting import TOOLS
 from .shell import GAP, distribute, zones
 from .ui_system import MinimalMetrics
@@ -16,12 +17,15 @@ HEADER = 30
 ROW_HEIGHT = 42
 LINE_HEIGHT = 28
 THUMBNAIL = 32
+INDENT = 14
+CHANNEL_OPACITY_WIDTH = 44
 BLEND_WIDTH = 78
 TOGGLE_WIDTH = 100
 BAR_MENU_WIDTH = 150
 SHELF_TILE = 72
 SHELF_LABEL = 18
 SHELF_GAP = 8
+REPLACE_TARGET = '@material'
 SCALE_RANGE = (-1.0, 9.0)
 TILING_RANGE = (-3.0, 5.0)
 
@@ -185,28 +189,55 @@ def dock_layout(layout, zone, tool):
 
 
 def selection(data):
-    return 'MASK' if editing_mask(data) else 'LAYER'
+    if editing_mask(data):
+        return 'MASK'
+    return 'FOLDER' if active_layer(data).kind == 'FOLDER' else 'LAYER'
+
+
+def layer_rows(data, collapsed):
+    rows = []
+
+    def walk(parent, depth):
+        for layer in reversed(children(data.layers, parent)):
+            rows.append((layer, depth))
+            if layer.kind == 'FOLDER' and 'FOLD_' + layer.uid not in collapsed:
+                walk(layer.uid, depth + 1)
+    walk('', 0)
+    return rows
+
+
+def layer_preview(layer):
+    if layer.kind == 'PAINT':
+        return layer.image
+    if layer.kind == 'FILL':
+        return thumbnails.material_texture(capture(layer), owner=layer.uid)
+    return None
 
 
 def fill_layers(layout, state, data, flow):
     s = layout.scale
     target = selection(data)
     size = THUMBNAIL * s
-    for layer in reversed(data.layers):
+    for layer, depth in layer_rows(data, state.collapsed):
         uid = layer.uid
         line = flow.line(ROW_HEIGHT * s)
         if not flow.visible(line):
             continue
-        row = Rect(line.x + 2 * s, line.y + 1 * s, line.w - 4 * s, line.h - 2 * s)
+        indent = depth * INDENT * s
+        row = Rect(line.x + 2 * s + indent, line.y + 1 * s, line.w - 4 * s - indent, line.h - 2 * s)
         selected = uid == data.active_uid
         editing = state.text is not None and state.text.key == f'NAME_{uid}'
         flow.add(f'ROW_{uid}', row, 'ROW', label=state.text.text if editing else layer.name, text=f'{layer.opacity * 100:.0f}%',
                  active=selected, second=1.0 if selected and target == 'LAYER' else 0.0,
-                 preview=layer.image if layer.kind == 'PAINT' else source_preview(layer.slots['base_color']), mask=layer.mask,
-                 color=slot_display(layer.slots['base_color']),
+                 preview=layer_preview(layer), mask=layer.mask, icon='LIBRARY' if layer.kind == 'FOLDER' else '',
+                 color=slot_display(layer.slots['base_color']) if layer.kind != 'FOLDER' else None,
                  caret=state.text.cursor if editing else -1, tip='Click to select, double-click to rename, right-click for more')
         flow.add(f'EYE_{uid}', Rect(row.x + 4 * s, row.y + 8 * s, 22 * s, row.h - 16 * s), 'ICON',
                  icon='HIDE_OFF' if layer.visible else 'HIDE_ON', tip='Hide layer' if layer.visible else 'Show layer')
+        if layer.kind == 'FOLDER':
+            folded = 'FOLD_' + uid in state.collapsed
+            flow.add('FOLD_' + uid, Rect(row.x + row.w - 64 * s, row.y + 8 * s, 22 * s, row.h - 16 * s), 'ICON',
+                     icon='DISCLOSURE' if folded else 'DOWN', tip='Show the layers in this folder' if folded else 'Hide the layers in this folder')
         if layer.mask is not None:
             flow.add(f'MASKTHUMB_{uid}', Rect(row.x + 34 * s + size, row.y + (row.h - size) / 2, size, size), 'THUMB',
                      preview=layer.mask, active=selected and target == 'MASK', tip='Select the mask to paint and edit it')
@@ -214,9 +245,10 @@ def fill_layers(layout, state, data, flow):
 
 def layers_panel(layout, state, data):
     s = layout.scale
-    actions = (('ADD_FILL', '+ Fill', 52, 'New fill layer above the selected one'),
+    actions = (('ADD_FOLDER', '+ Folder', 66, 'New folder above the selected layer'),
+               ('ADD_FILL', '+ Fill', 52, 'New fill layer above the selected one'),
                ('ADD_PAINT', '+ Paint', 64, 'New paint layer above the selected one'))
-    return ColumnPanel('LAYERS', 'Layers', len(data.layers) * ROW_HEIGHT * s + 8 * s, fill_layers, 4 * s, actions)
+    return ColumnPanel('LAYERS', 'Layers', len(layer_rows(data, state.collapsed)) * ROW_HEIGHT * s + 8 * s, fill_layers, 4 * s, actions)
 
 
 def opacity_section(flow, data, layer, w):
@@ -265,7 +297,10 @@ def channels_section(flow, data, layer, w):
             flow.add('SOURCE.' + key, Rect(left, y, h, h), 'SOURCE', icon='GRID', preview=source_preview(slot),
                      tip='Use a plain value, a texture, or a pattern')
             left += h + 6 * s
-        value = Rect(left, y, x + w - blend - 6 * s - left, h)
+        opacity = CHANNEL_OPACITY_WIDTH * s
+        flow.add('CHOPACITY.' + key, Rect(x + w - blend - 4 * s - opacity, y, opacity, h), 'SLIDER', value=slot.opacity,
+                 text=f'{slot.opacity * 100:.0f}%', tip=f'Opacity of {channel.label.lower()} on this layer')
+        value = Rect(left, y, x + w - blend - opacity - 10 * s - left, h)
         if key == 'base_color' and not fill:
             flow.add('PAINTED', value, 'NOTE', label='Brush color')
         elif fill and slot.source == 'IMAGE' and slot.image is not None:
@@ -290,6 +325,16 @@ def projection_section(flow, data, layer, w):
              tip='Map textures and patterns by UV or from three sides without seams')
     flow.add('TILING', Rect(x + half + 4 * s, y, half, h), 'SLIDER', label='Tiling', value=to_slider(layer.tiling, TILING_RANGE),
              text=f'{layer.tiling:.2f}x')
+
+
+def material_section(flow, data, layer, w):
+    s = flow.layout.scale
+    x, y, h = flow.field()
+    definition = json.loads(layer.material)
+    flow.add('MATERIAL_THUMB', Rect(x, y, h, h), 'SOURCE', icon='GRID', preview=thumbnails.material_texture(definition))
+    flow.add('MATERIAL_NAME', Rect(x + h + 6 * s, y, w - h - 150 * s, h), 'NOTE', label='Material · ' + definition['name'])
+    flow.add('REPLACE_MATERIAL', Rect(x + w - 138 * s, y, 70 * s, h), 'CHIP', label='Replace', tip='Click a material in the shelf to swap it in, keeping the mask')
+    flow.add('RESET_MATERIAL', Rect(x + w - 64 * s, y, 64 * s, h), 'CHIP', label='Reset', tip='Restore every channel to the material values')
 
 
 def layer_mask_section(flow, data, layer, w):
@@ -330,8 +375,14 @@ def projection_lines(data):
     return int(layer.kind == 'FILL' and uses_coordinates(layer))
 
 
-PROPERTY_SECTIONS = {'LAYER': (Section(one_line, opacity_section), Section(projection_lines, projection_section),
+def material_lines(data):
+    layer = active_layer(data)
+    return int(layer.kind == 'FILL' and bool(layer.material))
+
+
+PROPERTY_SECTIONS = {'LAYER': (Section(one_line, opacity_section), Section(material_lines, material_section), Section(projection_lines, projection_section),
                                Section(channel_lines, channels_section), Section(one_line, layer_mask_section)),
+                     'FOLDER': (Section(one_line, opacity_section), Section(one_line, layer_mask_section)),
                      'MASK': (Section(two_lines, mask_section),)}
 
 
@@ -383,11 +434,14 @@ def shelf_header(layout, state, zone, header):
     x += 8 * s
     room = toggle.x - 8 * s - x
     if state.armed:
-        layout.add('ARM_INFO', Rect(x, header.y, max(0.0, room - 78 * s), header.h), 'NOTE',
-                   label=f'Click a texture or pattern for {CHANNEL[state.armed].label.lower()}')
+        label = 'Click a material to put into the selected layer' if state.armed == REPLACE_TARGET else f'Click a texture or pattern for {CHANNEL[state.armed].label.lower()}'
+        layout.add('ARM_INFO', Rect(x, header.y, max(0.0, room - 78 * s), header.h), 'NOTE', label=label)
         layout.add('CANCEL_ARM', Rect(toggle.x - 78 * s, header.y, 70 * s, header.h), 'CHIP', label='Cancel', tip='Stop picking', shortcut='Esc')
     elif state.shelf_open and state.shelf_tab == 'TEXTURES':
         editing = state.text is not None and state.text.key == 'TEXTURE_DIR'
+        layout.add('TEXTURE_IMPORT', Rect(x, header.y, 70 * s, header.h), 'CHIP', label='Import', tip='Copy image files into your texture library')
+        x += 76 * s
+        room -= 76 * s
         field = min(360 * s, max(0.0, room - 78 * s))
         layout.add('TEXTURE_DIR', Rect(x, header.y, field, header.h), 'FIELD', text=state.text.text if editing else texture_folder(),
                    caret=state.text.cursor if editing else -1, tip='Folder of textures to browse')
@@ -423,7 +477,14 @@ def shelf_layout(layout, state, zone):
         rect = Rect(viewport.x + SHELF_GAP * s + column * tile_w, top - tile_h + SHELF_GAP * s, SHELF_TILE * s, tile_h - SHELF_GAP * s)
         if rect.top < viewport.y or rect.y > viewport.top:
             continue
-        tip = 'Click to add as a fill layer' if not state.armed or item.kind == 'MATERIAL' else f'Click to use for {CHANNEL[state.armed].label.lower()}'
+        if state.armed == REPLACE_TARGET and item.kind == 'MATERIAL':
+            tip = 'Click to put this material into the selected layer'
+        elif state.armed and state.armed != REPLACE_TARGET and item.kind != 'MATERIAL':
+            tip = f'Click to use for {CHANNEL[state.armed].label.lower()}'
+        else:
+            tip = 'Click to add as a fill layer'
+        if item.kind == 'TEXTURE':
+            tip += '. Right-click for more'
         layout.add(f'ITEM.{index}', rect, 'TILE', label=item.label, preview=shelf.thumbnail(item), clip=viewport,
                    tip=tip + ('. Right-click to delete' if item.user_index >= 0 else ''))
 
