@@ -153,6 +153,8 @@ def journey():
     scratch = prepare_scratch()
     check(library.library_root().resolve().is_relative_to(scratch.resolve()), 'the test material library lives in scratch, not the user library')
     (library.library_root() / library.SETTINGS_FILE).unlink(missing_ok=True)
+    for managed in library.managed_folder().iterdir():
+        managed.unlink()
     devil_painter.register()
     yield 0.5
     window, area, region = viewport()
