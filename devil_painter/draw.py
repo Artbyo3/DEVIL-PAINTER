@@ -3,15 +3,12 @@ import time
 import blf
 import gpu
 from gpu_extras.batch import batch_for_shader
-from .canvas import Rect, grid_step
+from .canvas import Rect
 from .icons import ICON_LEVELS, icon_pixels, icon_spans
-from .ui_system import (BG_BASE, BG_ELEVATED, BG_WELL, BORDER, GRID_MAJOR, GRID_MINOR, GRID_ORIGIN, TEXT_PRIMARY, TEXT_SECONDARY,
-                        SURFACE_FLOATING, ComponentRenderer, Tooltip)
+from .ui_system import (ACCENT, ACCENT_BG, ACCENT_BORDER, ACCENT_HOVER, BG_ELEVATED, BG_WELL, BORDER, SURFACE_FLOATING,
+                        SURFACE_OUTLINE, TEXT_MUTED, TEXT_ON_ACCENT, TEXT_PRIMARY, TEXT_SECONDARY, ComponentRenderer, Tooltip)
 
-SHELL = BG_BASE
-TOOLTIP_SHORTCUTS = {'CLOSE': 'Ctrl Alt P'}
-EMPTY_TITLE = 'Devil Painter'
-EMPTY_HINT = 'Painting tools come next. Middle-drag pans, scroll zooms.'
+TOAST_SECONDS = 3
 
 
 class Renderer:
@@ -19,7 +16,6 @@ class Renderer:
         self.shader = None
         self.line_shader = None
         self.s = 1
-        self.offset = (0, 0)
         self.icon_batches = {}
 
     def triangles(self, points, color, indices=None):
@@ -146,11 +142,9 @@ class Renderer:
         blf.position(0, round(x), round(y), 0)
         blf.draw(0, label)
 
-    def clip(self, r):
-        x, y, w, h = round(r.x), round(r.y), round(r.w), round(r.h)
-        gpu.state.scissor_set(int(self.offset[0] + x), int(self.offset[1] + y), max(1, int(w)), max(1, int(h)))
-        blf.enable(0, blf.CLIPPING)
-        blf.clipping(0, x, y, x + w, y + h)
+    def text_right(self, right, y, label, size, color):
+        blf.size(0, size * self.s)
+        self.text(right - blf.dimensions(0, label)[0], y, label, size, color)
 
     def draw_icon(self, name, cx, cy, size, color):
         spans = icon_spans(name)
@@ -184,80 +178,119 @@ class Renderer:
                 batch.draw(self.shader)
 
     def draw(self, ed):
-        self.s = s = ed.canvas_layout.scale
-        layout, view = ed.canvas_layout, ed.view
+        layout = ed.workspace
+        self.s = s = layout.scale
         metrics = layout.metrics
-        p, c = layout.panel, layout.canvas
         blend = gpu.state.blend_get()
         depth = gpu.state.depth_test_get()
-        scissor = gpu.state.scissor_get()
-        viewport = gpu.state.viewport_get()
-        self.offset = viewport[:2]
         gpu.state.blend_set('ALPHA')
         gpu.state.depth_test_set('NONE')
-        gpu.state.scissor_test_set(True)
         try:
-            self.clip(p)
-            self.round_rect(p, SHELL, radius=metrics.box)
-            self.round_rect_outline(p, BORDER, radius=metrics.box, width=1.0)
-            self.round_rect(c, BG_BASE, radius=0)
-            self.clip(c)
-            self.grid(view, c)
-            self.text(c.x + c.w / 2, c.y + c.h / 2 + 12 * s, EMPTY_TITLE, 17, TEXT_PRIMARY, True, max_width=c.w - 32 * s)
-            self.text(c.x + c.w / 2, c.y + c.h / 2 - 14 * s, EMPTY_HINT, 11, TEXT_SECONDARY, True, max_width=c.w - 32 * s)
-            self.minimal_workspace(ed)
+            for rect, title in layout.cards:
+                self.round_rect(rect, SURFACE_FLOATING, radius=metrics.menu_back)
+                self.round_rect_outline(rect, SURFACE_OUTLINE, radius=metrics.menu_back)
+                if title:
+                    self.text(rect.x + 14 * s, rect.y + rect.h - 24 * s, title, 13, TEXT_PRIMARY)
+            for group in layout.tool_groups:
+                self.round_rect(group, SURFACE_FLOATING, radius=metrics.toolbar_item)
+            hovered = None
+            for control in layout.controls:
+                hover = control.rect.contains(*ed.pointer)
+                DRAWERS[control.kind](self, control, hover, metrics)
+                if hover and control.tip:
+                    hovered = control
+            for group in layout.tool_groups:
+                self.round_rect_outline(group, SURFACE_OUTLINE, radius=metrics.toolbar_item)
+            self.toast(ed, metrics)
+            if hovered is not None:
+                rect = hovered.rect
+                if hovered.kind == 'TOOL':
+                    position = (rect.x + rect.w + 6 * s, rect.y + rect.h / 2)
+                else:
+                    position = (min(rect.x, ed.bounds.x + ed.bounds.w - 260 * s), rect.y - 18 * s)
+                ComponentRenderer.draw_tooltip(self, Tooltip(text=hovered.tip, shortcut=hovered.shortcut, pos=position, visible=True), s, metrics)
         finally:
-            blf.disable(0, blf.CLIPPING)
-            gpu.state.scissor_set(*scissor)
-            gpu.state.scissor_test_set(False)
             gpu.state.depth_test_set(depth)
             gpu.state.blend_set(blend)
 
-    def minimal_workspace(self, ed):
-        layout = ed.canvas_layout
-        scale = self.s
-        metrics = layout.metrics
-        self.clip(layout.panel)
-        tooltip = None
-        for key, (rect, label) in layout.buttons.items():
-            hover = rect.contains(*ed.pointer)
-            if key in {'RESTORE_CANVAS', 'SHOW_3D'}:
-                self.round_rect(rect, BG_ELEVATED if hover else BG_WELL, radius=metrics.regular)
-                self.text(rect.x + rect.w / 2, rect.y + 8 * scale, label, 10, TEXT_SECONDARY, True)
-            else:
-                if hover:
-                    self.round_rect(rect, BG_ELEVATED, radius=metrics.toolbar_item)
-                self.draw_icon(key, rect.x + rect.w / 2, rect.y + rect.h / 2, min(28, rect.h / scale - 6), TEXT_SECONDARY)
-            if hover:
-                tooltip = (label, TOOLTIP_SHORTCUTS.get(key, ''), (rect.x - 70 * scale, rect.y - 18 * scale))
-        panel = layout.panel
+    def toast(self, ed, metrics):
+        s = self.s
         if ed.message != ed.toast_text:
             ed.toast_text = ed.message
-            ed.toast_until = time.monotonic() + 3
-        if ed.message and time.monotonic() < ed.toast_until:
-            width = min(420 * scale, max(80 * scale, panel.w - 390 * scale))
-            toast = Rect(panel.x + 76 * scale, panel.y + 15 * scale, width, 30 * scale)
-            self.round_rect(toast, SURFACE_FLOATING, radius=metrics.tooltip)
-            self.text(toast.x + 12 * scale, toast.y + 10 * scale, ed.message, 10, TEXT_SECONDARY, max_width=toast.w - 24 * scale)
-        if tooltip:
-            ComponentRenderer.draw_tooltip(self, Tooltip(text=tooltip[0], shortcut=tooltip[1], pos=tooltip[2], visible=True), scale, metrics)
+            ed.toast_until = time.monotonic() + TOAST_SECONDS
+        if not ed.message or time.monotonic() >= ed.toast_until:
+            return
+        bounds = ed.bounds
+        width = min(460 * s, max(120 * s, bounds.w - 520 * s))
+        toast = Rect(bounds.x + 60 * s, bounds.y + 12 * s, width, 30 * s)
+        self.round_rect(toast, SURFACE_FLOATING, radius=metrics.tooltip)
+        self.text(toast.x + 12 * s, toast.y + 10 * s, ed.message, 10, TEXT_SECONDARY, max_width=toast.w - 24 * s)
 
-    def grid(self, view, c):
-        step = grid_step(view.zoom)
-        low, high = view.world((c.x, c.y), c), view.world((c.x + c.w, c.y + c.h), c)
-        minor, major = [], []
-        for axis in (0, 1):
-            for i in range(math.floor(low[axis] / step), math.ceil(high[axis] / step) + 1):
-                val = i * step
-                if axis == 0:
-                    x = view.screen((val, 0), c)[0]
-                    pts = [(x, c.y), (x, c.y + c.h)]
-                else:
-                    y = view.screen((0, val), c)[1]
-                    pts = [(c.x, y), (c.x + c.w, y)]
-                (major if i % 5 == 0 else minor).extend(pts)
-        self.lines(minor, GRID_MINOR)
-        self.lines(major, GRID_MAJOR)
-        origin = view.screen((0, 0), c)
-        self.lines([(origin[0], c.y), (origin[0], c.y + c.h),
-                    (c.x, origin[1]), (c.x + c.w, origin[1])], GRID_ORIGIN)
+    def tool(self, control, hover, metrics):
+        rect = control.rect
+        if control.active or hover:
+            self.round_rect(rect, ACCENT_BG if control.active else BG_ELEVATED, radius=metrics.toolbar_item)
+        self.draw_icon(control.icon, rect.x + rect.w / 2, rect.y + rect.h / 2, min(26, rect.h / self.s - 8),
+                       ACCENT if control.active else TEXT_SECONDARY)
+
+    def icon_button(self, control, hover, metrics):
+        rect = control.rect
+        if hover:
+            self.round_rect(rect, BG_ELEVATED, radius=metrics.regular)
+        self.draw_icon(control.icon, rect.x + rect.w / 2, rect.y + rect.h / 2, 14, TEXT_PRIMARY if hover else TEXT_SECONDARY)
+
+    def chip(self, control, hover, metrics):
+        rect = control.rect
+        self.round_rect(rect, ACCENT_BG if control.active else BG_ELEVATED if hover else BG_WELL, radius=metrics.regular)
+        if control.active:
+            self.round_rect_outline(rect, ACCENT_BORDER, radius=metrics.regular)
+        self.text(rect.x + rect.w / 2, rect.y + (rect.h - 10 * self.s) / 2, control.label, 10,
+                  ACCENT if control.active else TEXT_PRIMARY if hover else TEXT_SECONDARY, True, max_width=rect.w - 8 * self.s)
+
+    def primary(self, control, hover, metrics):
+        rect, s = control.rect, self.s
+        self.round_rect(rect, ACCENT_HOVER if hover else ACCENT, radius=metrics.regular)
+        self.round_rect_outline(rect, ACCENT_BORDER, radius=metrics.regular)
+        self.draw_icon(control.icon, rect.x + 18 * s, rect.y + rect.h / 2, 16, TEXT_ON_ACCENT)
+        self.text(rect.x + 34 * s, rect.y + (rect.h - 11 * s) / 2, control.label, 11, TEXT_ON_ACCENT)
+
+    def slider(self, control, hover, metrics):
+        rect, s = control.rect, self.s
+        self.round_rect(rect, BG_WELL, radius=metrics.regular)
+        filled = max(0.0, min(1.0, control.value)) * rect.w
+        if filled >= 1:
+            self.round_rect(Rect(rect.x, rect.y, filled, rect.h), ACCENT_BG, radius=metrics.regular)
+        self.round_rect_outline(rect, ACCENT_BORDER if hover else BORDER, radius=metrics.regular)
+        baseline = rect.y + (rect.h - 10 * s) / 2
+        if control.label:
+            self.text(rect.x + 8 * s, baseline, control.label, 10, TEXT_SECONDARY)
+        self.text_right(rect.x + rect.w - 8 * s, baseline, control.text, 10, TEXT_PRIMARY)
+
+    def swatch(self, control, hover, metrics):
+        rect = control.rect
+        self.round_rect(rect, control.color, radius=metrics.regular)
+        self.round_rect_outline(rect, ACCENT_BORDER if hover else SURFACE_OUTLINE, radius=metrics.regular)
+
+    def toggle(self, control, hover, metrics):
+        rect, s = control.rect, self.s
+        self.round_rect(rect, BG_ELEVATED if hover else BG_WELL, radius=metrics.regular)
+        if control.active:
+            self.draw_icon('CHECK', rect.x + 12 * s, rect.y + rect.h / 2, 12, ACCENT)
+        self.text(rect.x + 24 * s, rect.y + (rect.h - 10 * s) / 2, control.label, 10, TEXT_PRIMARY if control.active else TEXT_MUTED)
+
+    def row(self, control, hover, metrics):
+        rect, s = control.rect, self.s
+        if control.active or hover:
+            self.round_rect(rect, ACCENT_BG if control.active else BG_ELEVATED, radius=metrics.menu_item)
+        self.draw_icon(control.icon, rect.x + 38 * s, rect.y + rect.h / 2, 14, ACCENT if control.active else TEXT_MUTED)
+        baseline = rect.y + (rect.h - 11 * s) / 2
+        self.text(rect.x + 52 * s, baseline, control.label, 11, TEXT_PRIMARY, max_width=rect.w - 120 * s)
+        self.text_right(rect.x + rect.w - 8 * s, baseline + s, control.text, 9, TEXT_MUTED)
+
+    def note(self, control, hover, metrics):
+        rect = control.rect
+        self.text(rect.x + 2 * self.s, rect.y + (rect.h - 10 * self.s) / 2, control.label, 10, TEXT_MUTED, max_width=rect.w)
+
+
+DRAWERS = {'TOOL': Renderer.tool, 'ICON': Renderer.icon_button, 'CHIP': Renderer.chip, 'PRIMARY': Renderer.primary,
+           'SLIDER': Renderer.slider, 'SWATCH': Renderer.swatch, 'TOGGLE': Renderer.toggle, 'ROW': Renderer.row, 'NOTE': Renderer.note}

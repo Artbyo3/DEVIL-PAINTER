@@ -240,5 +240,47 @@
     "collection": "rapideditor/temaki",
     "url": "https://raw.githubusercontent.com/rapideditor/temaki/6d9ac860d1d615d4449aab049f630d25d036c19e/icons/hand.svg",
     "sha256": "3f0cd6db9d0b17902bdde687745acb49f927e6dc498c27ae72cce0f6cae0f912"
+  },
+  "PAINT": {
+    "collection": "Blender built-in icons",
+    "icon": "OPS.GPENCIL.DRAW",
+    "url": "https://raw.githubusercontent.com/blender/blender/e13b728c6880d3084d9d57c30031ed5df8b39dee/release/datafiles/icons/ops.gpencil.draw.dat",
+    "sha256": "5dd6e4bd02dc779204b2e71d305c331b93ff074f49c400a1067c6a2a04f0b66f",
+    "license": "GPL-2.0-or-later"
+  },
+  "ERASE": {
+    "collection": "Blender built-in icons",
+    "icon": "BRUSH.GPENCIL_DRAW.ERASE",
+    "url": "https://raw.githubusercontent.com/blender/blender/e13b728c6880d3084d9d57c30031ed5df8b39dee/release/datafiles/icons/brush.gpencil_draw.erase.dat",
+    "sha256": "33423bd93aa73e02d6cfd0fee443fe6d5a105b4c730b7ddf011c59f32dacde90",
+    "license": "GPL-2.0-or-later"
+  },
+  "FILL": {
+    "collection": "Blender built-in icons",
+    "icon": "BRUSH.PAINT_TEXTURE.FILL",
+    "url": "https://raw.githubusercontent.com/blender/blender/e13b728c6880d3084d9d57c30031ed5df8b39dee/release/datafiles/icons/brush.paint_texture.fill.dat",
+    "sha256": "55d9b56988868c4b42a1cfaf2884d0c7455131dda5d9c40b6f3473ae686b1a6c",
+    "license": "GPL-2.0-or-later"
+  },
+  "BLUR": {
+    "collection": "Blender built-in icons",
+    "icon": "BRUSH.PAINT_TEXTURE.SOFTEN",
+    "url": "https://raw.githubusercontent.com/blender/blender/e13b728c6880d3084d9d57c30031ed5df8b39dee/release/datafiles/icons/brush.paint_texture.soften.dat",
+    "sha256": "a06f9541ef8f0f4e4eb1e06999cf26be3721a9edf4a6e9f8c19c70db85cfc127",
+    "license": "GPL-2.0-or-later"
+  },
+  "SMEAR": {
+    "collection": "Blender built-in icons",
+    "icon": "BRUSH.PAINT_TEXTURE.SMEAR",
+    "url": "https://raw.githubusercontent.com/blender/blender/e13b728c6880d3084d9d57c30031ed5df8b39dee/release/datafiles/icons/brush.paint_texture.smear.dat",
+    "sha256": "e5a560ed1f5ba78fa8909efec0f2f3aed4033e81e3d9472fcaa41fef63a00f3b",
+    "license": "GPL-2.0-or-later"
+  },
+  "CLONE": {
+    "collection": "Blender built-in icons",
+    "icon": "BRUSH.PAINT_TEXTURE.CLONE",
+    "url": "https://raw.githubusercontent.com/blender/blender/e13b728c6880d3084d9d57c30031ed5df8b39dee/release/datafiles/icons/brush.paint_texture.clone.dat",
+    "sha256": "bd69d5008200039b7030d4dd13e71cd76c1a716fc96fd71fc34b1d4722f1a56c",
+    "license": "GPL-2.0-or-later"
   }
 }

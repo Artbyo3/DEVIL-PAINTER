@@ -103,7 +103,13 @@ def prepare():
         'POLYGON': 'ops.gpencil.primitive_polyline.dat',
         'INTERNAL': 'ops.curve.draw.dat',
         'KNIFE': 'ops.mesh.knife_tool.dat',
-        'RULER': 'ops.view3d.ruler.dat'
+        'RULER': 'ops.view3d.ruler.dat',
+        'PAINT': 'ops.gpencil.draw.dat',
+        'ERASE': 'brush.gpencil_draw.erase.dat',
+        'FILL': 'brush.paint_texture.fill.dat',
+        'BLUR': 'brush.paint_texture.soften.dat',
+        'SMEAR': 'brush.paint_texture.smear.dat',
+        'CLONE': 'brush.paint_texture.clone.dat'
     }
     for key, filename in svg_mappings.items():
         path = 'release/datafiles/icons_svg/' + filename + '.svg'

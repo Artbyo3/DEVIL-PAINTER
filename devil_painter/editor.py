@@ -1,11 +1,17 @@
 import time
 import traceback
 import bpy
-from .canvas import Layout, View, Rect
+from . import actions, painting
+from .canvas import Rect
+from .document import texture_set
 from .draw import Renderer
-from .minimal import minimal_layout
+from .minimal import MAX_BRUSH_SIZE, painter_layout
 
 TIMER_INTERVAL = .3
+POINTER_TOKENS = ('MOUSE', 'TRACKPAD', 'NDOF', 'PEN', 'ERASER')
+LAYER_VALUES = {'OPACITY': 'opacity', 'ROUGHNESS': 'roughness', 'METALLIC': 'metallic'}
+MOVES = {'MOVE_UP': 1, 'MOVE_DOWN': -1}
+CHANNELS = {'USE_COLOR': 'color', 'USE_ROUGHNESS': 'roughness', 'USE_METALLIC': 'metallic'}
 _active = None
 
 
@@ -17,7 +23,7 @@ def close_active():
 class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
     bl_idname = "devil_painter.editor"
     bl_label = "Devil Painter"
-    bl_description = "Open the Devil Painter workspace over the 3D scene"
+    bl_description = "Open the Devil Painter workspace over the 3D viewport"
     _closed = True
     _handle = None
     _timer = None
@@ -33,21 +39,18 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             return {'FINISHED'}
         self._area, self._window, self._scene = context.area, context.window, context.scene
         self._region = next(r for r in context.area.regions if r.type == 'WINDOW')
-        saved = tuple(self._scene.dp_ui_rect)
-        self.window_rect = saved if saved[2] > 0 and saved[3] > 0 else None
-        self.view = View()
-        self.full = True
-        self.pan_last = None
         self.pointer = (0, 0)
         self.message = ''
         self.toast_text = None
         self.toast_until = 0.0
+        self.resolution = 2048
+        self.slider = None
         self._closed = False
-        self.free_window = self.window_rect
-        self.window_drag = None
-        self.window_cursor = 'DEFAULT'
-        self.canvas_layout = self.make_layout()
-        self.fit()
+        data = texture_set(context.view_layer.objects.active)
+        if data is not None:
+            painting.enter_paint_mode(context, context.view_layer.objects.active)
+            painting.update_canvas(context, data)
+        self.workspace = self.make_layout()
         self.renderer = Renderer()
         try:
             self._handle = bpy.types.SpaceView3D.draw_handler_add(self.draw_overlay, (), 'WINDOW', 'POST_PIXEL')
@@ -60,108 +63,9 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         self._area.tag_redraw()
         return {'RUNNING_MODAL'}
 
-    def reveal_3d(self):
-        self.full = False
-        self.canvas_layout = self.make_layout()
-        available = self.canvas_layout.available
-        panel = self.canvas_layout.panel
-        scale = self.canvas_layout.scale
-        if self.free_window:
-            self.window_rect = self.free_window
-            self.canvas_layout = self.make_layout()
-        else:
-            width = min(available.w, max(620 * scale, available.w * .45))
-            self.set_window(Rect(available.x + available.w - width, panel.y, width, panel.h))
-        self.save_window()
-        self.fit()
-        self.message = '3D viewport revealed on the left. Click Full canvas to return.'
-
-    def window_hit(self):
-        if self.full or self.pan_last is not None:
-            return None
-        panel = self.canvas_layout.panel
-        scale = self.canvas_layout.scale
-        x, y = self.pointer
-        reach = 5 * scale
-        if not (panel.x - reach <= x <= panel.x + panel.w + reach and panel.y - reach <= y <= panel.y + panel.h + reach):
-            return None
-        edges = ''.join(mark for mark, near in (('L', abs(x - panel.x) <= reach), ('R', abs(x - panel.x - panel.w) <= reach),
-                                                ('B', abs(y - panel.y) <= reach), ('T', abs(y - panel.y - panel.h) <= reach)) if near)
-        if edges:
-            return edges
-        if y > panel.y + panel.h - 34 * scale and self.canvas_layout.button(x, y) is None:
-            return 'MOVE'
-        return None
-
-    def window_event(self, event):
-        press = event.value == 'PRESS'
-        drag = self.window_drag
-        if drag:
-            if event.type == 'MOUSEMOVE':
-                self.drag_window(drag)
-            elif press and event.type in {'ESC', 'RIGHTMOUSE'}:
-                self.set_window(drag['rect'])
-                self.window_drag = None
-            elif event.type == 'LEFTMOUSE' and event.value == 'RELEASE':
-                self.window_drag = None
-                self.save_window()
-                self.free_window = self.window_rect
-            self._area.tag_redraw()
-            return {'RUNNING_MODAL'}
-        hit = self.window_hit()
-        if press and event.type == 'LEFTMOUSE' and hit:
-            self.window_drag = dict(hit=hit, pointer=self.pointer, rect=self.canvas_layout.panel)
-            return {'RUNNING_MODAL'}
-        if event.type == 'MOUSEMOVE':
-            cursor = 'DEFAULT' if not hit else 'SCROLL_XY' if hit == 'MOVE' or len(hit) > 1 else 'MOVE_X' if hit in {'L', 'R'} else 'MOVE_Y'
-            if cursor != self.window_cursor:
-                self._window.cursor_set(cursor)
-                self.window_cursor = cursor
-        return None
-
-    def drag_window(self, drag):
-        rect = drag['rect']
-        dx = self.pointer[0] - drag['pointer'][0]
-        dy = self.pointer[1] - drag['pointer'][1]
-        hit = drag['hit']
-        least = 420 * self.canvas_layout.scale
-        if hit == 'MOVE':
-            self.set_window(Rect(rect.x + dx, rect.y + dy, rect.w, rect.h))
-            return
-        x, y, w, h = rect.x, rect.y, rect.w, rect.h
-        if 'L' in hit:
-            shift = min(dx, w - least)
-            x, w = x + shift, w - shift
-        if 'R' in hit:
-            w = max(least, w + dx)
-        if 'B' in hit:
-            shift = min(dy, h - least)
-            y, h = y + shift, h - shift
-        if 'T' in hit:
-            h = max(least, h + dy)
-        self.set_window(Rect(x, y, w, h))
-
-    def set_window(self, rect):
-        s = self.canvas_layout.scale
-        self.window_rect = tuple(value / s for value in (rect.x, rect.y, rect.w, rect.h))
-        self.canvas_layout = self.make_layout()
-
-    def save_window(self):
-        if not self.full:
-            p = self.canvas_layout.panel
-            s = self.canvas_layout.scale
-            self.window_rect = (p.x / s, p.y / s, p.w / s, p.h / s)
-        if self.window_rect is not None:
-            self._scene.dp_ui_rect = self.window_rect
-
-    def restore_canvas(self):
-        self.free_window = self.window_rect
-        self.full = True
-        self.window_rect = None
-        self.canvas_layout = self.make_layout()
-        self.save_window()
-        self.fit()
-        self.message = 'Full canvas restored.'
+    def painted(self):
+        obj = self._window.view_layer.objects.active
+        return obj, texture_set(obj)
 
     def make_layout(self):
         region, space = self._region, self._area.spaces.active
@@ -181,14 +85,12 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         if system_scale <= 0.0:
             system_scale = getattr(bpy.context.preferences.view, 'ui_scale', 1.0)
         scale = max(.5, system_scale)
-        position = tuple(v * scale for v in self.window_rect) if self.window_rect else None
-        layout = Layout(region.width, region.height, scale, self.full, max(0, left), max(0, right), top, bottom,
-                        position=position)
-        minimal_layout(layout)
-        return layout
-
-    def fit(self):
-        self.view.fit(self.canvas_layout.canvas)
+        self.bounds = Rect(left, bottom, max(1, region.width - left - right), max(1, region.height - top - bottom))
+        obj, data = self.painted()
+        brush = (painting.brush_value(self._scene, 'size'), painting.brush_value(self._scene, 'strength'),
+                 (*painting.brush_value(self._scene, 'color'), 1.0))
+        name = obj.name if obj is not None and obj.type == 'MESH' else ''
+        return painter_layout(self.bounds, scale, data, name, self.resolution, painting.active_tool(self._scene), brush)
 
     def draw_overlay(self):
         if self._closed:
@@ -197,7 +99,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         if context.area != self._area or context.region != self._region or context.window != self._window:
             return
         try:
-            self.canvas_layout = self.make_layout()
+            self.workspace = self.make_layout()
             self.renderer.draw(self)
         except Exception as exc:
             self.message = f"Render error: {exc}"
@@ -221,57 +123,111 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         if self._area not in list(self._window.screen.areas) or self._area.type != 'VIEW_3D' or self._window.scene != self._scene:
             self.cleanup()
             return {'FINISHED'}
-        self.canvas_layout = self.make_layout()
-        self.pointer = (event.mouse_x - self._region.x, event.mouse_y - self._region.y)
-        layout = self.canvas_layout
-        panel = layout.panel.contains(*self.pointer)
-        canvas = layout.canvas.contains(*self.pointer)
-        press = event.value == 'PRESS'
         if event.type == 'TIMER':
             if time.monotonic() < self.toast_until + TIMER_INTERVAL:
                 self._area.tag_redraw()
             return {'PASS_THROUGH'}
+        self.workspace = self.make_layout()
+        self.pointer = (event.mouse_x - self._region.x, event.mouse_y - self._region.y)
+        press = event.value == 'PRESS'
         if press and event.ctrl and event.alt and event.type == 'P':
             self.cleanup()
             return {'FINISHED'}
-        window_result = self.window_event(event)
-        if window_result is not None:
-            return window_result
-        if self.pan_last is not None:
-            if event.type == 'MOUSEMOVE':
-                self.view.pan(self.pointer[0] - self.pan_last[0], self.pointer[1] - self.pan_last[1])
-                self.pan_last = self.pointer
-            elif event.type == 'MIDDLEMOUSE' and event.value == 'RELEASE':
-                self.pan_last = None
+        if self.slider is not None:
+            return self.slider_event(context, event)
+        over = self.workspace.covers(*self.pointer) or self.workspace.hit(*self.pointer) is not None
+        if event.type == 'MOUSEMOVE':
             self._area.tag_redraw()
-            return {'RUNNING_MODAL'}
-        if panel or press:
+        if not over or not any(token in event.type for token in POINTER_TOKENS):
+            return {'PASS_THROUGH'}
+        control = self.workspace.hit(*self.pointer)
+        if control is not None and event.type == 'LEFTMOUSE' and event.value in {'PRESS', 'DOUBLE_CLICK'}:
+            try:
+                result = self.act(context, control, event.value == 'DOUBLE_CLICK')
+            except (ValueError, RuntimeError) as failure:
+                self.message = str(failure)
+                result = None
             self._area.tag_redraw()
-        if not panel:
-            return {'PASS_THROUGH'}
-        if press and event.ctrl and event.type == 'S':
-            return {'PASS_THROUGH'}
-        button = layout.button(*self.pointer)
-        if button and press and event.type == 'LEFTMOUSE':
-            if button == 'CLOSE':
-                self.cleanup()
-                return {'FINISHED'}
-            if button == 'SHOW_3D':
-                self.reveal_3d()
-            elif button == 'RESTORE_CANVAS':
-                self.restore_canvas()
-            return {'RUNNING_MODAL'}
-        if canvas and event.type in {'WHEELUPMOUSE', 'WHEELDOWNMOUSE'}:
-            self.view.zoom_at(self.pointer, layout.canvas, 1.15 if event.type == 'WHEELUPMOUSE' else 1 / 1.15)
-        elif canvas and event.type == 'MIDDLEMOUSE' and press:
-            self.pan_last = self.pointer
+            if result is not None:
+                return result
         return {'RUNNING_MODAL'}
+
+    def slider_event(self, context, event):
+        key, rect = self.slider
+        value = max(0.0, min(1.0, (self.pointer[0] - rect.x) / rect.w))
+        obj, data = self.painted()
+        if event.type == 'MOUSEMOVE':
+            self.apply_slider(key, value, obj, data)
+        elif event.type == 'LEFTMOUSE' and event.value == 'RELEASE':
+            self.apply_slider(key, value, obj, data)
+            self.slider = None
+            if key in LAYER_VALUES and data is not None:
+                self.message = actions.commit_value(context, obj, data, LAYER_VALUES[key])
+        self._area.tag_redraw()
+        return {'RUNNING_MODAL'}
+
+    def apply_slider(self, key, value, obj, data):
+        if key == 'BRUSH_SIZE':
+            painting.set_brush_value(self._scene, 'size', max(1, round(value * MAX_BRUSH_SIZE)))
+        elif key == 'BRUSH_STRENGTH':
+            painting.set_brush_value(self._scene, 'strength', value)
+        elif data is not None:
+            actions.set_value(bpy.context, obj, data, LAYER_VALUES[key], value)
+
+    def act(self, context, control, double):
+        key = control.key
+        obj, data = self.painted()
+        if key == 'CLOSE':
+            self.cleanup()
+            return {'FINISHED'}
+        if key.startswith('RES_'):
+            self.resolution = int(key.removeprefix('RES_'))
+        elif key == 'START':
+            self.message = actions.start(context, obj, self.resolution)
+        elif control.kind == 'SLIDER':
+            self.slider = (key, control.rect)
+            self.apply_slider(key, max(0.0, min(1.0, (self.pointer[0] - control.rect.x) / control.rect.w)), obj, data)
+        elif key in painting.BRUSH_NAMES:
+            painting.activate_tool(context, key)
+            self.message = control.label + ' tool.'
+        elif key == 'UNDO':
+            bpy.ops.ed.undo()
+        elif key == 'REDO':
+            bpy.ops.ed.redo()
+        elif key == 'BRUSH_COLOR':
+            bpy.ops.devil_painter.pick_color('INVOKE_DEFAULT', target='BRUSH')
+        elif key == 'LAYER_COLOR':
+            bpy.ops.devil_painter.pick_color('INVOKE_DEFAULT', target='LAYER')
+        elif key == 'EXPORT':
+            bpy.ops.devil_painter.export_textures('INVOKE_DEFAULT')
+        elif key == 'RENAME' or (double and key.startswith('ROW_')):
+            bpy.ops.devil_painter.rename_layer('INVOKE_DEFAULT')
+        elif key.startswith('ROW_'):
+            self.message = actions.select_layer(context, obj, data, int(key.removeprefix('ROW_')))
+        elif key.startswith('EYE_'):
+            self.message = actions.toggle_visible(context, obj, data, int(key.removeprefix('EYE_')))
+        elif key in {'ADD_PAINT', 'ADD_FILL'}:
+            self.message = actions.add_layer(context, obj, data, key.removeprefix('ADD_'))
+        elif key == 'DELETE':
+            self.message = actions.delete_layer(context, obj, data)
+        elif key in MOVES:
+            self.message = actions.move_layer(context, obj, data, MOVES[key])
+        elif key == 'BLEND':
+            self.message = actions.cycle_blend(context, obj, data)
+        elif key in CHANNELS:
+            self.message = actions.toggle_channel(context, obj, data, CHANNELS[key])
+        elif key in {'ADD_MASK_WHITE', 'ADD_MASK_BLACK'}:
+            self.message = actions.add_mask(context, obj, data, key == 'ADD_MASK_WHITE')
+        elif key == 'REMOVE_MASK':
+            self.message = actions.remove_mask(context, obj, data)
+        elif key in {'TARGET_LAYER', 'TARGET_MASK'}:
+            self.message = actions.set_paint_mask(context, obj, data, key == 'TARGET_MASK')
+        return None
 
     def cleanup(self):
         global _active
         if self._closed:
             return
-        self.save_window()
         self._closed = True
         if self._handle is not None:
             bpy.types.SpaceView3D.draw_handler_remove(self._handle, 'WINDOW')
@@ -280,8 +236,6 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             bpy.context.window_manager.event_timer_remove(self._timer)
             self._timer = None
         try:
-            if self.window_cursor != 'DEFAULT':
-                self._window.cursor_set('DEFAULT')
             self._area.tag_redraw()
         except ReferenceError:
             pass
