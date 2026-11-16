@@ -933,9 +933,47 @@ def journey():
     check(control('ERASE').active and bpy.context.scene.tool_settings.image_paint.canvas == next(layer for layer in data.layers if layer.uid == data.active_uid).image
           and abs(painting.brush_value(bpy.context.scene, 'strength') - .25) < .03, 'the eraser works on the layer itself at the brush opacity')
 
+    area_count = len(window.screen.areas)
+    click(window, region, 'VIEW2D')
+    yield 0.6
+    flat = editor._active.flat_area
+    data = bpy.data.objects['Cube'].devil_painter
+    current = next(layer for layer in data.layers if layer.uid == data.active_uid)
+    check(flat is not None and flat.type == 'IMAGE_EDITOR' and flat.spaces.active.ui_mode == 'PAINT' and len(window.screen.areas) == area_count + 1
+          and control('VIEW2D').active, '2D view docks an image paint view beside the model')
+    check(flat.spaces.active.image == (current.image if current.kind == 'PAINT' else current.mask) and not flat.spaces.active.show_region_header,
+          'the 2D view shows the selected canvas without Blender headers')
+    zones = editor._active.workspace.zones
+    check(not any(overlaps(a, b) for a, b in ((zones.bar, zones.column), (zones.strip, zones.column), (zones.stage, zones.column), (zones.shelf, zones.column))),
+          'the workspace still fits beside the 2D view')
+    click(window, region, 'ADD_PAINT')
+    yield 0.6
+    fresh = next(layer for layer in data.layers if layer.uid == data.active_uid)
+    move(window, region.x + 10, region.y + 10)
+    yield 0.3
+    check(flat.spaces.active.image == fresh.image, 'the 2D view follows the selected layer')
+    click(window, region, 'PAINT')
+    yield 0.4
+    flat_region = next(item for item in flat.regions if item.type == 'WINDOW')
+    x, y = flat_region.x + flat_region.width * .5, flat_region.y + flat_region.height * .5
+    move(window, x, y)
+    window.event_simulate(type='LEFTMOUSE', value='PRESS', x=int(x), y=int(y))
+    for step in range(1, 10):
+        move(window, x + step * 4, y + step * 2)
+    window.event_simulate(type='LEFTMOUSE', value='RELEASE', x=int(x + 36), y=int(y + 18))
+    yield 0.8
+    check(alpha(fresh.image).max() > .1, 'painting in the 2D view paints the selected layer in UV space')
+    click(window, region, 'VIEW2D')
+    yield 0.5
+    check(editor._active.flat_area is None and len(window.screen.areas) == area_count, 'clicking 2D view again closes it')
+    click(window, region, 'VIEW2D')
+    yield 0.5
+    check(len(window.screen.areas) == area_count + 1, 'the 2D view opens again')
+
     click(window, region, 'CLOSE')
     yield 0.5
     check(editor._active is None, 'the close button closes Devil Painter')
+    check(len(window.screen.areas) == area_count, 'closing Devil Painter also closes the 2D view')
     check(space.show_region_header and space.show_region_toolbar and space.show_gizmo_navigate, "closing restores Blender's header, toolbar and gizmo")
     press(window, 'P', *middle, ctrl=True, alt=True)
     yield 0.5

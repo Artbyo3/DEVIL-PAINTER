@@ -126,6 +126,13 @@ Blender's native painting.
   Rusty Iron, Dusty Plastic, Scuffed Gold, Dirty Concrete) and saved ones with
   rendered stack previews. Applying one rebuilds it as a folder above the
   selection, scaling saved images to the texture set resolution.
+- 2D view: the 2D view button splits Blender's viewport area and docks
+  Blender's own Image Editor in Paint mode beside the model, with its headers
+  and toolbars hidden. It shows the selected canvas (layer color or mask) with
+  the UV layout and follows the selection, and the same Devil Painter brush
+  paints there in UV space. It closes with the button or with Devil Painter.
+  It is Blender's editor rather than a custom canvas, so painting stays on
+  Blender's brush engine.
 - Live preview: the stack compiles into the material's node tree. Normal feeds
   a normal map, height feeds a bump on top of it, emission and opacity feed the
   shader's emission and alpha. Value edits update node inputs without
@@ -174,7 +181,6 @@ Planned stages, each shipped as a tested increment:
 - Painting normal detail with the brush (normal is a fill value per layer).
 - Multiple texture sets per object, UDIMs, and keeping other materials on a
   multi-material mesh. Start painting replaces the mesh's material slots.
-- A 2D texture view inside the workspace.
 - Scrolling for very long layer stacks; rows that do not fit are hidden.
 
 ## Architecture requirements

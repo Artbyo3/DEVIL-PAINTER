@@ -7,7 +7,7 @@ import numpy
 from . import actions, brushes, compositing, library, painting, shelf, smart, strokes, thumbnails
 from .blending import BLEND_MODES, CHANNEL, CHANNELS, linear_to_srgb, srgb_to_linear
 from .canvas import Rect
-from .document import active_layer, set_channels, slot_value, texture_set
+from .document import active_layer, paint_target, set_channels, slot_value, texture_set
 from .draw import Renderer
 from .masks import GENERATORS
 from .meshmaps import MESH_MAPS
@@ -20,6 +20,7 @@ DOUBLE_CLICK_SECONDS = .4
 SCROLL_STEP = 40
 POINTER_TOKENS = ('MOUSE', 'TRACKPAD', 'NDOF', 'PEN', 'ERASER')
 HIDDEN_REGIONS = ('show_region_header', 'show_region_tool_header', 'show_region_toolbar', 'show_region_asset_shelf', 'show_gizmo_navigate')
+FLAT_REGIONS = ('show_region_header', 'show_region_tool_header', 'show_region_toolbar', 'show_region_ui', 'show_region_asset_shelf')
 MOVES = {'MOVE_UP': 1, 'MOVE_DOWN': -1}
 PROJECTION_LABELS = {'UV': 'UV', 'TRIPLANAR': 'Tri-planar'}
 BRUSH_RANGES = {key: (field, top, .01 if key == 'BRUSH_FLOW' else 1.0 if key == 'BRUSH_SPACING' else 0.0) for key, _, field, top, _ in BRUSH_SLIDERS}
@@ -52,6 +53,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
     bl_description = "Open the Devil Painter workspace over the 3D viewport"
     _closed = True
     _handle = None
+    flat_area = None
     _timer = None
 
     @classmethod
@@ -77,6 +79,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         obj = context.view_layer.objects.active
         data = texture_set(obj)
         self.stroke_pending = False
+        self.flat_area = None
         if data is not None:
             actions.prepare(obj, data)
             painting.enter_paint_mode(context, obj)
@@ -178,6 +181,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             elif time.monotonic() < self.toast_until + TIMER_INTERVAL:
                 self._area.tag_redraw()
             return {'PASS_THROUGH'}
+        self.sync_flat()
         self.workspace = self.make_layout()
         self.pointer = (event.mouse_x - self._region.x, event.mouse_y - self._region.y)
         press = event.value == 'PRESS'
@@ -261,11 +265,56 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
                 return result
         return {'RUNNING_MODAL'}
 
+    def flat_space(self):
+        try:
+            if self.flat_area is not None and self.flat_area in list(self._window.screen.areas) and self.flat_area.type == 'IMAGE_EDITOR':
+                return self.flat_area.spaces.active
+        except ReferenceError:
+            pass
+        self.flat_area = None
+        self.state.view_2d = False
+        return None
+
+    def sync_flat(self):
+        space = self.flat_space()
+        if space is None:
+            return
+        obj, data = self.painted()
+        image = paint_target(data) if data is not None else None
+        if space.image != image:
+            space.image = image
+
+    def open_flat(self, context):
+        known = {area.as_pointer() for area in self._window.screen.areas}
+        with context.temp_override(window=self._window, area=self._area, region=self._region):
+            bpy.ops.screen.area_split(direction='VERTICAL', factor=.5)
+        area = next(item for item in self._window.screen.areas if item.as_pointer() not in known)
+        area.type = 'IMAGE_EDITOR'
+        space = area.spaces.active
+        space.ui_mode = 'PAINT'
+        for name in FLAT_REGIONS:
+            if hasattr(space, name):
+                setattr(space, name, False)
+        space.uv_editor.show_uv = True
+        self.flat_area = area
+        self.state.view_2d = True
+        self.sync_flat()
+        return 'The 2D view shows the selected canvas in UV space. Paint on either side.'
+
+    def close_flat(self, context):
+        if self.flat_space() is not None:
+            with context.temp_override(window=self._window, area=self.flat_area):
+                bpy.ops.screen.area_close()
+        self.flat_area = None
+        self.state.view_2d = False
+        return 'Closed the 2D view.'
+
     def begin_stroke(self, context):
         obj, data = self.painted()
         if data is None or obj.mode != 'TEXTURE_PAINT':
             return
-        if painting.uses_stroke_buffer(context, data):
+        inside = 0 <= self.pointer[0] < self._region.width and 0 <= self.pointer[1] < self._region.height
+        if inside and painting.uses_stroke_buffer(context, data):
             self.stroke_pending = True
         else:
             strokes.record(None)
@@ -512,6 +561,8 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.message = actions.set_generator(context, obj, data, dict(generator=key.removeprefix('SET_GENERATOR.')))
         elif key == 'GEN_INVERT':
             self.message = actions.set_generator(context, obj, data, dict(gen_invert=not active_layer(data).gen_invert))
+        elif key == 'VIEW2D':
+            self.message = self.close_flat(context) if self.flat_space() is not None else self.open_flat(context)
         elif key in {'BAKE', 'OPEN_BAKE'}:
             self.state.popover = None if self.state.popover is not None and self.state.popover.kind == 'BAKE' else Popover('BAKE', control.rect)
         elif key.startswith('BAKEMAP.'):
@@ -728,12 +779,17 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self._timer = None
         try:
             space = self._area.spaces.active
-            for name, value in self.saved_regions.items():
-                if not space.is_property_readonly(name):
-                    setattr(space, name, value)
+            with bpy.context.temp_override(window=self._window, area=self._area):
+                for name, value in self.saved_regions.items():
+                    if not space.is_property_readonly(name):
+                        setattr(space, name, value)
             self._area.tag_redraw()
         except ReferenceError:
             pass
+        try:
+            self.close_flat(bpy.context)
+        except (ReferenceError, RuntimeError):
+            self.flat_area = None
         if _active is self:
             _active = None
 

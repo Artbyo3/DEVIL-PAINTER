@@ -12,6 +12,7 @@ from .ui_system import (ACCENT, ACCENT_BG, ACCENT_BORDER, ACCENT_HOVER, BG_ELEVA
                         SURFACE_OUTLINE, TEXT_MUTED, TEXT_ON_ACCENT, TEXT_PRIMARY, TEXT_SECONDARY, ComponentRenderer, Tooltip)
 
 TOAST_SECONDS = 3
+COMPACT_SLIDER = 104
 CHECKER = ((0.32, 0.32, 0.32, 1.0), (0.22, 0.22, 0.22, 1.0))
 
 
@@ -304,7 +305,7 @@ class Renderer:
             self.round_rect(Rect(rect.x, rect.y, filled, rect.h), ACCENT_BG, radius=metrics.regular)
         self.round_rect_outline(rect, ACCENT_BORDER if hover else BORDER, radius=metrics.regular)
         baseline = rect.y + (rect.h - 10 * s) / 2
-        if control.label:
+        if control.label and rect.w > COMPACT_SLIDER * s:
             self.text(rect.x + 8 * s, baseline, control.label, 10, TEXT_SECONDARY)
         self.text_right(rect.x + rect.w - 8 * s, baseline, control.text, 10, TEXT_PRIMARY)
 

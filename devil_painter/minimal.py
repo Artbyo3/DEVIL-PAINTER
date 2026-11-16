@@ -146,7 +146,7 @@ def view_label(data):
     return CHANNEL[data.solo].label if data.solo else 'Material'
 
 
-def workspace_bar(layout, zone, data, obj_name):
+def workspace_bar(layout, zone, data, obj_name, view_2d):
     s = layout.scale
     layout.cards.append((zone, ''))
     y, h = zone.y + 6 * s, zone.h - 12 * s
@@ -160,6 +160,9 @@ def workspace_bar(layout, zone, data, obj_name):
     channels = Rect(view.x - 6 * s - menu_w, y, menu_w, h)
     bake = Rect(channels.x - 6 * s - 110 * s, y, 110 * s, h)
     layout.add('BAKE', bake, 'CHIP', label='Bake maps', tip='Bake ambient occlusion, curvature, thickness, position, world normal, and ID maps')
+    flat = Rect(bake.x - 6 * s - 90 * s, y, 90 * s, h)
+    layout.add('VIEW2D', flat, 'CHIP', label='2D view', active=view_2d, tip='Show the selected canvas flat in UV space next to the model and paint on it')
+    bake = flat
     layout.add('CHANNELS', channels, 'DROPDOWN', label='Channels', text=str(len(set_channels(data))),
                tip=channel_names(data) + '. Choose which channels this texture set paints and exports')
     layout.add('SET_NAME', Rect(zone.x + 12 * s, y, max(0.0, bake.x - zone.x - 24 * s), h), 'NOTE',
@@ -540,10 +543,11 @@ def column_layout(layout, state, data, zone):
 def shelf_header(layout, state, zone, header):
     s = layout.scale
     x = zone.x + 8 * s
+    tab_w = max(40 * s, min(76 * s, (zone.w - 46 * s) / len(shelf.TABS) - 4 * s))
     for tab, label in shelf.TABS:
-        layout.add('SHELF_TAB.' + tab, Rect(x, header.y, 76 * s, header.h), 'CHIP', label=label, active=state.shelf_open and tab == state.shelf_tab,
+        layout.add('SHELF_TAB.' + tab, Rect(x, header.y, tab_w, header.h), 'CHIP', label=label, active=state.shelf_open and tab == state.shelf_tab,
                    tip=f'Browse {label.lower()}')
-        x += 80 * s
+        x += tab_w + 4 * s
     toggle = Rect(zone.x + zone.w - 30 * s, header.y, 22 * s, header.h)
     layout.add('SHELF_TOGGLE', toggle, 'ICON', icon='DOWN' if state.shelf_open else 'DISCLOSURE',
                tip='Hide the shelf' if state.shelf_open else 'Show the shelf')
@@ -553,7 +557,7 @@ def shelf_header(layout, state, zone, header):
         label = 'Click a material to put into the selected layer' if state.armed == REPLACE_TARGET else f'Click a texture or pattern for {CHANNEL[state.armed].label.lower()}'
         layout.add('ARM_INFO', Rect(x, header.y, max(0.0, room - 78 * s), header.h), 'NOTE', label=label)
         layout.add('CANCEL_ARM', Rect(toggle.x - 78 * s, header.y, 70 * s, header.h), 'CHIP', label='Cancel', tip='Stop picking', shortcut='Esc')
-    elif state.shelf_open and state.shelf_tab == 'TEXTURES':
+    elif state.shelf_open and state.shelf_tab == 'TEXTURES' and room > 230 * s:
         editing = state.text is not None and state.text.key == 'TEXTURE_DIR'
         layout.add('TEXTURE_IMPORT', Rect(x, header.y, 70 * s, header.h), 'CHIP', label='Import', tip='Copy image files into your texture library')
         x += 76 * s
@@ -708,7 +712,7 @@ def painter_layout(bounds, scale, state, data, obj_name, tool, brush, directory)
     if data is None:
         start_layout(layout, bounds, obj_name, state.resolution)
     else:
-        workspace_bar(layout, layout.zones.bar, data, obj_name)
+        workspace_bar(layout, layout.zones.bar, data, obj_name, state.view_2d)
         tool_strip(layout, layout.zones.strip, tool, brush, data)
         dock_layout(layout, layout.zones.dock, tool)
         shelf_layout(layout, state, layout.zones.shelf)
