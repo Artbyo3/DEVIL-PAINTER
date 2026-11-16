@@ -1,4 +1,5 @@
 import bpy
+from . import library
 from .document import texture_set
 
 
@@ -22,4 +23,20 @@ class DEVIL_PAINTER_OT_choose_export_folder(bpy.types.Operator):
         return {'FINISHED'}
 
 
-CLASSES = (DEVIL_PAINTER_OT_choose_export_folder,)
+class DEVIL_PAINTER_OT_choose_texture_folder(bpy.types.Operator):
+    bl_idname = 'devil_painter.choose_texture_folder'
+    bl_label = 'Choose Texture Folder'
+    bl_description = 'Pick the folder of textures the Devil Painter shelf browses'
+    directory: bpy.props.StringProperty(subtype='DIR_PATH')
+
+    def invoke(self, context, event):
+        self.directory = library.texture_folder()
+        context.window_manager.fileselect_add(self)
+        return {'RUNNING_MODAL'}
+
+    def execute(self, context):
+        library.set_texture_folder(self.directory)
+        return {'FINISHED'}
+
+
+CLASSES = (DEVIL_PAINTER_OT_choose_export_folder, DEVIL_PAINTER_OT_choose_texture_folder)

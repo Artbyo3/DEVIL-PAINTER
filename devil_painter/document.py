@@ -1,7 +1,11 @@
 import bpy
 from .blending import BLEND_MODES, CHANNEL, CHANNELS
+from .procedural import PATTERNS
 
 RESOLUTIONS = (1024, 2048, 4096)
+SOURCES = (('VALUE', 'Value', ''), ('IMAGE', 'Texture', ''), ('PATTERN', 'Pattern', ''))
+PROJECTIONS = (('UV', 'UV', ''), ('TRIPLANAR', 'Tri-planar', ''))
+SLOT_FIELDS = ('enabled', 'source', 'color', 'value', 'color_b', 'value_b', 'blend', 'pattern', 'scale', 'detail', 'contrast')
 
 
 class DEVIL_PAINTER_PG_slot(bpy.types.PropertyGroup):
@@ -9,6 +13,14 @@ class DEVIL_PAINTER_PG_slot(bpy.types.PropertyGroup):
     color: bpy.props.FloatVectorProperty(size=3, default=(0.8, 0.8, 0.8), min=0.0, max=1.0)
     value: bpy.props.FloatProperty(default=0.5, min=0.0, max=1.0)
     blend: bpy.props.EnumProperty(items=[(key, label, '') for key, label in BLEND_MODES])
+    source: bpy.props.EnumProperty(items=SOURCES)
+    image: bpy.props.PointerProperty(type=bpy.types.Image)
+    pattern: bpy.props.EnumProperty(items=[(pattern.key, pattern.label, '') for pattern in PATTERNS])
+    color_b: bpy.props.FloatVectorProperty(size=3, default=(0.1, 0.1, 0.1), min=0.0, max=1.0)
+    value_b: bpy.props.FloatProperty(default=0.0, min=0.0, max=1.0)
+    scale: bpy.props.FloatProperty(default=8.0, min=0.1, max=1024.0)
+    detail: bpy.props.FloatProperty(default=0.5, min=0.0, max=1.0)
+    contrast: bpy.props.FloatProperty(default=0.3, min=0.0, max=0.98)
 
 
 class DEVIL_PAINTER_PG_channel(bpy.types.PropertyGroup):
@@ -20,6 +32,8 @@ class DEVIL_PAINTER_PG_layer(bpy.types.PropertyGroup):
     kind: bpy.props.EnumProperty(items=(('PAINT', 'Paint', ''), ('FILL', 'Fill', '')))
     visible: bpy.props.BoolProperty(default=True)
     opacity: bpy.props.FloatProperty(default=1.0, min=0.0, max=1.0)
+    projection: bpy.props.EnumProperty(items=PROJECTIONS)
+    tiling: bpy.props.FloatProperty(default=1.0, min=0.05, max=100.0)
     slots: bpy.props.CollectionProperty(type=DEVIL_PAINTER_PG_slot)
     image: bpy.props.PointerProperty(type=bpy.types.Image)
     mask: bpy.props.PointerProperty(type=bpy.types.Image)
@@ -67,15 +81,21 @@ def add_slots(layer):
         set_slot_value(slot, channel.default)
 
 
-def slot_value(slot):
-    return tuple(slot.color) if CHANNEL[slot.name].width == 3 else (slot.value,)
-
-
-def set_slot_value(slot, value):
+def slot_value(slot, second=False):
     if CHANNEL[slot.name].width == 3:
-        slot.color = value
+        return tuple(slot.color_b if second else slot.color)
+    return (slot.value_b if second else slot.value,)
+
+
+def set_slot_value(slot, value, second=False):
+    if CHANNEL[slot.name].width == 3:
+        setattr(slot, 'color_b' if second else 'color', value)
     else:
-        slot.value = value[0]
+        setattr(slot, 'value_b' if second else 'value', value[0])
+
+
+def uses_coordinates(layer):
+    return any(slot.enabled and slot.source != 'VALUE' for slot in layer.slots)
 
 
 def layer_index(data, uid):

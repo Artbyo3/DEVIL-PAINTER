@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(ROOT))
 import devil_painter
-from devil_painter import editor, painting
+from devil_painter import editor, library, painting, shelf, thumbnails
 from devil_painter.compositing import SIGNATURE_KEY, socket
 from devil_painter.ui_system import SURFACE_FLOATING
 from tools.workspace import prepare_scratch
@@ -90,6 +90,34 @@ def type_text(window, text, x, y):
     window.event_simulate(type='RET', value='PRESS', x=int(x), y=int(y))
 
 
+def write_png(path, color):
+    image = bpy.data.images.new(path.stem, 16, 16, alpha=False)
+    image.pixels.foreach_set(numpy.tile(numpy.array(color, dtype=numpy.float32), 16 * 16))
+    image.filepath_raw = str(path)
+    image.file_format = 'PNG'
+    image.save()
+    bpy.data.images.remove(image)
+
+
+def shelf_index(label):
+    return next(index for index, item in enumerate(shelf.items(editor._active.state.shelf_tab)) if item.label == label)
+
+
+def tile_shown(key):
+    if not has(key):
+        return False
+    item = control(key)
+    return item.clip.contains(item.rect.x, item.rect.y) and item.clip.contains(item.rect.x + item.rect.w, item.rect.top)
+
+
+def png_pixels(path):
+    image = bpy.data.images.load(str(path))
+    values = numpy.empty(len(image.pixels), dtype=numpy.float32)
+    image.pixels.foreach_get(values)
+    bpy.data.images.remove(image)
+    return values.reshape(-1, 4)
+
+
 def stroke(window, region):
     x, y = region.x + region.width * .42, region.y + region.height * .45
     move(window, x, y)
@@ -123,6 +151,8 @@ def rendered_pixel(window, area, region, point):
 
 def journey():
     scratch = prepare_scratch()
+    check(library.library_root().resolve().is_relative_to(scratch.resolve()), 'the test material library lives in scratch, not the user library')
+    (library.library_root() / library.SETTINGS_FILE).unlink(missing_ok=True)
     devil_painter.register()
     yield 0.5
     window, area, region = viewport()
@@ -344,6 +374,137 @@ def journey():
     with bpy.context.temp_override(window=window, area=area, region=region):
         bpy.ops.wm.save_as_mainfile(filepath=str(scratch / 'painted.blend'), copy=True)
     check(all(layer.image is None or layer.image.packed_file is not None for layer in data.layers), 'saving packs the painted layers into the .blend')
+
+    check(has('SHELF_TAB.MATERIALS') and control('SHELF_TAB.MATERIALS').active and has('ITEM.0'), 'the material shelf shows material tiles')
+    check(not any(overlaps(editor._active.workspace.zones.shelf, zone) for zone in (zones.dock, zones.column, editor._active.workspace.zones.stage)),
+          'the shelf sits in its own zone under the stage')
+    first = library.BUILTIN_MATERIALS[0]
+    for _ in range(60):
+        if thumbnails.cache_path(first).is_file() and control('ITEM.0').preview is not None:
+            break
+        yield 0.3
+    check(thumbnails.cache_path(first).is_file() and control('ITEM.0').preview is not None, 'material tiles get rendered sphere thumbnails')
+    tile = control('ITEM.0').rect
+    tile_pixel = rendered_pixel(window, area, region, (tile.x + tile.w / 2, tile.top - tile.w / 2))
+    check(tile_pixel[0] > .2 and tile_pixel[0] > tile_pixel[2] * 2, 'the red plastic thumbnail renders red in the shelf')
+
+    click(window, region, f'ITEM.{shelf_index("Gold")}')
+    yield 0.6
+    gold = next(layer for layer in data.layers if layer.uid == data.active_uid)
+    check(gold.name == 'Gold' and gold.kind == 'FILL' and gold.slots['metallic'].value == 1.0 and not gold.slots['height'].enabled,
+          'clicking Gold in the shelf adds a gold fill layer')
+    click(window, region, f'ITEM.{shelf_index("Rust")}')
+    yield 0.8
+    rust = next(layer for layer in data.layers if layer.uid == data.active_uid)
+    nodes = data.material.node_tree.nodes
+    check(rust.slots['base_color'].source == 'PATTERN' and nodes[rust.uid + '.base_color.texture'].type == 'TEX_NOISE',
+          'Rust lays down a procedural grunge pattern')
+    check(has('SCALE.base_color') and has('SWATCHB.base_color') and has('PROJECTION') and control('PROJECTION').text == 'Tri-planar',
+          'Properties shows the pattern parameters and the tri-planar projection')
+    mapping = nodes[rust.uid + '.mapping']
+    check(mapping.inputs['Vector'].links[0].from_socket.name == 'Object', 'tri-planar patterns use object coordinates')
+    rect = control('SCALE.base_color').rect
+    press(window, 'LEFTMOUSE', region.x + rect.x + rect.w * .8, region.y + rect.y + rect.h / 2)
+    yield 0.4
+    nodes = data.material.node_tree.nodes
+    check(abs(nodes[rust.uid + '.base_color.texture'].inputs['Scale'].default_value - rust.slots['base_color'].scale) < 1e-4
+          and rust.slots['base_color'].scale > 50, 'the scale slider sets the pattern scale in the material')
+    click(window, region, 'PROJECTION')
+    yield 0.3
+    click(window, region, 'SET_PROJECTION.UV')
+    yield 0.5
+    nodes = data.material.node_tree.nodes
+    check(rust.projection == 'UV' and nodes[rust.uid + '.mapping'].inputs['Vector'].links[0].from_socket.name == 'UV',
+          'the projection dropdown switches the layer to UV mapping')
+
+    click(window, region, 'SOURCE.roughness')
+    yield 0.3
+    click(window, region, 'PICK_PATTERN.roughness')
+    yield 0.4
+    check(editor._active.state.armed == 'roughness' and editor._active.state.shelf_tab == 'PATTERNS' and has('ARM_INFO'),
+          'choosing Pattern from the shelf opens the pattern tab for roughness')
+    click(window, region, f'ITEM.{shelf_index("Cells")}')
+    yield 0.6
+    check(rust.slots['roughness'].source == 'PATTERN' and rust.slots['roughness'].pattern == 'CELLS' and not editor._active.state.armed,
+          'clicking a pattern drives the armed channel')
+
+    textures = scratch / 'textures'
+    textures.mkdir(exist_ok=True)
+    write_png(textures / 'brick_basecolor.png', (.6, .2, .1, 1.0))
+    write_png(textures / 'brick_roughness.png', (.7, .7, .7, 1.0))
+    write_png(textures / 'brick_normal_gl.png', (.4, .6, 1.0, 1.0))
+    write_png(textures / 'lone.png', (.1, .8, .2, 1.0))
+    click(window, region, 'SHELF_TAB.TEXTURES')
+    yield 0.3
+    check(has('SHELF_EMPTY') and has('TEXTURE_DIR'), 'the texture tab asks for a folder')
+    click(window, region, 'TEXTURE_DIR')
+    yield 0.2
+    type_text(window, str(textures), *spot(region, 'TEXTURE_DIR'))
+    yield 0.6
+    check(library.texture_folder() == str(textures) and sum(item.key.startswith('ITEM.') for item in editor._active.workspace.controls) == 4,
+          'typing a folder lists its textures in the shelf')
+    for _ in range(20):
+        if control('ITEM.0').preview is not None:
+            break
+        yield 0.2
+    check(control('ITEM.0').preview is not None, 'texture tiles show the image thumbnails')
+    click(window, region, 'SOURCE.base_color')
+    yield 0.3
+    click(window, region, 'PICK_TEXTURE.base_color')
+    yield 0.3
+    click(window, region, f'ITEM.{shelf_index("lone")}')
+    yield 0.6
+    slot = rust.slots['base_color']
+    check(slot.source == 'IMAGE' and slot.image.name == 'lone.png' and has('IMAGE_NAME.base_color'), 'clicking a texture drives the armed channel')
+
+    click(window, region, 'SHELF_TAB.MATERIALS')
+    yield 0.3
+    key = f'ITEM.{shelf_index("Brick")}'
+    for _ in range(12):
+        if tile_shown(key):
+            break
+        x, y = spot(region, 'ITEM.0')
+        move(window, x, y)
+        window.event_simulate(type='WHEELDOWNMOUSE', value='PRESS', x=int(x), y=int(y))
+        yield 0.2
+    check(tile_shown(key), 'the material shelf scrolls to the texture set found in the folder')
+    click(window, region, key)
+    yield 0.8
+    brick = next(layer for layer in data.layers if layer.uid == data.active_uid)
+    check(brick.name == 'Brick' and brick.slots['roughness'].image.name == 'brick_roughness.png'
+          and brick.slots['normal'].image.colorspace_settings.is_data and not brick.slots['metallic'].enabled,
+          'a folder texture set becomes one fill layer with each map on its channel')
+
+    rust_index = next(index for index, layer in enumerate(data.layers) if layer.uid == rust.uid)
+    click(window, region, 'ROW_' + rust.uid, kind='RIGHTMOUSE')
+    yield 0.3
+    click(window, region, 'SAVE_MATERIAL')
+    yield 0.4
+    check(library.user_materials() and library.user_materials()[-1]['name'] == data.layers[rust_index].name
+          and (library.library_root() / library.SETTINGS_FILE).is_file(), 'Save as material stores the layer in the user library')
+    saved = next(index for index, item in enumerate(shelf.items('MATERIALS')) if item.user_index >= 0)
+    check(shelf.items('MATERIALS')[saved].payload['slots']['base_color']['image'].endswith('lone.png'), 'the saved material keeps its texture file')
+
+    export_dir = scratch / 'export_shelf'
+    click(window, region, 'EXPORT')
+    yield 0.4
+    click(window, region, 'EXPORT_DIR')
+    yield 0.2
+    type_text(window, str(export_dir), *spot(region, 'EXPORT_DIR'))
+    yield 0.3
+    click(window, region, 'EXPORT_RUN')
+    yield 1.5
+    normal = png_pixels(export_dir / 'Cube_Normal.png')
+    match = (numpy.abs(normal[:, 0] - .4) < .03) & (numpy.abs(normal[:, 1] - .6) < .03)
+    check(editor._active.message.startswith('Exported 6 textures') and match.mean() > .3,
+          'export bakes the texture set normal map into the normal channel')
+
+    click(window, region, 'SHELF_TOGGLE')
+    yield 0.3
+    check(not editor._active.state.shelf_open and not has('ITEM.0') and has('SHELF_TAB.MATERIALS'), 'the shelf collapses to its tabs')
+    click(window, region, 'SHELF_TOGGLE')
+    yield 0.3
+    check(has('ITEM.0'), 'the shelf opens again')
 
     for _ in range(30):
         if 'LAYERS' in editor._active.workspace.scroll_areas and 'PROPERTIES' in editor._active.workspace.scroll_areas:

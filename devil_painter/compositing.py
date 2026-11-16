@@ -1,12 +1,10 @@
-from pathlib import Path
-import bpy
-import numpy
-from .blending import composite, linear_to_srgb, srgb_to_linear
-from .document import set_channels, slot_value
+from .document import set_channels, slot_value, uses_coordinates
+from .procedural import contrast_range, pattern_node, set_pattern_values
 
 SIGNATURE_KEY = 'devil_painter_signature'
 BUMP_DISTANCE = .05
 DISPLAY_GAMMA = 2.2
+TRIPLANAR_BLEND = .2
 SHADER_INPUTS = {'base_color': 'Base Color', 'roughness': 'Roughness', 'metallic': 'Metallic', 'emission': 'Emission Color',
                  'opacity': 'Alpha'}
 
@@ -23,10 +21,19 @@ def visible_layers(data):
     return [layer for layer in data.layers if layer.visible]
 
 
+def slot_signature(slot):
+    source = slot.source
+    if source == 'IMAGE':
+        source += slot.image.name if slot.image else ''
+    elif source == 'PATTERN':
+        source += slot.pattern
+    return slot.name + slot.blend + source
+
+
 def signature(data):
     channels = ','.join(channel.key for channel in set_channels(data))
-    layers = '|'.join(':'.join((layer.uid, layer.kind, layer.image.name if layer.image else '', layer.mask.name if layer.mask else '',
-                                *(slot.name + slot.blend for slot in layer.slots if slot.enabled)))
+    layers = '|'.join(':'.join((layer.uid, layer.kind, layer.projection, layer.image.name if layer.image else '',
+                                layer.mask.name if layer.mask else '', *(slot_signature(slot) for slot in layer.slots if slot.enabled)))
                       for layer in visible_layers(data))
     return f'{channels};{data.solo};{layers}'
 
@@ -57,6 +64,42 @@ def layer_coverage(nodes, links, layer, x):
     return coverage, source
 
 
+def layer_coordinates(nodes, links, layer, x):
+    coordinates = nodes.new('ShaderNodeTexCoord')
+    coordinates.location = (x - 600, -400)
+    mapping = nodes.new('ShaderNodeMapping')
+    mapping.name = layer.uid + '.mapping'
+    mapping.location = (x - 450, -400)
+    links.new(coordinates.outputs['Object' if layer.projection == 'TRIPLANAR' else 'UV'], mapping.inputs['Vector'])
+    return mapping.outputs['Vector']
+
+
+def slot_content(nodes, links, layer, slot, vector, name, x, y):
+    if slot.source == 'IMAGE' and slot.image:
+        texture = nodes.new('ShaderNodeTexImage')
+        texture.image = slot.image
+        texture.location = (x - 250, y - 120)
+        if layer.projection == 'TRIPLANAR':
+            texture.projection = 'BOX'
+            texture.projection_blend = TRIPLANAR_BLEND
+        links.new(vector, texture.inputs['Vector'])
+        return texture.outputs['Color']
+    if slot.source == 'PATTERN':
+        texture, factor = pattern_node(nodes, slot.pattern, name + '.texture', (x - 450, y - 120))
+        links.new(vector, texture.inputs['Vector'])
+        contrast = nodes.new('ShaderNodeMapRange')
+        contrast.name = name + '.contrast'
+        contrast.location = (x - 300, y - 120)
+        links.new(factor, contrast.inputs['Value'])
+        mix = nodes.new('ShaderNodeMix')
+        mix.name = name + '.pattern'
+        mix.data_type = 'RGBA'
+        mix.location = (x - 150, y - 120)
+        links.new(contrast.outputs['Result'], socket(mix.inputs, 'Factor', 'VALUE'))
+        return socket(mix.outputs, 'Result', 'RGBA')
+    return None
+
+
 def surface_normal(nodes, links, results, x):
     normal = None
     if 'normal' in results:
@@ -75,10 +118,10 @@ def surface_normal(nodes, links, results, x):
     return normal
 
 
-def solo_shader(nodes, links, channel, result, x):
+def solo_shader(nodes, links, channel, result, x, raw):
     emission = nodes.new('ShaderNodeEmission')
     emission.location = (x, 300)
-    if channel.srgb:
+    if raw or channel.srgb:
         links.new(result, emission.inputs['Color'])
     else:
         gamma = nodes.new('ShaderNodeGamma')
@@ -89,14 +132,9 @@ def solo_shader(nodes, links, channel, result, x):
     return emission.outputs[0]
 
 
-def rebuild(data):
-    material = data.material
-    material.use_nodes = True
-    tree = material.node_tree
+def build_tree(tree, channels, layers, solo=None, raw=False):
     nodes, links = tree.nodes, tree.links
     nodes.clear()
-    channels = set_channels(data)
-    layers = visible_layers(data)
     end = 300 * len(layers)
     output = nodes.new('ShaderNodeOutputMaterial')
     shader = nodes.new('ShaderNodeBsdfPrincipled')
@@ -109,21 +147,25 @@ def rebuild(data):
         results[channel.key] = node.outputs[0]
     for index, layer in enumerate(layers):
         x = 300 * index
-        coverage, source = layer_coverage(nodes, links, layer, x)
+        coverage, painted = layer_coverage(nodes, links, layer, x)
+        vector = layer_coordinates(nodes, links, layer, x) if uses_coordinates(layer) else None
         for row, channel in enumerate(channels):
             slot = layer.slots[channel.key]
             if not slot.enabled:
                 continue
+            name = f'{layer.uid}.{channel.key}'
+            y = 300 - 250 * row
             node = nodes.new('ShaderNodeMix')
-            node.name = f'{layer.uid}.{channel.key}'
+            node.name = name
             node.data_type = 'RGBA'
             node.blend_type = slot.blend
             node.clamp_result = True
-            node.location = (x, 300 - 250 * row)
+            node.location = (x, y)
             links.new(results[channel.key], socket(node.inputs, 'A', 'RGBA'))
             links.new(coverage, socket(node.inputs, 'Factor', 'VALUE'))
-            if channel.key == 'base_color' and source is not None:
-                links.new(source, socket(node.inputs, 'B', 'RGBA'))
+            content = painted if channel.key == 'base_color' and painted is not None else slot_content(nodes, links, layer, slot, vector, name, x, y)
+            if content is not None:
+                links.new(content, socket(node.inputs, 'B', 'RGBA'))
             results[channel.key] = socket(node.outputs, 'Result', 'RGBA')
     for key, name in SHADER_INPUTS.items():
         if key in results:
@@ -133,76 +175,51 @@ def rebuild(data):
     normal = surface_normal(nodes, links, results, end)
     if normal is not None:
         links.new(normal, shader.inputs['Normal'])
-    solo = next((channel for channel in channels if channel.key == data.solo), None)
-    surface = solo_shader(nodes, links, solo, results[solo.key], end + 300) if solo else shader.outputs[0]
+    surface = solo_shader(nodes, links, solo, results[solo.key], end + 300, raw) if solo else shader.outputs[0]
     links.new(surface, output.inputs['Surface'])
-    material[SIGNATURE_KEY] = signature(data)
 
 
-def update_values(data):
-    nodes = data.material.node_tree.nodes
-    channels = set_channels(data)
-    for layer in visible_layers(data):
+def write_values(nodes, channels, layers):
+    for layer in layers:
         nodes[layer.uid + '.opacity'].inputs[1].default_value = layer.opacity
+        if uses_coordinates(layer):
+            nodes[layer.uid + '.mapping'].inputs['Scale'].default_value = (layer.tiling,) * 3
         for channel in channels:
             slot = layer.slots[channel.key]
             if not slot.enabled or (channel.key == 'base_color' and layer.kind == 'PAINT'):
                 continue
-            socket(nodes[f'{layer.uid}.{channel.key}'].inputs, 'B', 'RGBA').default_value = rgba(slot_value(slot))
+            name = f'{layer.uid}.{channel.key}'
+            if slot.source == 'PATTERN':
+                mix = nodes[name + '.pattern']
+                socket(mix.inputs, 'A', 'RGBA').default_value = rgba(slot_value(slot))
+                socket(mix.inputs, 'B', 'RGBA').default_value = rgba(slot_value(slot, second=True))
+                set_pattern_values(nodes[name + '.texture'], slot.pattern, slot.scale, slot.detail)
+                contrast = nodes[name + '.contrast']
+                contrast.inputs['From Min'].default_value, contrast.inputs['From Max'].default_value = contrast_range(slot.pattern, slot.contrast)
+            elif slot.source == 'VALUE' or slot.image is None:
+                socket(nodes[name].inputs, 'B', 'RGBA').default_value = rgba(slot_value(slot))
+
+
+def solo_channel(data):
+    return next((channel for channel in set_channels(data) if channel.key == data.solo), None)
+
+
+def rebuild(data, solo=None, raw=False):
+    material = data.material
+    build_tree(material.node_tree, set_channels(data), visible_layers(data), solo or solo_channel(data), raw)
+    material[SIGNATURE_KEY] = '' if raw else signature(data)
+
+
+def update_values(data):
+    write_values(data.material.node_tree.nodes, set_channels(data), visible_layers(data))
 
 
 def sync(data):
-    if data.material.get(SIGNATURE_KEY) != signature(data) or not data.material.node_tree:
+    if data.material.get(SIGNATURE_KEY) != signature(data):
         rebuild(data)
     update_values(data)
 
 
-def pixels_of(image, size):
-    if image.size[0] != size or image.size[1] != size:
-        raise ValueError(f'{image.name} is {image.size[0]} x {image.size[1]}, not {size} x {size}.')
-    pixels = numpy.empty(size * size * 4, dtype=numpy.float32)
-    image.pixels.foreach_get(pixels)
-    return pixels.reshape(size, size, 4)
-
-
-def layer_inputs(data):
-    size = data.resolution
-    result = []
-    for layer in visible_layers(data):
-        coverage = painted = None
-        if layer.kind == 'PAINT' and layer.image:
-            pixels = pixels_of(layer.image, size)
-            painted = srgb_to_linear(pixels[..., :3])
-            coverage = pixels[..., 3:]
-        mask = pixels_of(layer.mask, size)[..., 3:] if layer.mask else None
-        channels = {slot.name: (painted if slot.name == 'base_color' and painted is not None else slot_value(slot), slot.blend)
-                    for slot in layer.slots if slot.enabled}
-        result.append(dict(opacity=layer.opacity, coverage=coverage, mask=mask, channels=channels))
-    return result
-
-
-def export(data, directory, stem):
-    size = data.resolution
-    channels = set_channels(data)
-    results = composite(size, channels, layer_inputs(data))
-    folder = Path(directory)
-    folder.mkdir(parents=True, exist_ok=True)
-    written = []
-    for channel in channels:
-        values = results[channel.key]
-        if channel.srgb:
-            values = linear_to_srgb(values)
-        rgba_pixels = numpy.ones((size, size, 4), dtype=numpy.float32)
-        rgba_pixels[..., :3] = values
-        image = bpy.data.images.new(f'{stem}_{channel.suffix}', size, size, alpha=False)
-        try:
-            image.colorspace_settings.name = 'sRGB' if channel.srgb else 'Non-Color'
-            image.pixels.foreach_set(rgba_pixels.ravel())
-            path = folder / f'{stem}_{channel.suffix}.png'
-            image.filepath_raw = str(path)
-            image.file_format = 'PNG'
-            image.save()
-            written.append(path)
-        finally:
-            bpy.data.images.remove(image)
-    return written
+def assign_image_colorspace(image, channel):
+    if image.colorspace_settings.is_data == channel.srgb:
+        image.colorspace_settings.name = 'sRGB' if channel.srgb else 'Non-Color'

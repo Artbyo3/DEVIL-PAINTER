@@ -28,14 +28,17 @@ class DeadCodeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             pkg = Path(tmp) / 'devil_painter'
             pkg.mkdir()
+            (pkg / 'canvas.py').write_text('class Rect:\n    x: float\n\n    @property\n    def top(self):\n        return self.x\n', encoding='utf-8')
             (pkg / 'draw.py').write_text(
-                'h_edge = ed.design_hit_edge()\nx = h_edge.edge\npair = pair_for(doc, \"id\")\ny = pair[\"a\"]\n',
+                'h_edge = ed.design_hit_edge()\nx = h_edge.edge\npair = pair_for(doc, \"id\")\ny = pair[\"a\"]\n'
+                'box = Rect(1)\nz = box.top + box.right\n',
                 encoding='utf-8'
             )
             violations = find_draw_integrity_violations(Path(tmp))
             self.assertEqual(violations, [
                 "draw.py:2: invalid attribute 'edge' on EdgeRef",
                 "draw.py:4: invalid key 'a' on linked_pair",
+                "draw.py:6: invalid attribute 'right' on Rect",
             ])
 
     def test_missing_import_detected(self):

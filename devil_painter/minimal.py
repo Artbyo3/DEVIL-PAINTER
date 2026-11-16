@@ -1,9 +1,12 @@
 import colorsys
 from dataclasses import dataclass
+import math
 import numpy
+from . import shelf
 from .blending import BLEND_MODES, CHANNEL, linear_to_srgb
 from .canvas import Layout, Rect
-from .document import RESOLUTIONS, active_layer, editing_mask, set_channels, slot_value
+from .document import PROJECTIONS, RESOLUTIONS, active_layer, editing_mask, set_channels, slot_value, uses_coordinates
+from .library import texture_folder
 from .painting import TOOLS
 from .shell import GAP, distribute, zones
 from .ui_system import MinimalMetrics
@@ -16,14 +19,29 @@ THUMBNAIL = 32
 BLEND_WIDTH = 78
 TOGGLE_WIDTH = 100
 BAR_MENU_WIDTH = 150
+SHELF_TILE = 72
+SHELF_LABEL = 18
+SHELF_GAP = 8
+SCALE_RANGE = (-1.0, 9.0)
+TILING_RANGE = (-3.0, 5.0)
+
+
+def to_slider(value, span):
+    low, high = span
+    return (math.log2(value) - low) / (high - low)
+
+
+def from_slider(position, span):
+    low, high = span
+    return 2 ** (low + position * (high - low))
 
 
 def display_color(color):
     return tuple(float(value) for value in linear_to_srgb(numpy.array(color[:3]))) + (1.0,)
 
 
-def slot_display(slot):
-    value = slot_value(slot)
+def slot_display(slot, second=False):
+    value = slot_value(slot, second)
     rgb = value if len(value) == 3 else value * 3
     return display_color(rgb) if CHANNEL[slot.name].srgb else (*rgb, 1.0)
 
@@ -184,7 +202,7 @@ def fill_layers(layout, state, data, flow):
         editing = state.text is not None and state.text.key == f'NAME_{uid}'
         flow.add(f'ROW_{uid}', row, 'ROW', label=state.text.text if editing else layer.name, text=f'{layer.opacity * 100:.0f}%',
                  active=selected, second=1.0 if selected and target == 'LAYER' else 0.0,
-                 preview=layer.image if layer.kind == 'PAINT' else None, mask=layer.mask,
+                 preview=layer.image if layer.kind == 'PAINT' else source_preview(layer.slots['base_color']), mask=layer.mask,
                  color=slot_display(layer.slots['base_color']),
                  caret=state.text.cursor if editing else -1, tip='Click to select, double-click to rename, right-click for more')
         flow.add(f'EYE_{uid}', Rect(row.x + 4 * s, row.y + 8 * s, 22 * s, row.h - 16 * s), 'ICON',
@@ -206,23 +224,72 @@ def opacity_section(flow, data, layer, w):
     flow.add('OPACITY', Rect(x, y, w, h), 'SLIDER', label='Opacity', value=layer.opacity, text=f'{layer.opacity * 100:.0f}%')
 
 
+def value_control(flow, channel, slot, rect, second):
+    key = ('B.' if second else '.') + channel.key
+    if channel.width == 3:
+        flow.add('SWATCH' + key, rect, 'SWATCH', color=slot_display(slot, second), tip=f'{channel.label} of this layer')
+    else:
+        value = slot.value_b if second else slot.value
+        flow.add('VALUE' + key, rect, 'SLIDER', value=value, text=f'{value:.2f}')
+
+
+def source_preview(slot):
+    if slot.source == 'IMAGE':
+        return slot.image
+    if slot.source == 'PATTERN':
+        return shelf.thumbnail(shelf.Item(slot.pattern, 'PATTERN', slot.pattern))
+    return None
+
+
+def pattern_line(flow, channel, slot, w):
+    s = flow.layout.scale
+    x, y, h = flow.field()
+    third = (w - 8 * s) / 3
+    for index, (name, label, value, text) in enumerate((('SCALE', 'Scale', to_slider(slot.scale, SCALE_RANGE), f'{slot.scale:.1f}'),
+                                                         ('DETAIL', 'Detail', slot.detail, f'{slot.detail:.2f}'),
+                                                         ('CONTRAST', 'Contrast', slot.contrast / .98, f'{slot.contrast:.2f}'))):
+        flow.add(f'{name}.{channel.key}', Rect(x + index * (third + 4 * s), y, third, h), 'SLIDER', label=label, value=value, text=text)
+
+
 def channels_section(flow, data, layer, w):
     s = flow.layout.scale
     toggle, blend = TOGGLE_WIDTH * s, BLEND_WIDTH * s
+    fill = layer.kind == 'FILL'
     for channel in set_channels(data):
         key, slot = channel.key, layer.slots[channel.key]
         x, y, h = flow.field()
         flow.add('USE.' + key, Rect(x, y, toggle, h), 'TOGGLE', label=channel.label, active=slot.enabled,
                  tip=f'Let this layer affect {channel.label.lower()}')
-        value = Rect(x + toggle + 6 * s, y, w - toggle - blend - 12 * s, h)
-        if key == 'base_color' and layer.kind == 'PAINT':
+        left = x + toggle + 6 * s
+        if fill:
+            flow.add('SOURCE.' + key, Rect(left, y, h, h), 'SOURCE', icon='GRID', preview=source_preview(slot),
+                     tip='Use a plain value, a texture, or a pattern')
+            left += h + 6 * s
+        value = Rect(left, y, x + w - blend - 6 * s - left, h)
+        if key == 'base_color' and not fill:
             flow.add('PAINTED', value, 'NOTE', label='Brush color')
-        elif channel.width == 3:
-            flow.add('SWATCH.' + key, value, 'SWATCH', color=slot_display(slot), tip=f'{channel.label} of this layer')
+        elif fill and slot.source == 'IMAGE' and slot.image is not None:
+            flow.add('IMAGE_NAME.' + key, value, 'NOTE', label=slot.image.name)
+        elif fill and slot.source == 'PATTERN':
+            half = (value.w - 4 * s) / 2
+            value_control(flow, channel, slot, Rect(value.x, y, half, h), False)
+            value_control(flow, channel, slot, Rect(value.x + half + 4 * s, y, half, h), True)
         else:
-            flow.add('VALUE.' + key, value, 'SLIDER', value=slot.value, text=f'{slot.value:.2f}')
+            value_control(flow, channel, slot, value, False)
         flow.add('BLEND.' + key, Rect(x + w - blend, y, blend, h), 'DROPDOWN', text=dict(BLEND_MODES)[slot.blend],
                  tip=f'How {channel.label.lower()} mixes with the layers below')
+        if fill and slot.source == 'PATTERN':
+            pattern_line(flow, channel, slot, w)
+
+
+def projection_section(flow, data, layer, w):
+    s = flow.layout.scale
+    x, y, h = flow.field()
+    half = (w - 4 * s) / 2
+    flow.add('PROJECTION', Rect(x, y, half, h), 'DROPDOWN', label='Projection', text=dict((key, label) for key, label, _ in PROJECTIONS)[layer.projection],
+             tip='Map textures and patterns by UV or from three sides without seams')
+    flow.add('TILING', Rect(x + half + 4 * s, y, half, h), 'SLIDER', label='Tiling', value=to_slider(layer.tiling, TILING_RANGE),
+             text=f'{layer.tiling:.2f}x')
 
 
 def layer_mask_section(flow, data, layer, w):
@@ -254,11 +321,17 @@ def two_lines(data):
 
 
 def channel_lines(data):
-    return len(set_channels(data))
+    layer = active_layer(data)
+    return sum(1 + (layer.kind == 'FILL' and layer.slots[channel.key].source == 'PATTERN') for channel in set_channels(data))
 
 
-PROPERTY_SECTIONS = {'LAYER': (Section(one_line, opacity_section), Section(channel_lines, channels_section),
-                               Section(one_line, layer_mask_section)),
+def projection_lines(data):
+    layer = active_layer(data)
+    return int(layer.kind == 'FILL' and uses_coordinates(layer))
+
+
+PROPERTY_SECTIONS = {'LAYER': (Section(one_line, opacity_section), Section(projection_lines, projection_section),
+                               Section(channel_lines, channels_section), Section(one_line, layer_mask_section)),
                      'MASK': (Section(two_lines, mask_section),)}
 
 
@@ -267,7 +340,8 @@ def fill_properties(layout, state, data, flow):
     layer = active_layer(data)
     flow.y -= 4 * s
     for section in PROPERTY_SECTIONS[selection(data)]:
-        section.build(flow, data, layer, flow.viewport.w - 24 * s)
+        if section.lines(data):
+            section.build(flow, data, layer, flow.viewport.w - 24 * s)
 
 
 def properties_panel(layout, state, data):
@@ -294,6 +368,64 @@ def column_layout(layout, state, data, zone):
         top = card.y - GAP * s
         if index == 0 and len(panels) > 1 and all(wants) and sum(wants) > room:
             layout.add('SPLITTER', Rect(zone.x, top, zone.w, GAP * s), 'GRIP', tip='Drag to share space between the panels')
+
+
+def shelf_header(layout, state, zone, header):
+    s = layout.scale
+    x = zone.x + 8 * s
+    for tab, label in shelf.TABS:
+        layout.add('SHELF_TAB.' + tab, Rect(x, header.y, 88 * s, header.h), 'CHIP', label=label, active=state.shelf_open and tab == state.shelf_tab,
+                   tip=f'Browse {label.lower()}')
+        x += 92 * s
+    toggle = Rect(zone.x + zone.w - 30 * s, header.y, 22 * s, header.h)
+    layout.add('SHELF_TOGGLE', toggle, 'ICON', icon='DOWN' if state.shelf_open else 'DISCLOSURE',
+               tip='Hide the shelf' if state.shelf_open else 'Show the shelf')
+    x += 8 * s
+    room = toggle.x - 8 * s - x
+    if state.armed:
+        layout.add('ARM_INFO', Rect(x, header.y, max(0.0, room - 78 * s), header.h), 'NOTE',
+                   label=f'Click a texture or pattern for {CHANNEL[state.armed].label.lower()}')
+        layout.add('CANCEL_ARM', Rect(toggle.x - 78 * s, header.y, 70 * s, header.h), 'CHIP', label='Cancel', tip='Stop picking', shortcut='Esc')
+    elif state.shelf_open and state.shelf_tab == 'TEXTURES':
+        editing = state.text is not None and state.text.key == 'TEXTURE_DIR'
+        field = min(360 * s, max(0.0, room - 78 * s))
+        layout.add('TEXTURE_DIR', Rect(x, header.y, field, header.h), 'FIELD', text=state.text.text if editing else texture_folder(),
+                   caret=state.text.cursor if editing else -1, tip='Folder of textures to browse')
+        layout.add('TEXTURE_BROWSE', Rect(x + field + 6 * s, header.y, 70 * s, header.h), 'CHIP', label='Browse', tip='Pick a texture folder')
+
+
+def shelf_layout(layout, state, zone):
+    s = layout.scale
+    layout.cards.append((zone, ''))
+    header = Rect(zone.x, zone.top - 30 * s, zone.w, 22 * s)
+    shelf_header(layout, state, zone, header)
+    if not state.shelf_open:
+        return
+    viewport = Rect(zone.x, zone.y + 4 * s, zone.w, max(0.0, header.y - 6 * s - zone.y - 4 * s))
+    entries = shelf.items(state.shelf_tab)
+    if not entries:
+        empty = 'Pick a folder of textures to browse them here.' if state.shelf_tab == 'TEXTURES' else 'Save a fill layer as a material to see it here.'
+        layout.add('SHELF_EMPTY', Rect(zone.x + 16 * s, viewport.top - 30 * s, viewport.w - 32 * s, 22 * s), 'NOTE', label=empty)
+        return
+    tile_w, tile_h = (SHELF_TILE + SHELF_GAP) * s, (SHELF_TILE + SHELF_LABEL + SHELF_GAP) * s
+    columns = max(1, int((viewport.w - 2 * SHELF_GAP * s) // tile_w))
+    body = math.ceil(len(entries) / columns) * tile_h + SHELF_GAP * s
+    overflow = max(0.0, body - viewport.h)
+    scroll = min(max(0.0, state.scroll.get('SHELF', 0.0)), overflow)
+    state.scroll['SHELF'] = scroll
+    if overflow > 0:
+        layout.scroll_areas['SHELF'] = (viewport, overflow)
+        layout.add('SCROLL_SHELF', Rect(zone.x + zone.w - 6 * s, viewport.y + 2 * s, 3 * s, viewport.h - 4 * s), 'SCROLLBAR',
+                   value=scroll / overflow, second=viewport.h / body)
+    for index, item in enumerate(entries):
+        row, column = divmod(index, columns)
+        top = viewport.top + scroll - SHELF_GAP * s - row * tile_h
+        rect = Rect(viewport.x + SHELF_GAP * s + column * tile_w, top - tile_h + SHELF_GAP * s, SHELF_TILE * s, tile_h - SHELF_GAP * s)
+        if rect.top < viewport.y or rect.y > viewport.top:
+            continue
+        tip = 'Click to add as a fill layer' if not state.armed or item.kind == 'MATERIAL' else f'Click to use for {CHANNEL[state.armed].label.lower()}'
+        layout.add(f'ITEM.{index}', rect, 'TILE', label=item.label, preview=shelf.thumbnail(item), clip=viewport,
+                   tip=tip + ('. Right-click to delete' if item.user_index >= 0 else ''))
 
 
 def place_popover(bounds, anchor, w, h, s):
@@ -347,13 +479,14 @@ def export_popover(layout, state, bounds, data, directory):
 
 
 def painter_layout(bounds, scale, state, data, obj_name, tool, brush, directory):
-    layout = Layout(scale, MinimalMetrics.resolve(), zones(bounds, scale, state.column_width))
+    layout = Layout(scale, MinimalMetrics.resolve(), zones(bounds, scale, state.column_width, state.shelf_open))
     if data is None:
         start_layout(layout, bounds, obj_name, state.resolution)
     else:
         workspace_bar(layout, layout.zones.bar, data, obj_name)
         tool_strip(layout, layout.zones.strip, tool, brush)
         dock_layout(layout, layout.zones.dock, tool)
+        shelf_layout(layout, state, layout.zones.shelf)
         column_layout(layout, state, data, layout.zones.column)
     if state.popover is not None:
         layout.popover_start = len(layout.controls)

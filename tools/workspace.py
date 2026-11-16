@@ -40,7 +40,10 @@ def prepare_scratch():
 def child_environment():
     temporary = prepare_scratch() / 'blender-temp'
     temporary.mkdir(exist_ok=True)
-    return dict(os.environ, PYTHONDONTWRITEBYTECODE='1', TEMP=str(temporary), TMP=str(temporary), TMPDIR=str(temporary))
+    config = prepare_scratch() / 'blender-config'
+    config.mkdir(exist_ok=True)
+    return dict(os.environ, PYTHONDONTWRITEBYTECODE='1', TEMP=str(temporary), TMP=str(temporary), TMPDIR=str(temporary),
+                BLENDER_USER_CONFIG=str(config))
 
 
 def clean_scratch():

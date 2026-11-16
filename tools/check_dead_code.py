@@ -97,6 +97,18 @@ def find_missing_imports(root):
     return violations
 
 
+def class_members(path, name):
+    tree = ast.parse(path.read_text(encoding='utf-8-sig'))
+    node = next(item for item in tree.body if isinstance(item, ast.ClassDef) and item.name == name)
+    members = set()
+    for item in node.body:
+        if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name):
+            members.add(item.target.id)
+        elif isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            members.add(item.name)
+    return members
+
+
 def find_draw_integrity_violations(root):
     pkg = root / 'devil_painter'
     draw_files = [pkg / 'draw.py', pkg / 'minimal.py', pkg / 'ui.py']
@@ -104,7 +116,7 @@ def find_draw_integrity_violations(root):
         'EdgeRef': {'pattern', 'start', 'end', 't0', 't1', 'path', 'full'},
         'Seam': {'a', 'b', 'reverse', 'id', 'chain_a', 'chain_b', 'shrink', 'side'},
         'Anchor': {'x', 'y', 'kind', 'id', 'pattern', 'binding', 'target'},
-        'Rect': {'x', 'y', 'w', 'h', 'contains', 'right', 'bottom'},
+        'Rect': class_members(pkg / 'canvas.py', 'Rect'),
     }
     known_dicts = {
         'linked_pair': {'members', 'enabled', 'transform', 'mapping'},

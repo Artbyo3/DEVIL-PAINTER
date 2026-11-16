@@ -9,6 +9,8 @@ DOCK_WIDTH = 40
 MIN_COLUMN = 260
 MAX_COLUMN = 480
 MIN_SPLIT = .15
+SHELF_OPEN = 196
+SHELF_CLOSED = 34
 
 
 @dataclass(frozen=True)
@@ -17,6 +19,7 @@ class Zones:
     strip: Rect
     dock: Rect
     stage: Rect
+    shelf: Rect
     column: Rect
 
 
@@ -28,7 +31,7 @@ def clamp_split(split):
     return max(MIN_SPLIT, min(1 - MIN_SPLIT, split))
 
 
-def zones(bounds, s, column_width):
+def zones(bounds, s, column_width, shelf_open=True):
     margin, gap = MARGIN * s, GAP * s
     left, bottom = bounds.x + margin, bounds.y + margin
     bar = Rect(left, bounds.top - margin - BAR_HEIGHT * s, max(0.0, bounds.w - 2 * margin), BAR_HEIGHT * s)
@@ -37,8 +40,10 @@ def zones(bounds, s, column_width):
     strip = Rect(left, bar.y - gap - STRIP_HEIGHT * s, max(0.0, column.x - gap - left), STRIP_HEIGHT * s)
     dock = Rect(left, bottom, DOCK_WIDTH * s, max(0.0, strip.y - gap - bottom))
     stage_x = dock.x + dock.w + gap
-    stage = Rect(stage_x, bottom, max(0.0, column.x - gap - stage_x), dock.h)
-    return Zones(bar, strip, dock, stage, column)
+    width = max(0.0, column.x - gap - stage_x)
+    shelf = Rect(stage_x, bottom, width, min((SHELF_OPEN if shelf_open else SHELF_CLOSED) * s, dock.h / 2))
+    stage = Rect(stage_x, shelf.top + gap, width, max(0.0, dock.top - shelf.top - gap))
+    return Zones(bar, strip, dock, stage, shelf, column)
 
 
 def distribute(wants, room, weights):

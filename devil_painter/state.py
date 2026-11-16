@@ -28,3 +28,6 @@ class WorkspaceState:
     hsv: tuple = (0.0, 0.0, 0.0)
     column_width: float = 330.0
     split: float = .5
+    shelf_open: bool = True
+    shelf_tab: str = 'MATERIALS'
+    armed: str = ''

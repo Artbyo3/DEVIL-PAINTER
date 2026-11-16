@@ -38,7 +38,10 @@ Blender's native painting.
   - Paint layers: one RGBA image. Painted color is the base color and painted
     alpha is the coverage of every other enabled channel, so one stroke paints
     color, roughness, metallic, height, and the rest together.
-  - Fill layers: a constant value per channel.
+  - Fill layers: each channel takes a plain value, an image texture, or a
+    procedural pattern (noise, grunge, cells, cracks, wood, stripes, bricks,
+    checker) with two values, scale, detail, and contrast. Textures and
+    patterns project by UV or tri-planar, with tiling.
   - Masks: white or black, painted with the same brushes. Painted alpha reveals
     the layer.
 - Tools: Paint, Erase, Fill, Blur, Smear, and Clone from Blender's essential
@@ -64,14 +67,27 @@ Blender's native painting.
     Layers rename inline. Rows outside the scrolled view are not built. Blender's own header, tool
   header, toolbar, brush shelf, and navigation gizmo are hidden while the
   workspace is open. The only native Blender UI is the folder picker behind
-  Browse in the export card.
+  Browse in the export card and in the shelf's Textures tab.
+- Shelf: a collapsible zone under the stage with Materials, Textures, and
+  Patterns tabs of rendered thumbnails. Clicking a material adds it as a fill
+  layer. Built-in materials ship with the add-on, and any fill layer can be
+  saved as a user material from its context menu. The Textures tab browses a
+  texture folder (typed or picked with the OS folder picker). PBR texture sets
+  in that folder (color, roughness, metallic, normal, height, emission, opacity
+  maps named by suffix) appear as materials. A channel's source button picks a
+  texture or pattern from the shelf for that channel. Material and pattern
+  thumbnails are Cycles renders cached in Blender's user config folder with
+  the user library.
 - Live preview: the stack compiles into the material's node tree. Normal feeds
   a normal map, height feeds a bump on top of it, emission and opacity feed the
   shader's emission and alpha. Value edits update node inputs without
   recompiling. Structural edits rebuild the tree. The View menu shows the full
   material or any one channel on its own.
 - Export: one PNG per texture set channel (base color and emission in sRGB,
-  the rest non-color) composited with the same math as the preview.
+  the rest non-color), baked from the live material with Blender's bake
+  engine so textures, patterns, and tri-planar projection match the preview.
+  Empty UV space gets each channel's default value, with 16 px of padding
+  around UV islands.
 - Undo and redo, from the keyboard or the dock, keep the workspace open.
 - Layer rows show thumbnails: the painted image over a checkerboard or the
   fill color, plus a grayscale mask thumbnail when the layer has a mask.
@@ -112,7 +128,7 @@ Planned stages, each shipped as a tested increment:
   position, and baking those maps.
 - Multiple texture sets per object, UDIMs, and keeping other materials on a
   multi-material mesh. Start painting replaces the mesh's material slots.
-- Smart materials, presets, and a material library.
+- Smart materials that save a whole layer stack with masks.
 - A 2D texture view inside the workspace.
 - Scrolling for very long layer stacks; rows that do not fit are hidden.
 
@@ -126,8 +142,9 @@ Planned stages, each shipped as a tested increment:
    hygiene (`tools/check_public.py`) from the first commit.
 3. Package reproducible extension archives in `dist/` via `tools/build.py` and
    verify them with Blender's extension validator and headless smoke test.
-4. The layer stack is the source of truth. The material node tree and exported
-   PNGs are downstream outputs built from it with one shared blending model.
+4. The layer stack is the source of truth. The material node tree is built from
+   it, and exported PNGs are baked from that tree, so preview and export share
+   one blending model.
 
 ## MVP acceptance examples
 

@@ -18,12 +18,11 @@ vec3 to_display(vec3 linear)
 void main()
 {
     vec4 color = texture(image, uvInterp);
-    if (mode == 1) {
-        fragColor = vec4(vec3(color.a), 1.0);
+    vec3 shown = mode == 1 ? vec3(color.a) : to_display(color.rgb);
+    if (srgbTarget) {
+        shown = mix(shown / 12.92, pow((shown + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), shown));
     }
-    else {
-        fragColor = vec4(to_display(color.rgb), color.a);
-    }
+    fragColor = vec4(shown, mode == 1 ? 1.0 : color.a);
 }
 '''
 _shader = []
@@ -36,6 +35,7 @@ def preview_shader():
         info = gpu.types.GPUShaderCreateInfo()
         info.push_constant('MAT4', 'ModelViewProjectionMatrix')
         info.push_constant('INT', 'mode')
+        info.push_constant('BOOL', 'srgbTarget')
         info.sampler(0, 'FLOAT_2D', 'image')
         info.vertex_in(0, 'VEC2', 'pos')
         info.vertex_in(1, 'VEC2', 'uv')
@@ -55,5 +55,5 @@ def draw_image(image, rect, mask):
     gpu.state.blend_set('ALPHA')
     shader.bind()
     shader.uniform_int('mode', 1 if mask else 0)
-    shader.uniform_sampler('image', gpu.texture.from_image(image))
+    shader.uniform_sampler('image', image if isinstance(image, gpu.types.GPUTexture) else gpu.texture.from_image(image))
     batch.draw(shader)

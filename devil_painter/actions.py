@@ -1,12 +1,12 @@
 import bpy
 import numpy
-from . import compositing, painting
+from . import baking, compositing, library, painting
 from .blending import BLEND_MODES, CHANNEL
-from .document import active_layer, add_set_channels, add_slots, find_layer, layer_index, set_slot_value
+from .procedural import PATTERN
+from .document import SLOT_FIELDS, active_layer, add_set_channels, add_slots, find_layer, layer_index, set_slot_value
 
 KIND_NAMES = {'PAINT': 'Paint', 'FILL': 'Fill'}
-LAYER_FIELDS = ('kind', 'visible', 'opacity')
-SLOT_FIELDS = ('enabled', 'color', 'value', 'blend')
+LAYER_FIELDS = ('kind', 'visible', 'opacity', 'projection', 'tiling')
 
 
 def image_for(obj, data, label, opaque):
@@ -84,6 +84,14 @@ def add_layer(context, obj, data, kind):
     return refresh(context, obj, data, f'Added {layer.name}.')
 
 
+def add_material(context, obj, data, definition):
+    layer = new_layer(data, 'FILL')
+    layer.name = definition['name']
+    add_slots(layer)
+    library.apply_definition(layer, definition)
+    return refresh(context, obj, data, f'Added {layer.name}.')
+
+
 def delete_layer(context, obj, data):
     index = layer_index(data, data.active_uid)
     if index < 0:
@@ -140,7 +148,7 @@ def duplicate_layer(context, obj, data):
         return 'No layer to duplicate.'
     name = source.name
     values = {key: getattr(source, key) for key in LAYER_FIELDS}
-    slots = [(slot.name, {key: getattr(slot, key) for key in SLOT_FIELDS}) for slot in source.slots]
+    slots = [(slot.name, {key: getattr(slot, key) for key in SLOT_FIELDS + ('image',)}) for slot in source.slots]
     images = {key: getattr(source, key) for key in ('image', 'mask')}
     layer = new_layer(data, values['kind'])
     for key, value in values.items():
@@ -172,9 +180,46 @@ def set_opacity(context, obj, data, value):
     compositing.update_values(data)
 
 
-def set_channel_value(context, obj, data, key, value):
-    set_slot_value(active_layer(data).slots[key], tuple(max(0.0, min(1.0, part)) for part in value))
+def set_channel_value(context, obj, data, key, value, second=False):
+    set_slot_value(active_layer(data).slots[key], tuple(max(0.0, min(1.0, part)) for part in value), second)
     compositing.update_values(data)
+
+
+def set_slot_field(context, obj, data, key, field, value):
+    setattr(active_layer(data).slots[key], field, value)
+    compositing.update_values(data)
+
+
+def set_tiling(context, obj, data, value):
+    active_layer(data).tiling = value
+    compositing.update_values(data)
+
+
+def set_projection(context, obj, data, projection):
+    layer = active_layer(data)
+    layer.projection = projection
+    return refresh(context, obj, data, f'{layer.name} projects {"tri-planar" if projection == "TRIPLANAR" else "by UV"}.')
+
+
+def use_value(context, obj, data, key):
+    layer = active_layer(data)
+    layer.slots[key].source = 'VALUE'
+    return refresh(context, obj, data, f'{CHANNEL[key].label} of {layer.name} is a plain value.')
+
+
+def assign_image(context, obj, data, key, image):
+    layer = active_layer(data)
+    slot = layer.slots[key]
+    slot.enabled, slot.source, slot.image = True, 'IMAGE', image
+    compositing.assign_image_colorspace(image, CHANNEL[key])
+    return refresh(context, obj, data, f'{image.name} drives {CHANNEL[key].label.lower()} of {layer.name}.')
+
+
+def assign_pattern(context, obj, data, key, pattern):
+    layer = active_layer(data)
+    slot = layer.slots[key]
+    slot.enabled, slot.source, slot.pattern = True, 'PATTERN', pattern
+    return refresh(context, obj, data, f'{PATTERN[pattern].label} drives {CHANNEL[key].label.lower()} of {layer.name}.')
 
 
 def commit_value(context, obj, data, label):
@@ -218,5 +263,5 @@ def set_target(context, obj, data, target):
 
 
 def export(context, obj, data, directory):
-    written = compositing.export(data, directory, bpy.path.clean_name(obj.name))
+    written = baking.export(context, obj, data, directory, bpy.path.clean_name(obj.name))
     return f'Exported {len(written)} textures to {directory}.'

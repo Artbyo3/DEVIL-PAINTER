@@ -4,12 +4,12 @@ import traceback
 from pathlib import Path
 import bpy
 import numpy
-from . import actions, painting
+from . import actions, library, painting, shelf, thumbnails
 from .blending import BLEND_MODES, CHANNEL, CHANNELS, linear_to_srgb, srgb_to_linear
 from .canvas import Rect
 from .document import active_layer, set_channels, slot_value, texture_set
 from .draw import Renderer
-from .minimal import MAX_BRUSH_SIZE, painter_layout
+from .minimal import MAX_BRUSH_SIZE, SCALE_RANGE, TILING_RANGE, from_slider, painter_layout
 from .shell import MARGIN, clamp_column, clamp_split
 from .state import Popover, TextEdit, WorkspaceState
 
@@ -19,6 +19,7 @@ SCROLL_STEP = 40
 POINTER_TOKENS = ('MOUSE', 'TRACKPAD', 'NDOF', 'PEN', 'ERASER')
 HIDDEN_REGIONS = ('show_region_header', 'show_region_tool_header', 'show_region_toolbar', 'show_region_asset_shelf', 'show_gizmo_navigate')
 MOVES = {'MOVE_UP': 1, 'MOVE_DOWN': -1}
+PROJECTION_LABELS = {'UV': 'UV', 'TRIPLANAR': 'Tri-planar'}
 _active = None
 
 
@@ -136,6 +137,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         if context.area != self._area or context.region != self._region or context.window != self._window:
             return
         try:
+            thumbnails.begin_frame()
             self.workspace = self.make_layout()
             self.renderer.draw(self)
         except Exception as exc:
@@ -161,7 +163,10 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.cleanup()
             return {'FINISHED'}
         if event.type == 'TIMER':
-            if time.monotonic() < self.toast_until + TIMER_INTERVAL:
+            if thumbnails.waiting():
+                thumbnails.render_next()
+                self._area.tag_redraw()
+            elif time.monotonic() < self.toast_until + TIMER_INTERVAL:
                 self._area.tag_redraw()
             return {'PASS_THROUGH'}
         self.workspace = self.make_layout()
@@ -194,6 +199,10 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
                     return {'PASS_THROUGH'}
                 if event.type == 'LEFTMOUSE':
                     return {'RUNNING_MODAL'}
+        if press and event.type == 'ESC' and self.state.armed:
+            self.state.armed = ''
+            self._area.tag_redraw()
+            return {'RUNNING_MODAL'}
         if event.type in {'WHEELUPMOUSE', 'WHEELDOWNMOUSE'} and over:
             key = layout.scroll_area(*self.pointer)
             if key is not None:
@@ -207,6 +216,11 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             obj, data = self.painted()
             actions.select_layer(context, obj, data, control.key.removeprefix('ROW_'))
             self.open_layer_menu(control.rect, data)
+            return {'RUNNING_MODAL'}
+        if control is not None and press and event.type == 'RIGHTMOUSE' and control.key.startswith('ITEM.'):
+            item = self.shelf_item(control.key)
+            if item.user_index >= 0:
+                self.state.popover = Popover('MENU', control.rect, items=((f'DELETE_MATERIAL.{item.user_index}', 'Delete material', False),))
             return {'RUNNING_MODAL'}
         if control is not None and event.type == 'LEFTMOUSE' and event.value in {'PRESS', 'DOUBLE_CLICK'}:
             try:
@@ -226,6 +240,8 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             items += [('ADD_MASK_WHITE', 'Add white mask', False), ('ADD_MASK_BLACK', 'Add black mask', False)]
         else:
             items.append(('REMOVE_MASK', 'Remove mask', False))
+        if layer.kind == 'FILL':
+            items.append(('SAVE_MATERIAL', 'Save as material', False))
         items += [('MOVE_UP', 'Move up', False), ('MOVE_DOWN', 'Move down', False), ('DELETE', 'Delete', False)]
         self.state.popover = Popover('MENU', anchor, items=tuple(items))
 
@@ -244,6 +260,8 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.apply_color(context, commit=True)
         elif edit.key == 'EXPORT_DIR' and data is not None:
             data.export_directory = edit.text.strip()
+        elif edit.key == 'TEXTURE_DIR':
+            library.set_texture_folder(edit.text)
 
     def text_event(self, context, event, pointer_event):
         edit = self.state.text
@@ -318,11 +336,21 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             actions.set_opacity(context, obj, data, x)
             if release:
                 self.message = actions.commit_value(context, obj, data, 'Opacity')
-        elif key.startswith('VALUE.') and data is not None:
-            channel = key.removeprefix('VALUE.')
-            actions.set_channel_value(context, obj, data, channel, (x,))
+        elif key.startswith(('VALUE.', 'VALUEB.')) and data is not None:
+            kind, channel = key.split('.')
+            actions.set_channel_value(context, obj, data, channel, (x,), second=kind == 'VALUEB')
             if release:
                 self.message = actions.commit_value(context, obj, data, CHANNEL[channel].label)
+        elif key.startswith(('SCALE.', 'DETAIL.', 'CONTRAST.')) and data is not None:
+            kind, channel = key.split('.')
+            value = {'SCALE': from_slider(x, SCALE_RANGE), 'DETAIL': x, 'CONTRAST': x * .98}[kind]
+            actions.set_slot_field(context, obj, data, channel, kind.lower(), value)
+            if release:
+                self.message = actions.commit_value(context, obj, data, f'{CHANNEL[channel].label} {kind.lower()}')
+        elif key == 'TILING' and data is not None:
+            actions.set_tiling(context, obj, data, from_slider(x, TILING_RANGE))
+            if release:
+                self.message = actions.commit_value(context, obj, data, 'Tiling')
         elif key == 'COLOR_SV':
             self.state.hsv = (self.state.hsv[0], x, y)
             self.apply_color(context, release)
@@ -337,18 +365,20 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         if target == 'BRUSH':
             painting.set_brush_value(self.scene, 'color', display)
         elif data is not None:
-            value = srgb_to_linear(numpy.array(display)) if CHANNEL[target].srgb else display
-            actions.set_channel_value(context, obj, data, target, tuple(float(part) for part in value))
+            channel, _, second = target.partition(':')
+            value = srgb_to_linear(numpy.array(display)) if CHANNEL[channel].srgb else display
+            actions.set_channel_value(context, obj, data, channel, tuple(float(part) for part in value), second=bool(second))
             if commit:
-                self.message = actions.commit_value(context, obj, data, CHANNEL[target].label)
+                self.message = actions.commit_value(context, obj, data, CHANNEL[channel].label)
 
     def open_color(self, control, target):
         obj, data = self.painted()
         if target == 'BRUSH':
             display = painting.brush_value(self.scene, 'color')
         else:
-            value = numpy.array(slot_value(active_layer(data).slots[target]))
-            display = linear_to_srgb(value) if CHANNEL[target].srgb else value
+            channel, _, second = target.partition(':')
+            value = numpy.array(slot_value(active_layer(data).slots[channel], bool(second)))
+            display = linear_to_srgb(value) if CHANNEL[channel].srgb else value
         self.state.hsv = colorsys.rgb_to_hsv(*(float(value) for value in display))
         self.state.popover = Popover('COLOR', control.rect, target=target)
 
@@ -383,6 +413,47 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.open_color(control, 'BRUSH')
         elif key.startswith('SWATCH.'):
             self.open_color(control, key.removeprefix('SWATCH.'))
+        elif key.startswith('SWATCHB.'):
+            self.open_color(control, key.removeprefix('SWATCHB.') + ':b')
+        elif key.startswith('SOURCE.'):
+            channel = key.removeprefix('SOURCE.')
+            source = active_layer(data).slots[channel].source
+            self.state.popover = Popover('MENU', control.rect, items=((f'USE_VALUE.{channel}', 'Plain value', source == 'VALUE'),
+                                                                      (f'PICK_TEXTURE.{channel}', 'Texture from the shelf', source == 'IMAGE'),
+                                                                      (f'PICK_PATTERN.{channel}', 'Pattern from the shelf', source == 'PATTERN')))
+        elif key.startswith('USE_VALUE.'):
+            self.message = actions.use_value(context, obj, data, key.removeprefix('USE_VALUE.'))
+        elif key.startswith(('PICK_TEXTURE.', 'PICK_PATTERN.')):
+            kind, channel = key.split('.')
+            self.state.armed = channel
+            self.state.shelf_open = True
+            self.state.shelf_tab = 'TEXTURES' if kind == 'PICK_TEXTURE' else 'PATTERNS'
+            self.message = f'Click a {"texture" if kind == "PICK_TEXTURE" else "pattern"} in the shelf for {CHANNEL[channel].label.lower()}.'
+        elif key == 'CANCEL_ARM':
+            self.state.armed = ''
+        elif key.startswith('SHELF_TAB.'):
+            self.state.shelf_tab = key.removeprefix('SHELF_TAB.')
+            self.state.shelf_open = True
+            self.state.scroll['SHELF'] = 0.0
+            library.rescan()
+        elif key == 'SHELF_TOGGLE':
+            self.state.shelf_open = not self.state.shelf_open
+        elif key == 'TEXTURE_DIR':
+            self.begin_text(key, control.text)
+        elif key == 'TEXTURE_BROWSE':
+            bpy.ops.devil_painter.choose_texture_folder('INVOKE_DEFAULT')
+        elif key.startswith('ITEM.'):
+            self.message = self.use_shelf_item(context, obj, data, self.shelf_item(key))
+        elif key.startswith('DELETE_MATERIAL.'):
+            self.message = f'Deleted {library.remove_user_material(int(key.removeprefix("DELETE_MATERIAL.")))}.'
+        elif key == 'SAVE_MATERIAL':
+            self.message = f'Saved {library.add_user_material(library.capture(active_layer(data)))} to the material shelf.'
+        elif key == 'PROJECTION':
+            current = active_layer(data).projection
+            self.state.popover = Popover('MENU', control.rect, items=tuple((f'SET_PROJECTION.{mode}', label, mode == current)
+                                                                          for mode, label in PROJECTION_LABELS.items()))
+        elif key.startswith('SET_PROJECTION.'):
+            self.message = actions.set_projection(context, obj, data, key.removeprefix('SET_PROJECTION.'))
         elif key == 'COLOR_HEX':
             self.begin_text(key, control.text)
         elif key == 'EXPORT':
@@ -445,6 +516,24 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         elif key in {'SELECT_LAYER', 'SELECT_MASK'}:
             self.message = actions.set_target(context, obj, data, 'MASK' if key == 'SELECT_MASK' else 'CONTENT')
         return None
+
+    def shelf_item(self, key):
+        return shelf.items(self.state.shelf_tab)[int(key.removeprefix('ITEM.'))]
+
+    def use_shelf_item(self, context, obj, data, item):
+        armed = self.state.armed
+        self.state.armed = ''
+        layer = active_layer(data)
+        target = armed if armed and layer is not None and layer.kind == 'FILL' else ''
+        if item.kind == 'TEXTURE' and target:
+            return actions.assign_image(context, obj, data, target, library.load_image(item.payload, CHANNEL[target]))
+        if item.kind == 'PATTERN' and target:
+            return actions.assign_pattern(context, obj, data, target, item.payload)
+        if item.kind == 'TEXTURE':
+            return actions.add_material(context, obj, data, shelf.texture_definition(item.payload))
+        if item.kind == 'PATTERN':
+            return actions.add_material(context, obj, data, shelf.pattern_definition(item.payload))
+        return actions.add_material(context, obj, data, item.payload)
 
     def cleanup(self):
         global _active

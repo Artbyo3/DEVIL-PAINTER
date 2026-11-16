@@ -364,6 +364,29 @@ class Renderer:
         if hover and not control.active:
             self.round_rect_outline(control.rect, ACCENT_BORDER, radius=0)
 
+    def tile(self, control, hover, metrics):
+        rect, s = control.rect, self.s
+        image = Rect(rect.x, rect.top - rect.w, rect.w, rect.w)
+        if hover:
+            self.round_rect(Rect(rect.x - 3 * s, rect.y - 2 * s, rect.w + 6 * s, rect.h + 4 * s), BG_ELEVATED, radius=metrics.regular)
+        if control.preview is None:
+            self.round_rect(image, BG_WELL, radius=metrics.regular)
+        else:
+            self.checker(image)
+            draw_image(control.preview, image, False)
+        self.round_rect_outline(image, ACCENT_BORDER if hover else SURFACE_OUTLINE, radius=0)
+        self.text(rect.x + rect.w / 2, rect.y + 3 * s, control.label, 9, TEXT_PRIMARY if hover else TEXT_SECONDARY, True, max_width=rect.w)
+
+    def source(self, control, hover, metrics):
+        rect = control.rect
+        if control.preview is None:
+            self.round_rect(rect, BG_ELEVATED if hover else BG_WELL, radius=metrics.regular)
+            self.draw_icon(control.icon, rect.x + rect.w / 2, rect.y + rect.h / 2, 12, TEXT_PRIMARY if hover else TEXT_SECONDARY)
+        else:
+            self.checker(rect)
+            draw_image(control.preview, rect, False)
+        self.round_rect_outline(rect, ACCENT_BORDER if hover else SURFACE_OUTLINE, radius=0)
+
     def grip(self, control, hover, metrics):
         if not hover:
             return
@@ -448,4 +471,4 @@ DRAWERS = {'TOOL': Renderer.tool, 'ICON': Renderer.icon_button, 'CHIP': Renderer
            'SLIDER': Renderer.slider, 'SWATCH': Renderer.swatch, 'TOGGLE': Renderer.toggle, 'ROW': Renderer.row, 'NOTE': Renderer.note,
            'HEADER': Renderer.header, 'DROPDOWN': Renderer.dropdown, 'FIELD': Renderer.field, 'MENUITEM': Renderer.menu_item,
            'SV': Renderer.saturation_value, 'HUE': Renderer.hue, 'SCROLLBAR': Renderer.scrollbar, 'THUMB': Renderer.thumb,
-           'GRIP': Renderer.grip}
+           'GRIP': Renderer.grip, 'TILE': Renderer.tile, 'SOURCE': Renderer.source}

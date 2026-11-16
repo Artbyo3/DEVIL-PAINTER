@@ -1,6 +1,6 @@
 import bpy
 from bpy.app.handlers import persistent
-from . import document, operators
+from . import document, operators, thumbnails
 from .editor import DEVIL_PAINTER_OT_editor, close_active
 
 
@@ -56,4 +56,5 @@ def unregister():
     KEYMAPS.clear()
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)
+    thumbnails.release()
     document.unregister()
