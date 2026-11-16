@@ -104,6 +104,14 @@ Blender's native painting.
   texture or pattern from the shelf for that channel. Material and pattern
   thumbnails are Cycles renders cached in Blender's user config folder with
   the user library.
+- Mesh maps: Bake maps in the workspace bar opens a bake card. It bakes
+  ambient occlusion, curvature (bevel normal against the true normal, signed
+  by local occlusion), thickness (inverted inside occlusion), position
+  (normalized to the bounding box), world-space normal, and ID (a color per UV
+  island) from the mesh itself with Cycles, plus a tangent-space normal map
+  from a chosen high-poly source. Samples are adjustable. Baked maps appear as
+  thumbnails in the Mesh maps panel, and clicking one, or picking it in the
+  View menu, shows it on the model.
 - Live preview: the stack compiles into the material's node tree. Normal feeds
   a normal map, height feeds a bump on top of it, emission and opacity feed the
   shader's emission and alpha. Value edits update node inputs without
@@ -150,8 +158,7 @@ Planned stages, each shipped as a tested increment:
 ## Not in the MVP
 
 - Painting normal detail with the brush (normal is a fill value per layer).
-- Generators and smart masks driven by curvature, ambient occlusion, or
-  position, and baking those maps.
+- Generators and smart masks driven by the baked maps.
 - Multiple texture sets per object, UDIMs, and keeping other materials on a
   multi-material mesh. Start painting replaces the mesh's material slots.
 - Smart materials that save a whole layer stack with masks.

@@ -305,9 +305,28 @@ def solo_channel(data):
     return next((channel for channel in set_channels(data) if channel.key == data.solo), None)
 
 
+def show_map(tree, image):
+    texture = tree.nodes.new('ShaderNodeTexImage')
+    texture.image = image
+    gamma = tree.nodes.new('ShaderNodeGamma')
+    gamma.inputs['Gamma'].default_value = DISPLAY_GAMMA
+    emission = tree.nodes.new('ShaderNodeEmission')
+    tree.links.new(texture.outputs['Color'], gamma.inputs['Color'])
+    tree.links.new(gamma.outputs['Color'], emission.inputs['Color'])
+    output = next(node for node in tree.nodes if node.type == 'OUTPUT_MATERIAL')
+    tree.links.new(emission.outputs[0], output.inputs['Surface'])
+
+
+def viewed_map(data):
+    item = data.maps.get(data.solo.removeprefix('map:')) if data.solo.startswith('map:') else None
+    return item.image if item is not None else None
+
+
 def rebuild(data, solo=None, raw=False):
     material = data.material
     build_tree(material.node_tree, set_channels(data), list(data.layers), solo or solo_channel(data), raw, None if raw else stroke_link(data))
+    if not raw and solo is None and viewed_map(data) is not None:
+        show_map(material.node_tree, viewed_map(data))
     material[SIGNATURE_KEY] = '' if raw else signature(data)
 
 

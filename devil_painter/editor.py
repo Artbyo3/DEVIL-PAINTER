@@ -9,6 +9,7 @@ from .blending import BLEND_MODES, CHANNEL, CHANNELS, linear_to_srgb, srgb_to_li
 from .canvas import Rect
 from .document import active_layer, set_channels, slot_value, texture_set
 from .draw import Renderer
+from .meshmaps import MESH_MAPS
 from .minimal import BRUSH_SLIDERS, BRUSH_TOGGLES, MAX_BRUSH_SIZE, REPLACE_TARGET, SCALE_RANGE, TILING_RANGE, from_slider, painter_layout
 from .shell import MARGIN, clamp_column, clamp_split
 from .state import Popover, TextEdit, WorkspaceState
@@ -388,6 +389,8 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         elif key in BRUSH_RANGES and data is not None:
             setattr(data, BRUSH_RANGES[key][0], max(BRUSH_RANGES[key][2], x * BRUSH_RANGES[key][1]))
             self.brush_changed(context, data)
+        elif key == 'BAKE_SAMPLES' and data is not None:
+            data.bake_samples = max(1, round(x * 128))
         elif key.startswith('BRUSHVAL.') and data is not None:
             data.brush_slots[key.removeprefix('BRUSHVAL.')].value = x
             self.brush_changed(context, data)
@@ -491,6 +494,21 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         elif key == 'REDO':
             self.history_step(context, redo=True)
             bpy.ops.ed.redo()
+        elif key in {'BAKE', 'OPEN_BAKE'}:
+            self.state.popover = None if self.state.popover is not None and self.state.popover.kind == 'BAKE' else Popover('BAKE', control.rect)
+        elif key.startswith('BAKEMAP.'):
+            self.state.bake_keys ^= {key.removeprefix('BAKEMAP.')}
+        elif key == 'BAKE_SOURCE':
+            meshes = [item.name for item in context.view_layer.objects if item.type == 'MESH' and item != obj]
+            self.state.popover = Popover('MENU', control.rect, items=(('SET_SOURCE.', 'None', data.bake_source is None),) + tuple(
+                (f'SET_SOURCE.{name}', name, data.bake_source is not None and data.bake_source.name == name) for name in meshes))
+        elif key.startswith('SET_SOURCE.'):
+            self.message = actions.set_bake_source(context, obj, data, key.removeprefix('SET_SOURCE.'))
+        elif key == 'BAKE_RUN':
+            self.state.popover = None
+            self.message = actions.bake_mesh_maps(context, obj, data, [item.key for item in MESH_MAPS if item.key in self.state.bake_keys])
+        elif key.startswith('MAP.'):
+            self.message = actions.set_solo(context, obj, data, 'map:' + key.removeprefix('MAP.'))
         elif key == 'BRUSH_CARD':
             self.state.popover = None if self.state.popover is not None and self.state.popover.kind == 'BRUSH' else Popover('BRUSH', control.rect)
         elif key in BRUSH_FLAGS:
@@ -591,6 +609,8 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         elif key == 'VIEW':
             items = [('SOLO.', 'Material', not data.solo)] + [(f'SOLO.{channel.key}', channel.label, data.solo == channel.key)
                                                              for channel in set_channels(data)]
+            items += [(f'SOLO.map:{item.key}', item.label + ' map', data.solo == 'map:' + item.key) for item in MESH_MAPS
+                      if item.key in data.maps and data.maps[item.key].image is not None]
             self.state.popover = Popover('MENU', control.rect, items=tuple(items))
         elif key.startswith('SOLO.'):
             self.message = actions.set_solo(context, obj, data, key.removeprefix('SOLO.'))

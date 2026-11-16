@@ -8,6 +8,7 @@ from .blending import BLEND_MODES, CHANNEL, linear_to_srgb
 from .canvas import Layout, Rect
 from .document import PROJECTIONS, RESOLUTIONS, active_layer, children, editing_mask, set_channels, slot_value, uses_coordinates
 from .library import capture, texture_folder
+from .meshmaps import MESH_MAP, MESH_MAPS
 from .painting import TOOLS
 from .shell import GAP, distribute, zones
 from .ui_system import MinimalMetrics
@@ -17,6 +18,8 @@ HEADER = 30
 ROW_HEIGHT = 42
 LINE_HEIGHT = 28
 THUMBNAIL = 32
+MAP_TILE = 56
+MAPS_SHARE = .3
 INDENT = 14
 CHANNEL_OPACITY_WIDTH = 44
 BLEND_WIDTH = 78
@@ -136,6 +139,12 @@ def start_layout(layout, bounds, obj_name, resolution):
                label='Start painting', tip='Create a layer stack for this mesh')
 
 
+def view_label(data):
+    if data.solo.startswith('map:'):
+        return MESH_MAP[data.solo.removeprefix('map:')].label
+    return CHANNEL[data.solo].label if data.solo else 'Material'
+
+
 def workspace_bar(layout, zone, data, obj_name):
     s = layout.scale
     layout.cards.append((zone, ''))
@@ -146,12 +155,13 @@ def workspace_bar(layout, zone, data, obj_name):
     layout.add('EXPORT', export, 'PRIMARY', icon='SAVE', label='Export textures', tip='Choose a folder and write the textures')
     menu_w = BAR_MENU_WIDTH * s
     view = Rect(export.x - 8 * s - menu_w, y, menu_w, h)
-    layout.add('VIEW', view, 'DROPDOWN', label='View', text=CHANNEL[data.solo].label if data.solo else 'Material',
-               tip='Show the full material or one channel on its own')
+    layout.add('VIEW', view, 'DROPDOWN', label='View', text=view_label(data), tip='Show the full material, one channel, or a mesh map')
     channels = Rect(view.x - 6 * s - menu_w, y, menu_w, h)
+    bake = Rect(channels.x - 6 * s - 110 * s, y, 110 * s, h)
+    layout.add('BAKE', bake, 'CHIP', label='Bake maps', tip='Bake ambient occlusion, curvature, thickness, position, world normal, and ID maps')
     layout.add('CHANNELS', channels, 'DROPDOWN', label='Channels', text=str(len(set_channels(data))),
                tip=channel_names(data) + '. Choose which channels this texture set paints and exports')
-    layout.add('SET_NAME', Rect(zone.x + 12 * s, y, max(0.0, channels.x - zone.x - 24 * s), h), 'NOTE',
+    layout.add('SET_NAME', Rect(zone.x + 12 * s, y, max(0.0, bake.x - zone.x - 24 * s), h), 'NOTE',
                label=f'{obj_name}  ·  {data.resolution} px')
 
 
@@ -337,7 +347,7 @@ def channels_section(flow, data, layer, w):
         if key == 'base_color' and not fill:
             flow.add('PAINTED', value, 'NOTE', label='Brush color')
         elif slot.source == 'IMAGE' and slot.image is not None:
-            flow.add('IMAGE_NAME.' + key, value, 'NOTE', label=slot.image.name if fill else 'Painted with the brush')
+            flow.add('IMAGE_NAME.' + key, value, 'NOTE', label=slot.image.name if fill else 'Painted')
         elif fill and slot.source == 'PATTERN':
             half = (value.w - 4 * s) / 2
             value_control(flow, channel, slot, Rect(value.x, y, half, h), False)
@@ -436,12 +446,43 @@ def properties_panel(layout, state, data):
     return ColumnPanel('PROPERTIES', title, lines * LINE_HEIGHT * s + 16 * s, fill_properties, 12 * s)
 
 
+def baked_maps(data):
+    return [(item, data.maps[item.key].image) for item in MESH_MAPS if item.key in data.maps and data.maps[item.key].image is not None]
+
+
+def fill_maps(layout, state, data, flow):
+    s = layout.scale
+    maps = baked_maps(data)
+    if not maps:
+        x, y, h = flow.field()
+        flow.add('MAPS_EMPTY', Rect(x, y, flow.viewport.w - 130 * s, h), 'NOTE', label='No mesh maps yet')
+        flow.add('OPEN_BAKE', Rect(x + flow.viewport.w - 124 * s, y, 100 * s, h), 'CHIP', label='Bake maps', tip='Open the bake card')
+        return
+    tile = MAP_TILE * s
+    columns = max(1, int((flow.viewport.w - 2 * flow.pad) // (tile + 6 * s)))
+    for index, (item, image) in enumerate(maps):
+        row, column = divmod(index, columns)
+        rect = Rect(flow.viewport.x + flow.pad + column * (tile + 6 * s), flow.y - (row + 1) * (tile + 20 * s), tile, tile + 16 * s)
+        if flow.visible(rect):
+            flow.add('MAP.' + item.key, rect, 'TILE', label=item.label, preview=image, tip=f'View the {item.label.lower()} map on the model')
+
+
+def maps_panel(layout, state, data):
+    s = layout.scale
+    count = len(baked_maps(data))
+    columns = max(1, int((state.column_width - 24) // (MAP_TILE + 6)))
+    rows = math.ceil(count / columns) if count else 0
+    return ColumnPanel('MAPS', 'Mesh maps', (rows * (MAP_TILE + 20) + 12) * s if rows else (LINE_HEIGHT + 12) * s, fill_maps, 10 * s)
+
+
 def column_layout(layout, state, data, zone):
     s = layout.scale
-    panels = [layers_panel(layout, state, data)] + ([properties_panel(layout, state, data)] if data.layers else [])
+    panels = [layers_panel(layout, state, data)] + ([properties_panel(layout, state, data)] if data.layers else []) + [maps_panel(layout, state, data)]
     room = max(0.0, zone.h - len(panels) * HEADER * s - (len(panels) - 1) * GAP * s)
     wants = [0.0 if spec.key in state.collapsed else spec.body for spec in panels]
-    views = distribute(wants, room, (state.split, 1 - state.split)[:len(panels)])
+    maps_view = min(wants[-1], room * MAPS_SHARE)
+    room -= maps_view
+    views = distribute(wants[:-1], room, (state.split, 1 - state.split)[:len(panels) - 1]) + [maps_view]
     layout.add('COLUMN_EDGE', Rect(zone.x - 6 * s, zone.y, 6 * s, zone.h), 'GRIP', tip='Drag to resize the column')
     layout.splitter = (zone.top - HEADER * s, room)
     top = zone.top
@@ -450,7 +491,7 @@ def column_layout(layout, state, data, zone):
         if view > 0:
             spec.fill(layout, state, data, Flow(layout, viewport, scroll, spec.pad))
         top = card.y - GAP * s
-        if index == 0 and len(panels) > 1 and all(wants) and sum(wants) > room:
+        if index == 0 and len(panels) > 2 and all(wants[:2]) and sum(wants[:2]) > room:
             layout.add('SPLITTER', Rect(zone.x, top, zone.w, GAP * s), 'GRIP', tip='Drag to share space between the panels')
 
 
@@ -584,6 +625,28 @@ def brush_popover(layout, state, bounds, data):
     return card
 
 
+def bake_popover(layout, state, bounds, data):
+    s = layout.scale
+    card = place_popover(bounds, state.popover.anchor, 340 * s, ((len(MESH_MAPS) + 4) * LINE_HEIGHT + 24) * s, s)
+    x, w = card.x + 14 * s, card.w - 28 * s
+    y = card.top - 34 * s
+    layout.add('BAKE_TITLE', Rect(x, y, w, 22 * s), 'NOTE', label='Bake mesh maps from this mesh')
+    for item in MESH_MAPS:
+        y -= LINE_HEIGHT * s
+        baked = data.maps[item.key].image if item.key in data.maps else None
+        layout.add('BAKEMAP.' + item.key, Rect(x, y, w - 30 * s, 24 * s), 'TOGGLE', label=item.label + (' (needs high-poly)' if item.needs_source else ''),
+                   active=item.key in state.bake_keys, tip='Include this map in the bake')
+        layout.add('BAKETHUMB.' + item.key, Rect(x + w - 24 * s, y, 24 * s, 24 * s), 'SOURCE', icon='GRID', preview=baked)
+    y -= LINE_HEIGHT * s
+    layout.add('BAKE_SAMPLES', Rect(x, y, w, 24 * s), 'SLIDER', label='Samples', value=data.bake_samples / 128, text=str(data.bake_samples),
+               tip='More samples give smoother occlusion and thickness')
+    y -= LINE_HEIGHT * s
+    layout.add('BAKE_SOURCE', Rect(x, y, w, 24 * s), 'DROPDOWN', label='High-poly', text=data.bake_source.name if data.bake_source else 'None',
+               tip='Bake the normal map from a detailed mesh onto this one')
+    layout.add('BAKE_RUN', Rect(x, card.y + 12 * s, w, 28 * s), 'PRIMARY', icon='PLAY', label='Bake', tip='Bake the selected maps now')
+    return card
+
+
 def export_popover(layout, state, bounds, data, directory):
     s = layout.scale
     card = place_popover(bounds, state.popover.anchor, 360 * s, 150 * s, s)
@@ -614,6 +677,8 @@ def painter_layout(bounds, scale, state, data, obj_name, tool, brush, directory)
             layout.popover = color_popover(layout, state, bounds)
         elif state.popover.kind == 'MENU':
             layout.popover = menu_popover(layout, state, bounds)
+        elif state.popover.kind == 'BAKE' and data is not None:
+            layout.popover = bake_popover(layout, state, bounds, data)
         elif state.popover.kind == 'BRUSH' and data is not None:
             layout.popover = brush_popover(layout, state, bounds, data)
         elif data is not None:

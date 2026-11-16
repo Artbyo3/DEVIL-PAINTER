@@ -1,7 +1,8 @@
 import json
 import bpy
 import numpy
-from . import baking, brushes, compositing, library, painting, strokes
+from . import baking, brushes, compositing, library, meshmaps, painting, strokes
+from .meshmaps import MESH_MAP
 from .blending import BLEND_MODES, CHANNEL
 from .procedural import PATTERN
 from .document import SLOT_FIELDS, active_layer, add_set_channels, add_slots, children, descendants, fill_slots, find_layer, layer_index, set_slot_value
@@ -329,7 +330,22 @@ def toggle_set_channel(context, obj, data, key):
 
 def set_solo(context, obj, data, key):
     data.solo = key
+    if key.startswith('map:'):
+        return refresh(context, obj, data, f'Viewing the {MESH_MAP[key.removeprefix("map:")].label.lower()} map.')
     return refresh(context, obj, data, f'Viewing {CHANNEL[key].label} only.' if key else 'Viewing the full material.')
+
+
+def bake_mesh_maps(context, obj, data, keys):
+    baked = meshmaps.bake_maps(context, obj, data, keys)
+    painting.enter_paint_mode(context, obj)
+    if not baked:
+        return 'Nothing to bake. Pick a high-poly source for the normal map.'
+    return refresh(context, obj, data, f'Baked {len(baked)} mesh maps.')
+
+
+def set_bake_source(context, obj, data, name):
+    data.bake_source = bpy.data.objects.get(name) if name else None
+    return refresh(context, obj, data, f'Normal maps bake from {name}.' if name else 'No high-poly source.')
 
 
 def add_mask(context, obj, data, white):

@@ -29,6 +29,14 @@ class DEVIL_PAINTER_PG_channel(bpy.types.PropertyGroup):
     enabled: bpy.props.BoolProperty(default=False)
 
 
+class DEVIL_PAINTER_PG_map(bpy.types.PropertyGroup):
+    image: bpy.props.PointerProperty(type=bpy.types.Image)
+
+
+def is_mesh(self, obj):
+    return obj.type == 'MESH'
+
+
 class DEVIL_PAINTER_PG_layer(bpy.types.PropertyGroup):
     uid: bpy.props.StringProperty()
     kind: bpy.props.EnumProperty(items=LAYER_KINDS)
@@ -67,10 +75,13 @@ class DEVIL_PAINTER_PG_texture_set(bpy.types.PropertyGroup):
     brush_pressure_opacity: bpy.props.BoolProperty(default=True)
     brush_alpha: bpy.props.PointerProperty(type=bpy.types.Image)
     brush_preset: bpy.props.StringProperty(default='Soft Round')
+    maps: bpy.props.CollectionProperty(type=DEVIL_PAINTER_PG_map)
+    bake_samples: bpy.props.IntProperty(default=16, min=1, max=256)
+    bake_source: bpy.props.PointerProperty(type=bpy.types.Object, poll=is_mesh)
     export_directory: bpy.props.StringProperty(default='', subtype='DIR_PATH')
 
 
-CLASSES = (DEVIL_PAINTER_PG_slot, DEVIL_PAINTER_PG_channel, DEVIL_PAINTER_PG_layer, DEVIL_PAINTER_PG_texture_set)
+CLASSES = (DEVIL_PAINTER_PG_slot, DEVIL_PAINTER_PG_channel, DEVIL_PAINTER_PG_map, DEVIL_PAINTER_PG_layer, DEVIL_PAINTER_PG_texture_set)
 
 
 def texture_set(obj):

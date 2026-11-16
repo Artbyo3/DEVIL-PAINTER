@@ -682,6 +682,77 @@ def journey():
     yield 0.5
     check(not any(layer.uid in {folder_uid, material_uid} for layer in data.layers), 'deleting a folder deletes the layers inside it')
 
+    def map_pixels(key):
+        image = data.maps[key].image
+        values = numpy.empty(len(image.pixels), dtype=numpy.float32)
+        image.pixels.foreach_get(values)
+        return values.reshape(-1, 4)
+
+    check(has('MAPS_EMPTY') and has('OPEN_BAKE'), 'the mesh maps panel invites a bake before any map exists')
+    click(window, region, 'BAKE')
+    yield 0.4
+    check(all(has('BAKEMAP.' + key) for key in ('ao', 'curvature', 'thickness', 'position', 'world_normal', 'id', 'normal'))
+          and has('BAKE_RUN') and not control('BAKEMAP.normal').active, 'the bake card lists every mesh map')
+    rect = control('BAKE_SAMPLES').rect
+    press(window, 'LEFTMOUSE', region.x + rect.x + rect.w * .03, region.y + rect.y + rect.h / 2)
+    yield 0.2
+    check(data.bake_samples <= 6, 'the samples slider sets the bake quality')
+    click(window, region, 'BAKE_RUN')
+    yield 1.5
+    check(all(key in data.maps and data.maps[key].image is not None for key in ('ao', 'curvature', 'thickness', 'position', 'world_normal', 'id'))
+          and 'normal' not in data.maps, 'Bake writes the selected mesh maps')
+    check(cube.mode == 'TEXTURE_PAINT' and bpy.context.scene.render.engine != 'CYCLES', 'baking returns to texture paint mode and the render engine')
+    position = map_pixels('position')
+    covered = position[position[:, 3] > .5]
+    check(covered[:, 0].min() < .15 and covered[:, 0].max() > .85, 'the position map spans the mesh bounds')
+    curvature = map_pixels('curvature')[:, 0]
+    check(curvature.max() > .6 and abs(numpy.median(curvature[curvature > .01]) - .5) < .08, 'curvature brightens the cube edges and stays neutral on flat faces')
+    normal = map_pixels('world_normal')
+    check(normal[:, 2].max() > .95 and normal[normal[:, 3] > .5][:, 2].min() < .05, 'the world normal map covers every face direction')
+    check(has('MAP.ao') and has('MAP.curvature') and control('MAP.ao').preview == data.maps['ao'].image, 'the mesh maps panel shows map thumbnails')
+    click(window, region, 'MAP.curvature')
+    yield 0.6
+    output = next(node for node in data.material.node_tree.nodes if node.type == 'OUTPUT_MATERIAL')
+    viewed = output.inputs['Surface'].links[0].from_node
+    check(data.solo == 'map:curvature' and viewed.type == 'EMISSION' and control('VIEW').text == 'Curvature', 'clicking a map thumbnail views it on the model')
+    click(window, region, 'VIEW')
+    yield 0.3
+    check(has('SOLO.map:ao'), 'the View menu lists the baked maps')
+    click(window, region, 'SOLO.')
+    yield 0.5
+
+    import bmesh
+    detail = bpy.data.meshes.new('HighPoly')
+    shape = bmesh.new()
+    bmesh.ops.create_uvsphere(shape, u_segments=48, v_segments=24, radius=1.15)
+    for face in shape.faces:
+        face.smooth = True
+    shape.to_mesh(detail)
+    shape.free()
+    high = bpy.data.objects.new('HighPoly', detail)
+    bpy.context.scene.collection.objects.link(high)
+    click(window, region, 'BAKE')
+    yield 0.3
+    click(window, region, 'BAKE_SOURCE')
+    yield 0.3
+    click(window, region, 'SET_SOURCE.HighPoly')
+    yield 0.4
+    click(window, region, 'BAKE')
+    yield 0.3
+    for key in ('ao', 'curvature', 'thickness', 'position', 'world_normal', 'id'):
+        click(window, region, 'BAKEMAP.' + key)
+        yield 0.05
+    click(window, region, 'BAKEMAP.normal')
+    yield 0.2
+    click(window, region, 'BAKE_RUN')
+    yield 1.5
+    tangent = map_pixels('normal')
+    covered = tangent[tangent[:, 3] > .5]
+    check(data.bake_source == high and len(covered) and numpy.median(covered[:, 2]) > .8 and covered[:, 0].std() > .01,
+          'the normal map bakes the high-poly surface in tangent space')
+    check(cube.mode == 'TEXTURE_PAINT' and bpy.context.view_layer.objects.active == cube, 'baking keeps the painted mesh active')
+    bpy.data.objects.remove(high)
+
     click(window, region, 'SHELF_TOGGLE')
     yield 0.3
     check(not editor._active.state.shelf_open and not has('ITEM.0') and has('SHELF_TAB.MATERIALS'), 'the shelf collapses to its tabs')

@@ -31,3 +31,4 @@ class WorkspaceState:
     shelf_open: bool = True
     shelf_tab: str = 'MATERIALS'
     armed: str = ''
+    bake_keys: set = field(default_factory=lambda: {'ao', 'curvature', 'thickness', 'position', 'world_normal', 'id'})

@@ -11,9 +11,9 @@ BAKE_SAMPLES = 1
 
 
 @contextmanager
-def bake_scene(context, obj):
+def bake_scene(context, obj, samples=BAKE_SAMPLES):
     scene = context.scene
-    engine, samples, mode = scene.render.engine, scene.cycles.samples, obj.mode
+    engine, saved_samples, mode = scene.render.engine, scene.cycles.samples, obj.mode
     selected = [item for item in context.view_layer.objects if item.select_get()]
     active = context.view_layer.objects.active
     try:
@@ -24,10 +24,10 @@ def bake_scene(context, obj):
         obj.select_set(True)
         context.view_layer.objects.active = obj
         scene.render.engine = 'CYCLES'
-        scene.cycles.samples = BAKE_SAMPLES
+        scene.cycles.samples = samples
         yield
     finally:
-        scene.render.engine, scene.cycles.samples = engine, samples
+        scene.render.engine, scene.cycles.samples = engine, saved_samples
         obj.select_set(False)
         for item in selected:
             item.select_set(True)
