@@ -161,47 +161,111 @@ def journey():
 
     click(window, region, 'ADD_FILL')
     yield 0.5
-    fill = data.layers[data.active]
-    check(len(data.layers) == 2 and fill.kind == 'FILL' and data.active == 1, '+ Fill adds a fill layer above the paint layer')
-    rect = control('METALLIC').rect
+    fill = next(layer for layer in data.layers if layer.uid == data.active_uid)
+    check(len(data.layers) == 2 and fill.kind == 'FILL' and data.layers[1].uid == fill.uid, '+ Fill adds a fill layer above the paint layer')
+    check(all(has(f'USE.{key}') for key in ('base_color', 'roughness', 'metallic', 'normal', 'height')) and not has('USE.emission'),
+          'Properties lists one row per texture set channel')
+    rect = control('VALUE.metallic').rect
     press(window, 'LEFTMOUSE', region.x + rect.x + rect.w - 1, region.y + rect.y + rect.h / 2)
     yield 0.5
-    check(fill.metallic > .95, 'dragging the metallic slider sets the fill metallic')
+    metallic_slot = fill.slots['metallic']
+    check(metallic_slot.value > .95, 'dragging the metallic slider sets the fill metallic')
     nodes = data.material.node_tree.nodes
-    check(abs(socket(nodes[fill.uid + '.metallic'].inputs, 'B', 'VALUE').default_value - fill.metallic) < 1e-5, 'the material preview follows the metallic value')
+    check(abs(socket(nodes[fill.uid + '.metallic'].inputs, 'B', 'RGBA').default_value[0] - metallic_slot.value) < 1e-5,
+          'the material preview follows the metallic value')
 
-    click(window, region, 'LAYER_COLOR')
+    click(window, region, 'USE.height')
+    yield 0.4
+    rect = control('VALUE.height').rect
+    press(window, 'LEFTMOUSE', region.x + rect.x + rect.w * .9, region.y + rect.y + rect.h / 2)
+    yield 0.5
+    nodes = data.material.node_tree.nodes
+    shader = next(node for node in nodes if node.type == 'BSDF_PRINCIPLED')
+    bump = next(node for node in nodes if node.type == 'BUMP')
+    check(fill.slots['height'].enabled and fill.slots['height'].value > .85 and fill.uid + '.height' in nodes,
+          'turning height on and dragging it adds the fill to the height channel')
+    check(shader.inputs['Normal'].links[0].from_node == bump and bump.inputs['Height'].is_linked,
+          'height drives a bump on the material normal')
+
+    click(window, region, 'SWATCH.base_color')
     yield 0.4
     check(editor._active.state.popover is not None and has('COLOR_SV') and has('COLOR_HUE'), 'the fill swatch opens the custom color picker')
     click(window, region, 'COLOR_HUE', fx=.001)
     yield 0.2
     click(window, region, 'COLOR_SV', fx=.999, fy=.999)
     yield 0.4
-    check(fill.color[0] > .9 and fill.color[1] < .05 and fill.color[2] < .05, 'picking hue and saturation sets the fill color')
+    color = fill.slots['base_color'].color
+    check(color[0] > .9 and color[1] < .05 and color[2] < .05, 'picking hue and saturation sets the fill color')
     click(window, region, 'COLOR_HEX')
     yield 0.2
     x, y = spot(region, 'COLOR_HEX')
     type_text(window, '#0000FF', x, y)
     yield 0.4
-    check(fill.color[2] > .9 and fill.color[0] < .05, 'typing a hex color sets the fill color')
+    color = fill.slots['base_color'].color
+    check(color[2] > .9 and color[0] < .05, 'typing a hex color sets the fill color')
     press(window, 'LEFTMOUSE', region.x + region.width * .3, region.y + region.height * .1)
     yield 0.4
     check(editor._active.state.popover is None, 'clicking outside closes the color picker')
 
-    click(window, region, 'BLEND')
+    click(window, region, 'BLEND.base_color')
     yield 0.4
-    click(window, region, 'SET_BLEND_MULTIPLY')
+    click(window, region, 'SET_BLEND.base_color.MULTIPLY')
     yield 0.4
-    check(fill.blend == 'MULTIPLY' and nodes[fill.uid + '.color'].blend_type == 'MULTIPLY', 'the blend dropdown sets Multiply in the material')
+    nodes = data.material.node_tree.nodes
+    check(fill.slots['base_color'].blend == 'MULTIPLY' and nodes[fill.uid + '.base_color'].blend_type == 'MULTIPLY'
+          and fill.slots['height'].blend == 'MIX', 'the base color blend dropdown sets Multiply for that channel only')
 
-    click(window, region, 'EYE_1')
+    click(window, region, 'CHANNELS')
+    yield 0.4
+    check(has('SET_CHANNEL.emission') and not control('SET_CHANNEL.emission').active, 'the Channels menu lists the channels the set can add')
+    click(window, region, 'SET_CHANNEL.emission')
+    yield 0.5
+    check(data.channels['emission'].enabled and has('SWATCH.emission'), 'adding emission to the texture set shows its row in Properties')
+    press(window, 'Z', *middle, ctrl=True)
+    yield 0.8
+    cube = bpy.data.objects['Cube']
+    data = cube.devil_painter
+    check(editor._active is not None and has('ADD_PAINT'), 'Ctrl+Z keeps Devil Painter open')
+    check(not data.channels['emission'].enabled and not has('SWATCH.emission'), 'Ctrl+Z undoes adding emission')
+    press(window, 'Z', *middle, ctrl=True, shift=True)
+    yield 0.8
+    cube = bpy.data.objects['Cube']
+    data = cube.devil_painter
+    check(data.channels['emission'].enabled, 'Ctrl+Shift+Z redoes it')
+    click(window, region, 'UNDO')
+    yield 0.8
+    cube = bpy.data.objects['Cube']
+    data = cube.devil_painter
+    check(editor._active is not None and not data.channels['emission'].enabled, 'the dock Undo button undoes without closing Devil Painter')
+    click(window, region, 'REDO')
+    yield 0.8
+    cube = bpy.data.objects['Cube']
+    data = cube.devil_painter
+    paint_layer, fill = data.layers[0], data.layers[1]
+    check(editor._active is not None and data.channels['emission'].enabled and has('SWATCH.emission'), 'the dock Redo button redoes it')
+
+    click(window, region, 'VIEW')
+    yield 0.4
+    click(window, region, 'SOLO.roughness')
+    yield 0.5
+    output = next(node for node in data.material.node_tree.nodes if node.type == 'OUTPUT_MATERIAL')
+    check(data.solo == 'roughness' and output.inputs['Surface'].links[0].from_node.type == 'EMISSION' and control('VIEW').text == 'Roughness',
+          'View shows the roughness channel on its own')
+    click(window, region, 'VIEW')
+    yield 0.4
+    click(window, region, 'SOLO.')
+    yield 0.5
+    output = next(node for node in data.material.node_tree.nodes if node.type == 'OUTPUT_MATERIAL')
+    check(not data.solo and output.inputs['Surface'].links[0].from_node.type == 'BSDF_PRINCIPLED', 'View goes back to the full material')
+
+    click(window, region, 'EYE_' + fill.uid)
     yield 0.5
     check(not fill.visible and fill.uid not in data.material[SIGNATURE_KEY], 'the eye hides the fill layer from the material')
-    click(window, region, 'EYE_1')
+    click(window, region, 'EYE_' + fill.uid)
     yield 0.5
     check(fill.visible and fill.uid in data.material[SIGNATURE_KEY], 'the eye shows the fill layer again')
 
-    click(window, region, 'ROW_1', kind='RIGHTMOUSE')
+    click(window, region, 'ROW_' + fill.uid, kind='RIGHTMOUSE')
     yield 0.4
     check(has('DUPLICATE') and has('ADD_MASK_BLACK'), 'right-clicking a layer opens its context menu')
     click(window, region, 'ADD_MASK_BLACK')
@@ -211,33 +275,34 @@ def journey():
     stroke(window, region)
     yield 1.0
     check(alpha(fill.mask).max() > .5, 'a brush stroke reveals the fill through its mask')
-    check(control('MASKTHUMB_1').active and has('MASK_INFO') and not has('OPACITY'), 'with the mask selected, Properties shows the mask')
+    check(control('MASKTHUMB_' + fill.uid).active and has('MASK_INFO') and not has('OPACITY'), 'with the mask selected, Properties shows the mask')
     click(window, region, 'SELECT_LAYER')
     yield 0.4
-    check(not data.paint_mask and has('OPACITY') and not control('MASKTHUMB_1').active, 'Back to layer shows the layer properties again')
-    click(window, region, 'MASKTHUMB_1')
+    check(data.target == 'CONTENT' and has('OPACITY') and not control('MASKTHUMB_' + fill.uid).active, 'Back to layer shows the layer properties again')
+    click(window, region, 'MASKTHUMB_' + fill.uid)
     yield 0.4
-    check(data.paint_mask and has('MASK_INFO') and bpy.context.scene.tool_settings.image_paint.canvas == fill.mask,
+    check(data.target == 'MASK' and has('MASK_INFO') and bpy.context.scene.tool_settings.image_paint.canvas == fill.mask,
           'clicking the mask thumbnail selects the mask for painting and editing')
 
-    row = control('ROW_0').rect
+    row = control('ROW_' + paint_layer.uid).rect
     card = next(rect for rect, _ in editor._active.workspace.cards if rect.contains(row.x + row.w / 2, row.y + row.h / 2))
     pixel = rendered_pixel(window, area, region, (card.x + card.w - 3, card.y + 3))
     check(all(abs(a - b) < .03 for a, b in zip(pixel[:3], SURFACE_FLOATING)), 'the layers panel renders in the Devil palette')
 
-    click(window, region, 'ROW_1')
-    click(window, region, 'ROW_1')
+    click(window, region, 'ROW_' + fill.uid)
+    click(window, region, 'ROW_' + fill.uid)
     yield 0.4
     check(editor._active.state.text is not None, 'double-clicking a layer starts renaming it in place')
-    type_text(window, 'Rust', *spot(region, 'ROW_1'))
+    type_text(window, 'Rust', *spot(region, 'ROW_' + fill.uid))
     yield 0.4
     check(fill.name == 'Rust', 'typing a name and pressing Enter renames the layer')
 
-    click(window, region, 'ROW_1', kind='RIGHTMOUSE')
+    click(window, region, 'ROW_' + fill.uid, kind='RIGHTMOUSE')
     yield 0.4
     click(window, region, 'DUPLICATE')
     yield 0.6
     copy = data.layers[2]
+    check(data.active_uid == copy.uid, 'the copy is selected above its source')
     check(len(data.layers) == 3 and copy.name == 'Rust copy' and copy.mask is not None and copy.mask != data.layers[1].mask,
           'Duplicate copies the layer with its own mask')
 
@@ -247,7 +312,7 @@ def journey():
     paint_layer = data.layers[0]
     paint_layer.image.pixels.foreach_set(red.ravel())
     paint_layer.image.update()
-    row = control('ROW_0').rect
+    row = control('ROW_' + paint_layer.uid).rect
     paint_thumb = rendered_pixel(window, area, region, (row.x + 46 * scale, row.y + row.h / 2))
     check(paint_thumb[0] > .9 and paint_thumb[1] < .1 and paint_thumb[2] < .1, 'the paint layer thumbnail shows the painted image')
 
@@ -262,8 +327,14 @@ def journey():
     check(Path(data.export_directory) == export_dir, 'typing the folder sets the export directory')
     click(window, region, 'EXPORT_RUN')
     yield 1.0
-    files = {suffix: export_dir / f'Cube_{suffix}.png' for suffix in ('BaseColor', 'Roughness', 'Metallic')}
-    check(all(path.is_file() for path in files.values()), 'Export writes base color, roughness and metallic PNGs')
+    files = {suffix: export_dir / f'Cube_{suffix}.png' for suffix in ('BaseColor', 'Roughness', 'Metallic', 'Normal', 'Height', 'Emission')}
+    check(all(path.is_file() for path in files.values()), 'Export writes one PNG per texture set channel')
+    check(not (export_dir / 'Cube_Opacity.png').exists(), 'channels outside the texture set are not exported')
+    height = bpy.data.images.load(str(files['Height']))
+    values = numpy.empty(len(height.pixels), dtype=numpy.float32)
+    height.pixels.foreach_get(values)
+    check(values.max() > .8 and abs(values.min() - .5) < .02, 'exported height rises only where the fill shows through its mask')
+    bpy.data.images.remove(height)
     metallic = bpy.data.images.load(str(files['Metallic']))
     values = numpy.empty(len(metallic.pixels), dtype=numpy.float32)
     metallic.pixels.foreach_get(values)

@@ -4,10 +4,10 @@ import traceback
 from pathlib import Path
 import bpy
 import numpy
-from . import actions, compositing, painting
-from .blending import BLEND_MODES, linear_to_srgb, srgb_to_linear
+from . import actions, painting
+from .blending import BLEND_MODES, CHANNEL, CHANNELS, linear_to_srgb, srgb_to_linear
 from .canvas import Rect
-from .document import active_layer, texture_set
+from .document import active_layer, set_channels, slot_value, texture_set
 from .draw import Renderer
 from .minimal import MAX_BRUSH_SIZE, painter_layout
 from .shell import MARGIN, clamp_column, clamp_split
@@ -18,9 +18,7 @@ DOUBLE_CLICK_SECONDS = .4
 SCROLL_STEP = 40
 POINTER_TOKENS = ('MOUSE', 'TRACKPAD', 'NDOF', 'PEN', 'ERASER')
 HIDDEN_REGIONS = ('show_region_header', 'show_region_tool_header', 'show_region_toolbar', 'show_region_asset_shelf', 'show_gizmo_navigate')
-LAYER_VALUES = {'OPACITY': 'opacity', 'ROUGHNESS': 'roughness', 'METALLIC': 'metallic'}
 MOVES = {'MOVE_UP': 1, 'MOVE_DOWN': -1}
-CHANNELS = {'USE_COLOR': 'color', 'USE_ROUGHNESS': 'roughness', 'USE_METALLIC': 'metallic'}
 _active = None
 
 
@@ -59,7 +57,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         if _active is not None:
             _active.cleanup()
             return {'FINISHED'}
-        self._area, self._window, self._scene = context.area, context.window, context.scene
+        self._area, self._window = context.area, context.window
         self._region = next(r for r in context.area.regions if r.type == 'WINDOW')
         self.pointer = (0, 0)
         self.message = ''
@@ -87,6 +85,10 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         _active = self
         self._area.tag_redraw()
         return {'RUNNING_MODAL'}
+
+    @property
+    def scene(self):
+        return self._window.scene
 
     def hide_regions(self):
         space = self._area.spaces.active
@@ -121,11 +123,11 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         scale = max(.5, system_scale)
         self.bounds = Rect(left, bottom, max(1, region.width - left - right), max(1, region.height - top - bottom))
         obj, data = self.painted()
-        brush = (painting.brush_value(self._scene, 'size'), painting.brush_value(self._scene, 'strength'),
-                 (*painting.brush_value(self._scene, 'color'), 1.0))
+        brush = (painting.brush_value(self.scene, 'size'), painting.brush_value(self.scene, 'strength'),
+                 (*painting.brush_value(self.scene, 'color'), 1.0))
         name = obj.name if obj is not None and obj.type == 'MESH' else ''
         directory = (data.export_directory or default_directory(obj)) if data is not None else ''
-        return painter_layout(self.bounds, scale, self.state, data, name, painting.active_tool(self._scene), brush, directory)
+        return painter_layout(self.bounds, scale, self.state, data, name, painting.active_tool(self.scene), brush, directory)
 
     def draw_overlay(self):
         if self._closed:
@@ -155,7 +157,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             return {'RUNNING_MODAL'}
 
     def handle_event(self, context, event):
-        if self._area not in list(self._window.screen.areas) or self._area.type != 'VIEW_3D' or self._window.scene != self._scene:
+        if self._area not in list(self._window.screen.areas) or self._area.type != 'VIEW_3D':
             self.cleanup()
             return {'FINISHED'}
         if event.type == 'TIMER':
@@ -203,7 +205,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             return {'PASS_THROUGH'}
         if control is not None and press and event.type == 'RIGHTMOUSE' and control.key.startswith('ROW_'):
             obj, data = self.painted()
-            actions.select_layer(context, obj, data, int(control.key.removeprefix('ROW_')))
+            actions.select_layer(context, obj, data, control.key.removeprefix('ROW_'))
             self.open_layer_menu(control.rect, data)
             return {'RUNNING_MODAL'}
         if control is not None and event.type == 'LEFTMOUSE' and event.value in {'PRESS', 'DOUBLE_CLICK'}:
@@ -235,7 +237,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         self.state.text = None
         obj, data = self.painted()
         if edit.key.startswith('NAME_') and data is not None:
-            self.message = actions.rename_layer(context, obj, data, int(edit.key.removeprefix('NAME_')), edit.text)
+            self.message = actions.rename_layer(context, obj, data, edit.key.removeprefix('NAME_'), edit.text)
         elif edit.key == 'COLOR_HEX':
             red, green, blue = parse_hex(edit.text)
             self.state.hsv = colorsys.rgb_to_hsv(red, green, blue)
@@ -309,13 +311,18 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             top, room = self.workspace.splitter
             self.state.split = clamp_split((top - self.pointer[1]) / room) if room > 0 else self.state.split
         elif key == 'BRUSH_SIZE':
-            painting.set_brush_value(self._scene, 'size', max(1, round(x * MAX_BRUSH_SIZE)))
+            painting.set_brush_value(self.scene, 'size', max(1, round(x * MAX_BRUSH_SIZE)))
         elif key == 'BRUSH_STRENGTH':
-            painting.set_brush_value(self._scene, 'strength', x)
-        elif key in LAYER_VALUES and data is not None:
-            actions.set_value(context, obj, data, LAYER_VALUES[key], x)
+            painting.set_brush_value(self.scene, 'strength', x)
+        elif key == 'OPACITY' and data is not None:
+            actions.set_opacity(context, obj, data, x)
             if release:
-                self.message = actions.commit_value(context, obj, data, LAYER_VALUES[key])
+                self.message = actions.commit_value(context, obj, data, 'Opacity')
+        elif key.startswith('VALUE.') and data is not None:
+            channel = key.removeprefix('VALUE.')
+            actions.set_channel_value(context, obj, data, channel, (x,))
+            if release:
+                self.message = actions.commit_value(context, obj, data, CHANNEL[channel].label)
         elif key == 'COLOR_SV':
             self.state.hsv = (self.state.hsv[0], x, y)
             self.apply_color(context, release)
@@ -326,20 +333,22 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
     def apply_color(self, context, commit):
         display = colorsys.hsv_to_rgb(*self.state.hsv)
         obj, data = self.painted()
-        if self.state.popover.target == 'BRUSH':
-            painting.set_brush_value(self._scene, 'color', display)
+        target = self.state.popover.target
+        if target == 'BRUSH':
+            painting.set_brush_value(self.scene, 'color', display)
         elif data is not None:
-            active_layer(data).color = tuple(float(value) for value in srgb_to_linear(numpy.array(display)))
-            compositing.update_values(data)
+            value = srgb_to_linear(numpy.array(display)) if CHANNEL[target].srgb else display
+            actions.set_channel_value(context, obj, data, target, tuple(float(part) for part in value))
             if commit:
-                self.message = actions.commit_value(context, obj, data, 'color')
+                self.message = actions.commit_value(context, obj, data, CHANNEL[target].label)
 
     def open_color(self, control, target):
         obj, data = self.painted()
         if target == 'BRUSH':
-            display = painting.brush_value(self._scene, 'color')
+            display = painting.brush_value(self.scene, 'color')
         else:
-            display = linear_to_srgb(numpy.array(active_layer(data).color))
+            value = numpy.array(slot_value(active_layer(data).slots[target]))
+            display = linear_to_srgb(value) if CHANNEL[target].srgb else value
         self.state.hsv = colorsys.rgb_to_hsv(*(float(value) for value in display))
         self.state.popover = Popover('COLOR', control.rect, target=target)
 
@@ -372,8 +381,8 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             bpy.ops.ed.redo()
         elif key == 'BRUSH_COLOR':
             self.open_color(control, 'BRUSH')
-        elif key == 'LAYER_COLOR':
-            self.open_color(control, 'LAYER')
+        elif key.startswith('SWATCH.'):
+            self.open_color(control, key.removeprefix('SWATCH.'))
         elif key == 'COLOR_HEX':
             self.begin_text(key, control.text)
         elif key == 'EXPORT':
@@ -386,41 +395,55 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             directory = bpy.path.abspath(data.export_directory or default_directory(obj))
             self.message = actions.export(context, obj, data, directory)
             self.state.popover = None
-        elif key == 'BLEND':
-            layer = active_layer(data)
-            self.state.popover = Popover('MENU', control.rect, items=tuple((f'SET_BLEND_{mode}', label, mode == layer.blend) for mode, label in BLEND_MODES))
-        elif key.startswith('SET_BLEND_'):
-            self.message = actions.set_blend(context, obj, data, key.removeprefix('SET_BLEND_'))
+        elif key.startswith('BLEND.'):
+            channel = key.removeprefix('BLEND.')
+            current = active_layer(data).slots[channel].blend
+            self.state.popover = Popover('MENU', control.rect, items=tuple((f'SET_BLEND.{channel}.{mode}', label, mode == current)
+                                                                          for mode, label in BLEND_MODES))
+        elif key.startswith('SET_BLEND.'):
+            _, channel, mode = key.split('.')
+            self.message = actions.set_blend(context, obj, data, channel, mode)
+        elif key == 'CHANNELS':
+            self.state.popover = Popover('MENU', control.rect, items=tuple((f'SET_CHANNEL.{channel.key}', channel.label, data.channels[channel.key].enabled)
+                                                                          for channel in CHANNELS if channel.key != 'base_color'))
+        elif key.startswith('SET_CHANNEL.'):
+            self.message = actions.toggle_set_channel(context, obj, data, key.removeprefix('SET_CHANNEL.'))
+        elif key == 'VIEW':
+            items = [('SOLO.', 'Material', not data.solo)] + [(f'SOLO.{channel.key}', channel.label, data.solo == channel.key)
+                                                             for channel in set_channels(data)]
+            self.state.popover = Popover('MENU', control.rect, items=tuple(items))
+        elif key.startswith('SOLO.'):
+            self.message = actions.set_solo(context, obj, data, key.removeprefix('SOLO.'))
         elif key == 'RENAME':
-            self.begin_text(f'NAME_{data.active}', active_layer(data).name)
+            self.begin_text(f'NAME_{data.active_uid}', active_layer(data).name)
         elif key == 'DUPLICATE':
             self.message = actions.duplicate_layer(context, obj, data)
         elif key.startswith('ROW_'):
-            index = int(key.removeprefix('ROW_'))
+            uid = key.removeprefix('ROW_')
             now = time.monotonic()
             repeated = self.last_click[0] == key and now - self.last_click[1] < DOUBLE_CLICK_SECONDS
             self.last_click = ('', 0.0) if double or repeated else (key, now)
-            self.message = actions.select_layer(context, obj, data, index)
+            self.message = actions.select_layer(context, obj, data, uid)
             if double or repeated:
-                self.begin_text(f'NAME_{index}', data.layers[index].name)
+                self.begin_text(f'NAME_{uid}', active_layer(data).name)
         elif key.startswith('EYE_'):
-            self.message = actions.toggle_visible(context, obj, data, int(key.removeprefix('EYE_')))
+            self.message = actions.toggle_visible(context, obj, data, key.removeprefix('EYE_'))
         elif key in {'ADD_PAINT', 'ADD_FILL'}:
             self.message = actions.add_layer(context, obj, data, key.removeprefix('ADD_'))
         elif key == 'DELETE':
             self.message = actions.delete_layer(context, obj, data)
         elif key in MOVES:
             self.message = actions.move_layer(context, obj, data, MOVES[key])
-        elif key in CHANNELS:
-            self.message = actions.toggle_channel(context, obj, data, CHANNELS[key])
+        elif key.startswith('USE.'):
+            self.message = actions.toggle_slot(context, obj, data, key.removeprefix('USE.'))
         elif key in {'ADD_MASK_WHITE', 'ADD_MASK_BLACK'}:
             self.message = actions.add_mask(context, obj, data, key == 'ADD_MASK_WHITE')
         elif key == 'REMOVE_MASK':
             self.message = actions.remove_mask(context, obj, data)
         elif key.startswith('MASKTHUMB_'):
-            self.message = actions.select_layer(context, obj, data, int(key.removeprefix('MASKTHUMB_')), mask=True)
+            self.message = actions.select_layer(context, obj, data, key.removeprefix('MASKTHUMB_'), mask=True)
         elif key in {'SELECT_LAYER', 'SELECT_MASK'}:
-            self.message = actions.set_paint_mask(context, obj, data, key == 'SELECT_MASK')
+            self.message = actions.set_target(context, obj, data, 'MASK' if key == 'SELECT_MASK' else 'CONTENT')
         return None
 
     def cleanup(self):

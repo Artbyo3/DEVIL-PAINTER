@@ -24,14 +24,21 @@ Blender's native painting.
   unwrapped automatically. The mesh gets a Devil Painter material, the viewport
   switches to Material Preview, and the object enters Texture Paint mode with a
   first paint layer selected.
-- Layer stack stored on the mesh object, so Blender undo and saving cover it:
-  - Paint layers: one RGBA image. Painted color is the layer color and painted
-    alpha is its coverage, so one stroke paints base color, roughness, and
-    metallic together.
-  - Fill layers: a constant color, roughness, and metallic.
-  - Every layer: visibility, opacity, blend mode (Normal, Multiply, Screen,
-    Overlay, Add) for color, per-channel enable for color, roughness, and
-    metallic, rename, reorder, and delete.
+- Layer stack stored on the mesh object, so Blender undo and saving cover it.
+  Layers are addressed by uid, and the selection is a layer uid plus a target
+  (content or mask), so folders and effect stacks can join without changing
+  how selection and undo work.
+  - Channels come from one registry: base color, roughness, metallic, normal,
+    height, emission, and opacity. Each texture set chooses its channels from
+    the Channels menu (base color, roughness, metallic, normal, and height by
+    default). Only those channels are previewed, listed, and exported.
+  - Every layer has one slot per channel with its own enable, value, and blend
+    mode (Normal, Multiply, Screen, Overlay, Add), plus layer visibility,
+    opacity, rename, reorder, duplicate, and delete.
+  - Paint layers: one RGBA image. Painted color is the base color and painted
+    alpha is the coverage of every other enabled channel, so one stroke paints
+    color, roughness, metallic, height, and the rest together.
+  - Fill layers: a constant value per channel.
   - Masks: white or black, painted with the same brushes. Painted alpha reveals
     the layer.
 - Tools: Paint, Erase, Fill, Blur, Smear, and Clone from Blender's essential
@@ -58,10 +65,14 @@ Blender's native painting.
   header, toolbar, brush shelf, and navigation gizmo are hidden while the
   workspace is open. The only native Blender UI is the folder picker behind
   Browse in the export card.
-- Live preview: the stack compiles into the material's node tree. Value edits
-  update node inputs without recompiling. Structural edits rebuild the tree.
-- Export: Base Color (sRGB), Roughness, and Metallic PNGs composited with the
-  same math as the preview.
+- Live preview: the stack compiles into the material's node tree. Normal feeds
+  a normal map, height feeds a bump on top of it, emission and opacity feed the
+  shader's emission and alpha. Value edits update node inputs without
+  recompiling. Structural edits rebuild the tree. The View menu shows the full
+  material or any one channel on its own.
+- Export: one PNG per texture set channel (base color and emission in sRGB,
+  the rest non-color) composited with the same math as the preview.
+- Undo and redo, from the keyboard or the dock, keep the workspace open.
 - Layer rows show thumbnails: the painted image over a checkerboard or the
   fill color, plus a grayscale mask thumbnail when the layer has a mask.
 - Saving packs every layer image and mask into the `.blend`.
@@ -96,7 +107,7 @@ Planned stages, each shipped as a tested increment:
 
 ## Not in the MVP
 
-- Normal and height channels, and painting them.
+- Painting normal detail with the brush (normal is a fill value per layer).
 - Generators and smart masks driven by curvature, ambient occlusion, or
   position, and baking those maps.
 - Multiple texture sets per object, UDIMs, and keeping other materials on a

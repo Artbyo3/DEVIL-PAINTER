@@ -1,9 +1,9 @@
 import colorsys
 from dataclasses import dataclass
 import numpy
-from .blending import BLEND_MODES, linear_to_srgb
+from .blending import BLEND_MODES, CHANNEL, linear_to_srgb
 from .canvas import Layout, Rect
-from .document import RESOLUTIONS, active_layer
+from .document import RESOLUTIONS, active_layer, editing_mask, set_channels, slot_value
 from .painting import TOOLS
 from .shell import GAP, distribute, zones
 from .ui_system import MinimalMetrics
@@ -13,11 +13,23 @@ HEADER = 30
 ROW_HEIGHT = 42
 LINE_HEIGHT = 28
 THUMBNAIL = 32
-CHANNEL_NAMES = 'Base Color · Roughness · Metallic'
+BLEND_WIDTH = 78
+TOGGLE_WIDTH = 100
+BAR_MENU_WIDTH = 150
 
 
 def display_color(color):
     return tuple(float(value) for value in linear_to_srgb(numpy.array(color[:3]))) + (1.0,)
+
+
+def slot_display(slot):
+    value = slot_value(slot)
+    rgb = value if len(value) == 3 else value * 3
+    return display_color(rgb) if CHANNEL[slot.name].srgb else (*rgb, 1.0)
+
+
+def channel_names(data):
+    return ' · '.join(channel.label for channel in set_channels(data))
 
 
 def hsv_color(hsv):
@@ -36,7 +48,7 @@ class ColumnPanel:
 
 @dataclass(frozen=True)
 class Section:
-    lines: int
+    lines: object
     build: object
 
 
@@ -110,8 +122,15 @@ def workspace_bar(layout, zone, data, obj_name):
     layout.add('CLOSE', Rect(right - 24 * s, y, 24 * s, h), 'ICON', icon='CLOSE', tip='Close Devil Painter', shortcut='Ctrl Alt P')
     export = Rect(right - 186 * s, y, 150 * s, h)
     layout.add('EXPORT', export, 'PRIMARY', icon='SAVE', label='Export textures', tip='Choose a folder and write the textures')
-    layout.add('SET_NAME', Rect(zone.x + 12 * s, y, max(0.0, export.x - zone.x - 24 * s), h), 'NOTE',
-               label=f'{obj_name}  ·  {data.resolution} px  ·  {CHANNEL_NAMES}')
+    menu_w = BAR_MENU_WIDTH * s
+    view = Rect(export.x - 8 * s - menu_w, y, menu_w, h)
+    layout.add('VIEW', view, 'DROPDOWN', label='View', text=CHANNEL[data.solo].label if data.solo else 'Material',
+               tip='Show the full material or one channel on its own')
+    channels = Rect(view.x - 6 * s - menu_w, y, menu_w, h)
+    layout.add('CHANNELS', channels, 'DROPDOWN', label='Channels', text=str(len(set_channels(data))),
+               tip=channel_names(data) + '. Choose which channels this texture set paints and exports')
+    layout.add('SET_NAME', Rect(zone.x + 12 * s, y, max(0.0, channels.x - zone.x - 24 * s), h), 'NOTE',
+               label=f'{obj_name}  ·  {data.resolution} px')
 
 
 def tool_strip(layout, zone, tool, brush):
@@ -148,29 +167,30 @@ def dock_layout(layout, zone, tool):
 
 
 def selection(data):
-    return 'MASK' if data.paint_mask and active_layer(data).mask is not None else 'LAYER'
+    return 'MASK' if editing_mask(data) else 'LAYER'
 
 
 def fill_layers(layout, state, data, flow):
     s = layout.scale
     target = selection(data)
     size = THUMBNAIL * s
-    for index in range(len(data.layers) - 1, -1, -1):
-        layer = data.layers[index]
+    for layer in reversed(data.layers):
+        uid = layer.uid
         line = flow.line(ROW_HEIGHT * s)
         if not flow.visible(line):
             continue
         row = Rect(line.x + 2 * s, line.y + 1 * s, line.w - 4 * s, line.h - 2 * s)
-        selected = index == data.active
-        editing = state.text is not None and state.text.key == f'NAME_{index}'
-        flow.add(f'ROW_{index}', row, 'ROW', label=state.text.text if editing else layer.name, text=f'{layer.opacity * 100:.0f}%',
+        selected = uid == data.active_uid
+        editing = state.text is not None and state.text.key == f'NAME_{uid}'
+        flow.add(f'ROW_{uid}', row, 'ROW', label=state.text.text if editing else layer.name, text=f'{layer.opacity * 100:.0f}%',
                  active=selected, second=1.0 if selected and target == 'LAYER' else 0.0,
-                 preview=layer.image if layer.kind == 'PAINT' else None, mask=layer.mask, color=display_color(layer.color),
+                 preview=layer.image if layer.kind == 'PAINT' else None, mask=layer.mask,
+                 color=slot_display(layer.slots['base_color']),
                  caret=state.text.cursor if editing else -1, tip='Click to select, double-click to rename, right-click for more')
-        flow.add(f'EYE_{index}', Rect(row.x + 4 * s, row.y + 8 * s, 22 * s, row.h - 16 * s), 'ICON',
+        flow.add(f'EYE_{uid}', Rect(row.x + 4 * s, row.y + 8 * s, 22 * s, row.h - 16 * s), 'ICON',
                  icon='HIDE_OFF' if layer.visible else 'HIDE_ON', tip='Hide layer' if layer.visible else 'Show layer')
         if layer.mask is not None:
-            flow.add(f'MASKTHUMB_{index}', Rect(row.x + 34 * s + size, row.y + (row.h - size) / 2, size, size), 'THUMB',
+            flow.add(f'MASKTHUMB_{uid}', Rect(row.x + 34 * s + size, row.y + (row.h - size) / 2, size, size), 'THUMB',
                      preview=layer.mask, active=selected and target == 'MASK', tip='Select the mask to paint and edit it')
 
 
@@ -184,25 +204,25 @@ def layers_panel(layout, state, data):
 def opacity_section(flow, data, layer, w):
     x, y, h = flow.field()
     flow.add('OPACITY', Rect(x, y, w, h), 'SLIDER', label='Opacity', value=layer.opacity, text=f'{layer.opacity * 100:.0f}%')
-    x, y, h = flow.field()
-    flow.add('BLEND', Rect(x, y, w, h), 'DROPDOWN', label='Blend', text=dict(BLEND_MODES)[layer.blend],
-             tip='Choose how this layer mixes with the layers below')
 
 
 def channels_section(flow, data, layer, w):
     s = flow.layout.scale
-    x, y, h = flow.field()
-    flow.add('USE_COLOR', Rect(x, y, 100 * s, h), 'TOGGLE', label='Color', active=layer.use_color, tip='Affect base color')
-    if layer.kind == 'FILL':
-        flow.add('LAYER_COLOR', Rect(x + 108 * s, y, w - 108 * s, h), 'SWATCH', color=display_color(layer.color), tip='Fill color')
-    else:
-        flow.add('PAINTED', Rect(x + 108 * s, y, w - 108 * s, h), 'NOTE', label='Brush color')
-    for channel in ('roughness', 'metallic'):
+    toggle, blend = TOGGLE_WIDTH * s, BLEND_WIDTH * s
+    for channel in set_channels(data):
+        key, slot = channel.key, layer.slots[channel.key]
         x, y, h = flow.field()
-        value = getattr(layer, channel)
-        flow.add('USE_' + channel.upper(), Rect(x, y, 100 * s, h), 'TOGGLE', label=channel.title(),
-                 active=getattr(layer, 'use_' + channel), tip=f'Affect {channel}')
-        flow.add(channel.upper(), Rect(x + 108 * s, y, w - 108 * s, h), 'SLIDER', value=value, text=f'{value:.2f}')
+        flow.add('USE.' + key, Rect(x, y, toggle, h), 'TOGGLE', label=channel.label, active=slot.enabled,
+                 tip=f'Let this layer affect {channel.label.lower()}')
+        value = Rect(x + toggle + 6 * s, y, w - toggle - blend - 12 * s, h)
+        if key == 'base_color' and layer.kind == 'PAINT':
+            flow.add('PAINTED', value, 'NOTE', label='Brush color')
+        elif channel.width == 3:
+            flow.add('SWATCH.' + key, value, 'SWATCH', color=slot_display(slot), tip=f'{channel.label} of this layer')
+        else:
+            flow.add('VALUE.' + key, value, 'SLIDER', value=slot.value, text=f'{slot.value:.2f}')
+        flow.add('BLEND.' + key, Rect(x + w - blend, y, blend, h), 'DROPDOWN', text=dict(BLEND_MODES)[slot.blend],
+                 tip=f'How {channel.label.lower()} mixes with the layers below')
 
 
 def layer_mask_section(flow, data, layer, w):
@@ -225,8 +245,21 @@ def mask_section(flow, data, layer, w):
     flow.add('REMOVE_MASK', Rect(x + w - 26 * s, y, 26 * s, h), 'ICON', icon='CLOSE', tip='Remove mask')
 
 
-PROPERTY_SECTIONS = {'LAYER': (Section(2, opacity_section), Section(3, channels_section), Section(1, layer_mask_section)),
-                     'MASK': (Section(2, mask_section),)}
+def one_line(data):
+    return 1
+
+
+def two_lines(data):
+    return 2
+
+
+def channel_lines(data):
+    return len(set_channels(data))
+
+
+PROPERTY_SECTIONS = {'LAYER': (Section(one_line, opacity_section), Section(channel_lines, channels_section),
+                               Section(one_line, layer_mask_section)),
+                     'MASK': (Section(two_lines, mask_section),)}
 
 
 def fill_properties(layout, state, data, flow):
@@ -241,7 +274,7 @@ def properties_panel(layout, state, data):
     s = layout.scale
     target = selection(data)
     title = 'Properties · ' + active_layer(data).name + (' · Mask' if target == 'MASK' else '')
-    lines = sum(section.lines for section in PROPERTY_SECTIONS[target])
+    lines = sum(section.lines(data) for section in PROPERTY_SECTIONS[target])
     return ColumnPanel('PROPERTIES', title, lines * LINE_HEIGHT * s + 16 * s, fill_properties, 12 * s)
 
 
@@ -308,7 +341,7 @@ def export_popover(layout, state, bounds, data, directory):
     layout.add('EXPORT_DIR', Rect(x, card.top - 66 * s, w - 76 * s, 24 * s), 'FIELD', text=state.text.text if editing else directory,
                caret=state.text.cursor if editing else -1, tip='Folder for the textures')
     layout.add('BROWSE', Rect(x + w - 70 * s, card.top - 66 * s, 70 * s, 24 * s), 'CHIP', label='Browse', tip='Pick a folder')
-    layout.add('EXPORT_INFO', Rect(x, card.top - 94 * s, w, 20 * s), 'NOTE', label=f'{CHANNEL_NAMES}  ·  PNG  ·  {data.resolution} px')
+    layout.add('EXPORT_INFO', Rect(x, card.top - 94 * s, w, 20 * s), 'NOTE', label=f'{channel_names(data)}  ·  PNG  ·  {data.resolution} px')
     layout.add('EXPORT_RUN', Rect(x, card.y + 12 * s, w, 28 * s), 'PRIMARY', icon='SAVE', label='Export', tip='Write the textures now')
     return card
 

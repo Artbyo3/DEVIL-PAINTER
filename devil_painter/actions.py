@@ -1,10 +1,12 @@
 import bpy
 import numpy
 from . import compositing, painting
-from .blending import BLEND_MODES
-from .document import active_layer
+from .blending import BLEND_MODES, CHANNEL
+from .document import active_layer, add_set_channels, add_slots, find_layer, layer_index, set_slot_value
 
 KIND_NAMES = {'PAINT': 'Paint', 'FILL': 'Fill'}
+LAYER_FIELDS = ('kind', 'visible', 'opacity')
+SLOT_FIELDS = ('enabled', 'color', 'value', 'blend')
 
 
 def image_for(obj, data, label, opaque):
@@ -45,6 +47,8 @@ def start(context, obj, resolution):
     data = obj.devil_painter
     data.resolution = resolution
     data.enabled = True
+    data.channels.clear()
+    add_set_channels(data)
     material = bpy.data.materials.new(f'Devil Painter {obj.name}')
     data.material = material
     if obj.material_slots:
@@ -58,65 +62,74 @@ def start(context, obj, resolution):
     return f'Painting {obj.name} at {resolution} px.' + unwrapped
 
 
-def add_layer(context, obj, data, kind):
+def new_layer(data, kind):
     data.serial += 1
-    insert_at = min(data.active + 1, len(data.layers)) if data.layers else 0
+    insert_at = layer_index(data, data.active_uid) + 1
     layer = data.layers.add()
     layer.uid = f'L{data.serial}'
     layer.kind = kind
+    data.layers.move(len(data.layers) - 1, insert_at)
+    layer = data.layers[insert_at]
+    data.active_uid = layer.uid
+    data.target = 'CONTENT'
+    return layer
+
+
+def add_layer(context, obj, data, kind):
+    layer = new_layer(data, kind)
     layer.name = f'{KIND_NAMES[kind]} {sum(1 for item in data.layers if item.kind == kind)}'
+    add_slots(layer)
     if kind == 'PAINT':
         layer.image = image_for(obj, data, layer.uid, False)
-    data.layers.move(len(data.layers) - 1, insert_at)
-    data.active = insert_at
-    data.paint_mask = False
     return refresh(context, obj, data, f'Added {layer.name}.')
 
 
 def delete_layer(context, obj, data):
-    layer = active_layer(data)
-    if layer is None:
+    index = layer_index(data, data.active_uid)
+    if index < 0:
         return 'No layer to delete.'
+    layer = data.layers[index]
     name = layer.name
     for image in (layer.image, layer.mask):
         if image is not None:
             bpy.data.images.remove(image)
-    data.layers.remove(data.active)
-    data.active = max(0, min(data.active, len(data.layers) - 1))
-    data.paint_mask = False
+    data.layers.remove(index)
+    data.active_uid = data.layers[max(0, min(index, len(data.layers) - 1))].uid if data.layers else ''
+    data.target = 'CONTENT'
     return refresh(context, obj, data, f'Deleted {name}.')
 
 
 def move_layer(context, obj, data, step):
-    target = data.active + step
-    if not 0 <= target < len(data.layers):
+    index = layer_index(data, data.active_uid)
+    target = index + step
+    if index < 0 or not 0 <= target < len(data.layers):
         return 'The layer is already at the edge of the stack.'
-    data.layers.move(data.active, target)
-    data.active = target
+    data.layers.move(index, target)
     return refresh(context, obj, data, 'Moved ' + data.layers[target].name + (' up.' if step > 0 else ' down.'))
 
 
-def select_layer(context, obj, data, index, mask=False):
-    data.active = index
-    data.paint_mask = mask and data.layers[index].mask is not None
+def select_layer(context, obj, data, uid, mask=False):
+    layer = find_layer(data, uid)
+    data.active_uid = uid
+    data.target = 'MASK' if mask and layer.mask is not None else 'CONTENT'
     painting.update_canvas(context, data)
-    return f'{data.layers[index].name}{" mask" if data.paint_mask else ""} selected.'
+    return f'{layer.name}{" mask" if data.target == "MASK" else ""} selected.'
 
 
-def toggle_visible(context, obj, data, index):
-    layer = data.layers[index]
+def toggle_visible(context, obj, data, uid):
+    layer = find_layer(data, uid)
     layer.visible = not layer.visible
     return refresh(context, obj, data, f'{layer.name} {"shown" if layer.visible else "hidden"}.')
 
 
-def set_blend(context, obj, data, mode):
+def set_blend(context, obj, data, key, mode):
     layer = active_layer(data)
-    layer.blend = mode
-    return refresh(context, obj, data, f'{layer.name} blends with {dict(BLEND_MODES)[mode]}.')
+    layer.slots[key].blend = mode
+    return refresh(context, obj, data, f'{CHANNEL[key].label} of {layer.name} blends with {dict(BLEND_MODES)[mode]}.')
 
 
-def rename_layer(context, obj, data, index, name):
-    layer = data.layers[index]
+def rename_layer(context, obj, data, uid, name):
+    layer = find_layer(data, uid)
     layer.name = name.strip() or layer.name
     return refresh(context, obj, data, f'Renamed to {layer.name}.')
 
@@ -125,46 +138,66 @@ def duplicate_layer(context, obj, data):
     source = active_layer(data)
     if source is None:
         return 'No layer to duplicate.'
-    data.serial += 1
-    layer = data.layers.add()
-    for key in ('kind', 'visible', 'opacity', 'blend', 'color', 'use_color', 'roughness', 'use_roughness', 'metallic', 'use_metallic'):
-        setattr(layer, key, getattr(source, key))
-    layer.uid = f'L{data.serial}'
-    layer.name = source.name + ' copy'
-    for key in ('image', 'mask'):
-        image = getattr(source, key)
+    name = source.name
+    values = {key: getattr(source, key) for key in LAYER_FIELDS}
+    slots = [(slot.name, {key: getattr(slot, key) for key in SLOT_FIELDS}) for slot in source.slots]
+    images = {key: getattr(source, key) for key in ('image', 'mask')}
+    layer = new_layer(data, values['kind'])
+    for key, value in values.items():
+        setattr(layer, key, value)
+    for slot_name, slot_values in slots:
+        slot = layer.slots.add()
+        slot.name = slot_name
+        for key, value in slot_values.items():
+            setattr(slot, key, value)
+    layer.name = name + ' copy'
+    for key, image in images.items():
         if image is not None:
             copy = image.copy()
             copy.name = f'DP {obj.name} {layer.uid}' + (' mask' if key == 'mask' else '')
             copy.pack()
             setattr(layer, key, copy)
-    target = data.active + 1
-    data.layers.move(len(data.layers) - 1, target)
-    data.active = target
-    return refresh(context, obj, data, f'Duplicated {source.name}.')
+    return refresh(context, obj, data, f'Duplicated {name}.')
 
 
-def toggle_channel(context, obj, data, channel):
+def toggle_slot(context, obj, data, key):
     layer = active_layer(data)
-    key = 'use_' + channel
-    setattr(layer, key, not getattr(layer, key))
-    return refresh(context, obj, data, f'{channel.title()} {"on" if getattr(layer, key) else "off"} for {layer.name}.')
+    slot = layer.slots[key]
+    slot.enabled = not slot.enabled
+    return refresh(context, obj, data, f'{CHANNEL[key].label} {"on" if slot.enabled else "off"} for {layer.name}.')
 
 
-def set_value(context, obj, data, key, value):
-    layer = active_layer(data)
-    setattr(layer, key, max(0.0, min(1.0, value)))
+def set_opacity(context, obj, data, value):
+    active_layer(data).opacity = max(0.0, min(1.0, value))
     compositing.update_values(data)
 
 
-def commit_value(context, obj, data, key):
-    return refresh(context, obj, data, f'{key.title()} of {active_layer(data).name} set.')
+def set_channel_value(context, obj, data, key, value):
+    set_slot_value(active_layer(data).slots[key], tuple(max(0.0, min(1.0, part)) for part in value))
+    compositing.update_values(data)
+
+
+def commit_value(context, obj, data, label):
+    return refresh(context, obj, data, f'{label} of {active_layer(data).name} set.')
+
+
+def toggle_set_channel(context, obj, data, key):
+    item = data.channels[key]
+    item.enabled = not item.enabled
+    if not item.enabled and data.solo == key:
+        data.solo = ''
+    return refresh(context, obj, data, f'{CHANNEL[key].label} {"added to" if item.enabled else "removed from"} the texture set.')
+
+
+def set_solo(context, obj, data, key):
+    data.solo = key
+    return refresh(context, obj, data, f'Viewing {CHANNEL[key].label} only.' if key else 'Viewing the full material.')
 
 
 def add_mask(context, obj, data, white):
     layer = active_layer(data)
     layer.mask = image_for(obj, data, layer.uid + ' mask', white)
-    data.paint_mask = True
+    data.target = 'MASK'
     return refresh(context, obj, data, f'{"White" if white else "Black"} mask added to {layer.name}. Painting now edits the mask.')
 
 
@@ -174,14 +207,14 @@ def remove_mask(context, obj, data):
     layer.mask = None
     if mask is not None:
         bpy.data.images.remove(mask)
-    data.paint_mask = False
+    data.target = 'CONTENT'
     return refresh(context, obj, data, f'Mask removed from {layer.name}.')
 
 
-def set_paint_mask(context, obj, data, enabled):
-    data.paint_mask = enabled
+def set_target(context, obj, data, target):
+    data.target = target
     painting.update_canvas(context, data)
-    return 'Painting edits the mask.' if enabled else 'Painting edits the layer.'
+    return 'Painting edits the mask.' if target == 'MASK' else 'Painting edits the layer.'
 
 
 def export(context, obj, data, directory):
