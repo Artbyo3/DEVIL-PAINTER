@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(ROOT))
 import devil_painter
-from devil_painter import editor, library, painting, shelf, thumbnails
+from devil_painter import editor, library, painting, shelf, smart, thumbnails
 from devil_painter.compositing import SIGNATURE_KEY, socket
 from devil_painter.ui_system import SURFACE_FLOATING
 from tools.workspace import prepare_scratch
@@ -821,6 +821,66 @@ def journey():
     yield 0.5
     check(steel.generator == 'NONE' and steel.uid + '.gen.range' not in data.material.node_tree.nodes and not has('GEN_LEVEL'),
           'setting the generator to None removes it')
+
+    def layer_by(uid):
+        return next(layer for layer in data.layers if layer.uid == uid)
+
+    click(window, region, 'SHELF_TAB.SMART')
+    yield 0.4
+    for _ in range(60):
+        if control('ITEM.0').preview is not None:
+            break
+        yield 0.3
+    check(control('ITEM.0').preview is not None, 'smart materials show rendered stack previews')
+    click(window, region, f'ITEM.{shelf_index("Rusty Iron")}')
+    yield 0.8
+    rusty = layer_by(data.active_uid)
+    inside = [layer for layer in data.layers if layer.parent == rusty.uid]
+    check(rusty.kind == 'FOLDER' and rusty.name == 'Rusty Iron' and len(inside) == 3 and inside[1].generator == 'DIRT' and inside[2].generator == 'CAVITY',
+          'a smart material lands as a folder of layers with their generators')
+    rusty_uid = rusty.uid
+    click(window, region, 'ADD_PAINT')
+    yield 0.5
+    painted = layer_by(data.active_uid)
+    painted_uid = painted.uid
+    check(painted.parent == rusty_uid, 'a paint layer added while the folder is selected goes inside it')
+    size = data.resolution
+    red = numpy.zeros((size * size, 4), dtype=numpy.float32)
+    red[:size * size // 2] = (1.0, 0.0, 0.0, 1.0)
+    painted.image.pixels.foreach_set(red.ravel())
+    painted.image.update()
+    yield from reveal(window, region, 'ADD_MASK_WHITE')
+    click(window, region, 'ADD_MASK_WHITE')
+    yield 0.5
+    check(layer_by(painted_uid).mask is not None, 'the painted layer has a mask to save')
+    click(window, region, 'ROW_' + rusty_uid, kind='RIGHTMOUSE')
+    yield 0.3
+    click(window, region, 'SAVE_SMART')
+    yield 0.6
+    saved = smart.smart_materials()[-1]
+    paint_entry = next(item for item in saved['layers'] if item['kind'] == 'PAINT')
+    check(saved['name'] == 'Rusty Iron' and len(saved['layers']) == 4 and Path(paint_entry['paint']).is_file() and Path(paint_entry['mask']).is_file(),
+          'Save as smart material stores the folder, its layers, the painted image and the mask')
+    user_tile = next(index for index, item in enumerate(shelf.items('SMART')) if item.user_index >= 0)
+    click(window, region, f'ITEM.{user_tile}')
+    yield 1.0
+    copy = layer_by(data.active_uid)
+    copied_paint = next(layer for layer in data.layers if layer.parent == copy.uid and layer.kind == 'PAINT')
+    check(copy.uid != rusty_uid and copy.kind == 'FOLDER' and len([layer for layer in data.layers if layer.parent == copy.uid]) == 4
+          and copied_paint.mask is not None and copied_paint.image != layer_by(painted_uid).image and alpha(copied_paint.image).max() == 1.0
+          and copied_paint.image.packed_file is not None, 'applying the saved smart material rebuilds the stack with its painted pixels and mask')
+    click(window, region, f'ITEM.{user_tile}', kind='RIGHTMOUSE')
+    yield 0.3
+    click(window, region, f'DELETE_SMART.{shelf.items("SMART")[user_tile].user_index}')
+    yield 0.4
+    check(not smart.smart_materials(), 'a saved smart material can be deleted from the shelf')
+    for uid in (copy.uid, rusty_uid):
+        click(window, region, 'ROW_' + uid, kind='RIGHTMOUSE')
+        yield 0.3
+        click(window, region, 'DELETE')
+        yield 0.5
+    click(window, region, 'SHELF_TAB.MATERIALS')
+    yield 0.3
 
     click(window, region, 'SHELF_TOGGLE')
     yield 0.3

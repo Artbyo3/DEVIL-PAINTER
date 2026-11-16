@@ -4,7 +4,7 @@ import traceback
 from pathlib import Path
 import bpy
 import numpy
-from . import actions, brushes, compositing, library, painting, shelf, strokes, thumbnails
+from . import actions, brushes, compositing, library, painting, shelf, smart, strokes, thumbnails
 from .blending import BLEND_MODES, CHANNEL, CHANNELS, linear_to_srgb, srgb_to_linear
 from .canvas import Rect
 from .document import active_layer, set_channels, slot_value, texture_set
@@ -236,7 +236,9 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         if control is not None and press and event.type == 'RIGHTMOUSE' and control.key.startswith('ITEM.'):
             item = self.shelf_item(control.key)
             index = control.key.removeprefix('ITEM.')
-            if item.user_index >= 0:
+            if item.user_index >= 0 and item.kind == 'SMART':
+                self.state.popover = Popover('MENU', control.rect, items=((f'DELETE_SMART.{item.user_index}', 'Delete smart material', False),))
+            elif item.user_index >= 0:
                 self.state.popover = Popover('MENU', control.rect, items=((f'DELETE_MATERIAL.{item.user_index}', 'Delete material', False),))
             elif item.kind == 'TEXTURE':
                 obj, data = self.painted()
@@ -297,6 +299,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             items.append(('MOVE_INTO', 'Move into folder below', False))
         if layer.parent:
             items.append(('MOVE_OUT', 'Move out of folder', False))
+        items.append(('SAVE_SMART', 'Save as smart material', False))
         items += [('MOVE_UP', 'Move up', False), ('MOVE_DOWN', 'Move down', False), ('DELETE', 'Delete', False)]
         self.state.popover = Popover('MENU', anchor, items=tuple(items))
 
@@ -586,6 +589,10 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.message = actions.assign_image(context, obj, data, channel, library.load_image(path, CHANNEL[channel]))
         elif key.startswith('REMOVE_TEXTURE.'):
             self.message = f'Removed {library.remove_texture(self.shelf_item("ITEM." + key.removeprefix("REMOVE_TEXTURE.")).payload)} from the library.'
+        elif key == 'SAVE_SMART':
+            self.message = f'Saved {smart.save_smart(active_layer(data))} to the smart material shelf.'
+        elif key.startswith('DELETE_SMART.'):
+            self.message = f'Deleted {smart.remove_smart(int(key.removeprefix("DELETE_SMART.")))}.'
         elif key.startswith('DELETE_MATERIAL.'):
             self.message = f'Deleted {library.remove_user_material(int(key.removeprefix("DELETE_MATERIAL.")))}.'
         elif key == 'SAVE_MATERIAL':
@@ -684,6 +691,8 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             return actions.replace_material(context, obj, data, item.payload)
         armed = '' if armed == REPLACE_TARGET else armed
         target = armed if armed and layer is not None and layer.kind == 'FILL' else ''
+        if item.kind == 'SMART':
+            return actions.add_smart_material(context, obj, data, item.payload)
         if item.kind == 'MASK':
             if layer is None:
                 return 'Select a layer to mask.'

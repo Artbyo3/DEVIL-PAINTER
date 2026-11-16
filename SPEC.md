@@ -119,6 +119,13 @@ Blender's native painting.
   noise scale, and invert, and multiplies with the painted mask so painting
   refines it. The Masks shelf tab holds smart mask presets whose thumbnails
   render the generator live on a beveled cube.
+- Smart materials: Save as smart material on any layer or folder stores the
+  whole subtree (folders, fill sources, generators, opacity, painted masks,
+  paint images, and channel canvases as PNG files) in the user library. The
+  Smart shelf tab lists built-in generator-driven smart materials (Worn Paint,
+  Rusty Iron, Dusty Plastic, Scuffed Gold, Dirty Concrete) and saved ones with
+  rendered stack previews. Applying one rebuilds it as a folder above the
+  selection, scaling saved images to the texture set resolution.
 - Live preview: the stack compiles into the material's node tree. Normal feeds
   a normal map, height feeds a bump on top of it, emission and opacity feed the
   shader's emission and alpha. Value edits update node inputs without
@@ -167,7 +174,6 @@ Planned stages, each shipped as a tested increment:
 - Painting normal detail with the brush (normal is a fill value per layer).
 - Multiple texture sets per object, UDIMs, and keeping other materials on a
   multi-material mesh. Start painting replaces the mesh's material slots.
-- Smart materials that save a whole layer stack with masks.
 - A 2D texture view inside the workspace.
 - Scrolling for very long layer stacks; rows that do not fit are hidden.
 

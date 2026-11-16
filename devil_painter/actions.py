@@ -1,7 +1,7 @@
 import json
 import bpy
 import numpy
-from . import baking, brushes, compositing, library, meshmaps, painting, strokes
+from . import baking, brushes, compositing, library, meshmaps, painting, smart, strokes
 from .masks import GENERATOR, GENERATOR_FIELDS
 from .meshmaps import MESH_MAP
 from .blending import BLEND_MODES, CHANNEL
@@ -113,6 +113,15 @@ def add_material(context, obj, data, definition):
     add_slots(layer)
     apply_material(layer, definition)
     return refresh(context, obj, data, f'Added {layer.name}.')
+
+
+def add_smart_material(context, obj, data, definition):
+    folder = new_layer(data, 'FOLDER')
+    folder.name = definition['name']
+    folder_uid = folder.uid
+    smart.build(obj, data, definition, folder, image_for)
+    data.active_uid = folder_uid
+    return refresh(context, obj, data, f'Added the {definition["name"]} smart material.')
 
 
 def replace_material(context, obj, data, definition):

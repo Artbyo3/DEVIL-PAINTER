@@ -541,9 +541,9 @@ def shelf_header(layout, state, zone, header):
     s = layout.scale
     x = zone.x + 8 * s
     for tab, label in shelf.TABS:
-        layout.add('SHELF_TAB.' + tab, Rect(x, header.y, 88 * s, header.h), 'CHIP', label=label, active=state.shelf_open and tab == state.shelf_tab,
+        layout.add('SHELF_TAB.' + tab, Rect(x, header.y, 76 * s, header.h), 'CHIP', label=label, active=state.shelf_open and tab == state.shelf_tab,
                    tip=f'Browse {label.lower()}')
-        x += 92 * s
+        x += 80 * s
     toggle = Rect(zone.x + zone.w - 30 * s, header.y, 22 * s, header.h)
     layout.add('SHELF_TOGGLE', toggle, 'ICON', icon='DOWN' if state.shelf_open else 'DISCLOSURE',
                tip='Hide the shelf' if state.shelf_open else 'Show the shelf')
@@ -574,7 +574,7 @@ def shelf_layout(layout, state, zone):
     viewport = Rect(zone.x, zone.y + 4 * s, zone.w, max(0.0, header.y - 6 * s - zone.y - 4 * s))
     entries = shelf.items(state.shelf_tab)
     if not entries:
-        empty = 'Pick a folder of textures to browse them here.' if state.shelf_tab == 'TEXTURES' else 'Save a fill layer as a material to see it here.'
+        empty = 'Pick a folder of textures to browse them here.' if state.shelf_tab == 'TEXTURES' else 'Save a layer from its right-click menu to see it here.'
         layout.add('SHELF_EMPTY', Rect(zone.x + 16 * s, viewport.top - 30 * s, viewport.w - 32 * s, 22 * s), 'NOTE', label=empty)
         return
     tile_w, tile_h = (SHELF_TILE + SHELF_GAP) * s, (SHELF_TILE + SHELF_LABEL + SHELF_GAP) * s

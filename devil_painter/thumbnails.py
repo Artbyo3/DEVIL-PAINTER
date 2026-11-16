@@ -97,7 +97,7 @@ def preview_mesh(rounded_cube):
 def render(path, definition):
     path.parent.mkdir(parents=True, exist_ok=True)
     scene = bpy.data.scenes.new('DP Thumbnail')
-    definitions = definition.get('layers', [definition])
+    definitions = [item for item in definition.get('layers', [definition]) if item.get('kind', 'FILL') == 'FILL']
     mesh = preview_mesh(any('generator' in item for item in definitions))
     sphere = bpy.data.objects.new('DP Thumbnail', mesh)
     camera_data = bpy.data.cameras.new('DP Thumbnail')

@@ -4,9 +4,10 @@ from . import thumbnails
 from .brushes import ALPHAS, PRESETS, alpha_path, preview_path
 from .library import BUILTIN_MATERIALS, is_managed, material, pattern, plain, scan, texture, user_materials
 from .masks import SMART_MASKS
+from .smart import BUILTIN_SMART, smart_materials
 from .procedural import PATTERN, PATTERNS
 
-TABS = (('MATERIALS', 'Materials'), ('TEXTURES', 'Textures'), ('PATTERNS', 'Patterns'), ('MASKS', 'Masks'), ('BRUSHES', 'Brushes'),
+TABS = (('MATERIALS', 'Materials'), ('SMART', 'Smart'), ('TEXTURES', 'Textures'), ('PATTERNS', 'Patterns'), ('MASKS', 'Masks'), ('BRUSHES', 'Brushes'),
         ('ALPHAS', 'Alphas'))
 
 
@@ -44,6 +45,9 @@ def items(tab):
     if tab == 'TEXTURES':
         files, _ = scan()
         return [Item(path.stem, 'TEXTURE', path, managed=is_managed(path)) for path in files]
+    if tab == 'SMART':
+        return ([Item(definition['name'], 'SMART', definition) for definition in BUILTIN_SMART]
+                + [Item(definition['name'], 'SMART', definition, index) for index, definition in enumerate(smart_materials())])
     if tab == 'MASKS':
         return [Item(preset['name'], 'MASK', preset) for preset in SMART_MASKS]
     if tab == 'BRUSHES':
@@ -64,4 +68,10 @@ def thumbnail(item):
         return thumbnails.material_texture(pattern_definition(item.payload))
     if item.kind == 'MASK':
         return thumbnails.material_texture(mask_definition(item.payload))
+    if item.kind == 'SMART':
+        fills = [entry for entry in item.payload['layers'] if entry['kind'] == 'FILL']
+        if fills:
+            return thumbnails.material_texture(item.payload)
+        paints = [entry['paint'] for entry in item.payload['layers'] if entry['paint']]
+        return thumbnails.file_texture(paints[0]) if paints else None
     return thumbnails.material_texture(item.payload)
