@@ -15,9 +15,10 @@ load verification.
 - Extension package `devil_painter` targeting Blender 5.2+.
 - Valid `blender_manifest.toml` metadata, permissions declaration, and build
   exclusion rules.
-- Lifecycle registration (`register` / `unregister`) with one minimal 3D View
-  sidebar panel (`DEVIL_PAINTER_PT_main`) confirming the add-on loads and
-  registers cleanly.
+- Lifecycle registration (`register` / `unregister`) with no sidebar or docked
+  panels. The add-on adds `View3D > View > Devil Painter` and Ctrl+Alt+P, which
+  open an empty GPU-drawn editor over the 3D viewport. Esc or Ctrl+Alt+P closes
+  it. Clicks inside the editor stay in the editor.
 - No texture-painting, layer-stack, brush, mask, or export implementation yet.
 
 ## Architecture requirements
@@ -35,5 +36,7 @@ load verification.
 
 - Build `dist/devil_painter-0.1.0.zip` cleanly via `python tools/build.py`.
 - Validate the packaged extension archive with `blender --command extension validate`.
-- Enable `devil_painter` in headless Blender and confirm `DEVIL_PAINTER_PT_main`
-  registers and unregisters without errors.
+- Enable `devil_painter` in headless Blender and confirm the editor operator and
+  View menu entry register and unregister without errors.
+- In a real Blender window, open the editor with Ctrl+Alt+P, confirm it renders
+  and keeps clicks away from the scene, then close it with Esc and Ctrl+Alt+P.

@@ -19,9 +19,9 @@
 - **Import integrity**: every name imported from a project module must exist in that module. A token or constant is defined in its home module before anything references it.
 - **Load gate**: no build is verified, ready, or done unless the packaged extension imports cleanly in a real Blender — every module, no mocks. Mocked headless tests never count as evidence for import or GUI-path correctness. Reports list real-Blender checks separately from mocked checks.
 - **Draw-path integrity**: code in any draw handler may only access attributes and dict keys that verifiably exist on the target object/dict as defined in this codebase. Referencing an attribute or key that is not defined on its target type is a build-blocking defect, on the same level as a bad import. Extend the static checks to cover attribute accesses on the add-on's own classes and known dict shapes wherever statically determinable; where a case cannot be determined statically, the GUI draw coverage rule below is the enforcement.
-- **Draw coverage gate**: no build is verified, ready, or done unless the real-Blender test suite exercises the active UI draw/registration path (`DEVIL_PAINTER_PT_main` in validation stage, and every painting mode/state once implemented) and asserts that no render or registration error occurs. A mode or state without draw coverage blocks the build from being reported ready — the same standing as the load gate.
-- **Core workflow end-to-end gate**: no build is verified, ready, or done unless the real-Blender test suite exercises the active user journey end-to-end without mocked scene properties (in validation stage: packaged extension install, enable, `DEVIL_PAINTER_PT_main` registration, and clean disable/unregister; once painting features exist: layer creation, stroke/fill authoring, compositing, and texture export). Calling internal backend helpers directly does not satisfy this gate.
-- Automated enforcement: `python -m tools.check_dead_code` checks all package modules for unused imports, missing cross-module imports, unreferenced module-level definitions, and statically determinable draw-path attribute/key integrity (`check_draw_integrity`), while `tests/blender_smoke.py` imports every module of the package and tests registration in real Blender with zero mocks. All are enforced during extension packaging and verification (`tools/build.py`, `tools/dev.py`, and `tests/test_dead_code.py`).
+- **Draw coverage gate**: no build is verified, ready, or done unless the real-Blender test suite exercises the active UI draw/registration path (the `DEVIL_PAINTER_OT_editor` overlay in validation stage, and every painting mode/state once implemented) and asserts that no render or registration error occurs. A mode or state without draw coverage blocks the build from being reported ready — the same standing as the load gate.
+- **Core workflow end-to-end gate**: no build is verified, ready, or done unless the real-Blender test suite exercises the active user journey end-to-end without mocked scene properties (in validation stage: packaged extension install, enable, opening the editor with Ctrl+Alt+P, drawing it, closing it with Esc or Ctrl+Alt+P, and clean disable/unregister; once painting features exist: layer creation, stroke/fill authoring, compositing, and texture export). Calling internal backend helpers directly does not satisfy this gate.
+- Automated enforcement: `python -m tools.check_dead_code` checks all package modules for unused imports, missing cross-module imports, unreferenced module-level definitions, and statically determinable draw-path attribute/key integrity (`check_draw_integrity`), while `tests/blender_smoke.py` imports every module of the package and tests registration in real Blender with zero mocks, and `tests/gui_editor.py` drives the editor through simulated input in a real Blender window and checks what it renders. All are enforced during extension packaging and verification (`tools/build.py`, `tools/dev.py`, and `tests/test_dead_code.py`).
 
 ---
 
@@ -35,7 +35,7 @@
 
 ## ARCHITECTURE & IMPLEMENTATION PRINCIPLES
 1. **Layer & Painting Pipeline Integrity**:
-   - Validation stage: repository carries only the `devil_painter` package skeleton (`__init__.py` and `blender_manifest.toml`), build/check tooling, and Blender smoke verification. Do not introduce painting feature code until the validation stage is approved.
+   - Validation stage: repository carries only the `devil_painter` package skeleton (`__init__.py`, the empty editor overlay in `editor.py`, and `blender_manifest.toml`), build/check tooling, and real-Blender smoke and GUI verification. Do not introduce painting feature code until the validation stage is approved.
    - Once painting features are designed, keep the non-destructive layer document as the source of truth and composited textures as downstream outputs.
    - Never reference proprietary third-party painting or cloth-authoring tool names in any public file.
 2. **UI & Rendering Architecture**:
@@ -50,7 +50,9 @@
 ---
 
 ## MINIMAL CONTEXTUAL UX CONTRACT
-- Validation stage: expose only one minimal 3D View sidebar panel (`DEVIL_PAINTER_PT_main` in `View3D > Sidebar > Devil Painter`) proving add-on registration and lifecycle without adding speculative controls or painting placeholders.
+- Zero sidebars and zero docked inspectors: Devil Painter never adds an N-panel tab, Properties panel, or other docked Blender panel. Its UI is its own GPU-drawn editor over the 3D viewport.
+- Launch: `View3D > View > Devil Painter` and Ctrl+Alt+P open the editor; Ctrl+Alt+P again or Esc closes it. Pointer input inside the editor stays in the editor; everything outside it reaches Blender as usual.
+- Validation stage: the editor is an empty surface with a title bar, proving launch, drawing, input capture, and lifecycle without adding speculative controls or painting placeholders.
 - Keep the workspace uncluttered and free of abandoned UI panels or unused layouts as painting UX is designed in later milestones.
 
 ## REQUIRED ARTIST ACCEPTANCE AND SHIPPING WORKFLOW
@@ -78,7 +80,7 @@
 ## DEVELOPER WORKFLOW SHORTCUTS
 Run the unified developer runner from the repository root:
 - `.\dev.cmd --quick`: Fast headless unit tests (includes dead code, unused import, and rule checks)
-- `.\dev.cmd --test`: Complete verification across unit and real-Blender smoke suites
+- `.\dev.cmd --test`: Complete verification across unit, real-Blender smoke, and real-Blender GUI suites
 - `.\dev.cmd --build`: Packages extension ZIP in `dist/`, validates it with Blender, and syncs to user addons
 - `.\dev.cmd --all`: Full end-to-end test and build pass
 - `.\dev.cmd --keep-scratch`: Combine with a task to retain artifacts for manual review

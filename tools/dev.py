@@ -26,7 +26,8 @@ def run_cmd(cmd, cwd=str(ROOT), desc=""):
     t0 = time.time()
     res = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, env=child_environment())
     dt = time.time() - t0
-    if res.returncode != 0:
+    gui_test = any(Path(argument).name.startswith('gui_') for argument in cmd)
+    if res.returncode != 0 or (gui_test and 'Traceback' in res.stdout + res.stderr):
         print(f"FAILED in {dt:.2f}s:")
         print(res.stdout)
         print(res.stderr)
@@ -54,6 +55,12 @@ def do_tests():
     for t in ["blender_smoke.py"]:
         if not run_cmd([BLENDER_PATH, "--background", "--factory-startup", "--python-exit-code", "1", "--python", f"tests/{t}"],
                        desc=f"Blender Background: {t}"):
+            return False
+
+    print("\n=== RUNNING REAL-BLENDER IN-ENGINE GUI SUITES ===")
+    for t in ["gui_editor.py"]:
+        if not run_cmd([BLENDER_PATH, "--enable-event-simulate", "--factory-startup", "--python", f"tests/{t}"],
+                       desc=f"In-Engine GUI: {t}"):
             return False
 
     print("ALL TESTS PASSED!\n")
@@ -91,7 +98,7 @@ def do_build():
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Devil Painter Dev Tool")
     parser.add_argument("--quick", action="store_true", help="Run fast headless unit tests only")
-    parser.add_argument("--test", action="store_true", help="Run all unit and Blender smoke tests")
+    parser.add_argument("--test", action="store_true", help="Run all unit, Blender smoke, and GUI tests")
     parser.add_argument("--build", action="store_true", help="Build, validate, and sync")
     parser.add_argument("--all", action="store_true", help="Test, build, and validate")
     parser.add_argument("--clean", action="store_true", help="Delete disposable scratch artifacts without touching dist or source")

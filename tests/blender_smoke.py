@@ -19,6 +19,21 @@ def check(condition, message):
     print('PASS:', message)
 
 
+def launcher_entries():
+    return [function for function in bpy.types.VIEW3D_MT_view._dyn_ui_initialize() if function.__name__ == 'launch_menu']
+
+
+def check_registered(label):
+    check(hasattr(bpy.types, 'DEVIL_PAINTER_OT_editor'), label + ' editor operator registered')
+    check(len(launcher_entries()) == 1, label + ' View menu launcher added once')
+    check(not any(name.startswith('DEVIL_PAINTER_PT') for name in dir(bpy.types)), label + ' adds no sidebar panel')
+
+
+def check_unregistered(label):
+    check(not hasattr(bpy.types, 'DEVIL_PAINTER_OT_editor'), label + ' editor operator unregistered cleanly')
+    check(not launcher_entries(), label + ' View menu launcher removed')
+
+
 pkg_dir = ROOT / 'devil_painter'
 py_files = sorted(pkg_dir.glob('*.py'))
 loaded_modules = {'__init__': devil_painter}
@@ -53,10 +68,9 @@ try:
     ext_pkg = importlib.import_module('bl_ext.user_default.devil_painter')
     check(Path(ext_pkg.__file__).resolve().is_relative_to(pkg_target.resolve()), 'bl_ext.user_default.devil_painter loaded from packaged zip')
     ext_pkg.register()
-    check(hasattr(bpy.types, 'DEVIL_PAINTER_PT_main'), 'extension panel class registered')
-    check(bpy.types.DEVIL_PAINTER_PT_main.is_registered, 'extension panel is_registered')
+    check_registered('extension')
     ext_pkg.unregister()
-    check(not hasattr(bpy.types, 'DEVIL_PAINTER_PT_main'), 'extension panel unregistered cleanly')
+    check_unregistered('extension')
 finally:
     sys.path.remove(str(ext_root))
     for k in [k for k in sys.modules if k == 'bl_ext' or k.startswith('bl_ext.')]:
@@ -68,8 +82,7 @@ finally:
         scratch_dir.rmdir()
 
 devil_painter.register()
-check(hasattr(bpy.types, 'DEVIL_PAINTER_PT_main'), 'direct package panel class registered')
-check(bpy.types.DEVIL_PAINTER_PT_main.is_registered, 'direct package panel is_registered')
+check_registered('direct package')
 devil_painter.unregister()
-check(not hasattr(bpy.types, 'DEVIL_PAINTER_PT_main'), 'direct package panel unregistered cleanly')
+check_unregistered('direct package')
 print('ALL BLENDER SMOKE CHECKS PASSED', bpy.app.version_string)
