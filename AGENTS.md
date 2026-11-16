@@ -6,19 +6,22 @@
 - Python module, class, function, and method docstrings are forbidden, whether written with `"""..."""`, `'''...'''`, ordinary single/double quotes, raw strings, or another string-literal spelling.
 - Standalone string expressions used as notes, headings, explanations, disabled code, or pseudo-comments are also forbidden, regardless of quoting style. Do not replace a removed comment with a string literal.
 - This applies to application source, tests, developer tools, launch scripts, and generated code. Existing comments and docstrings must be removed when encountered; never preserve them merely because they predate this rule.
-- Keep explanations, usage instructions, and design rationale in Markdown documentation such as `README.md` or `AGENTS.md`, not inside code. Use descriptive names and straightforward structure to make code self-documenting.
+- Keep explanations, usage instructions, and design rationale in Markdown documentation such as `README.md`, `SPEC.md`, or `AGENTS.md`, not inside code. Use descriptive names and straightforward structure to make code self-documenting.
 - Actual program data is not a comment: preserve strings that are assigned, returned, passed to functions, or otherwise used by the program, including UI labels, error messages, templates, and generated-script contents. Inspect their purpose instead of blindly deleting every triple-quoted string. Generated-script contents must themselves obey this rule.
-- When removing a docstring or comment would leave an empty required code block, retain valid syntax with `pass`.
+- When removing a docstring or comment would leave an empty required code block, retain valid syntax with `pass`; do not change behavior or protected painting and compositing algorithms.
 - Verify Python with both tokenization and AST inspection: reject every `COMMENT` token and every standalone string-expression node, including all docstrings. Tokenization alone is insufficient because Python treats docstrings as strings, not comment tokens. Apply equivalent comment checks to other code languages and generated code, then verify syntax and run the required tests. Do not claim zero comments based only on a `#` search or tokenizer scan.
 
 ## RULE ZERO-B: ZERO DEAD CODE AND ZERO UNUSED IMPORTS
 - **Dead code and unused imports are strictly forbidden across the codebase.**
 - Every import statement must be actively used in the importing file. Never leave unused symbols in `import` or `from ... import ...` statements.
 - Every module-level definition (constant, variable, function, class, or dataclass) must be actively referenced in the project or explicitly exported for Blender extension lifecycle registration (`bl_info`, registered scene operators/panels/properties).
-- No speculative, abandoned, or placeholder code left behind after consolidation.
+- No speculative, abandoned, or placeholder UI component classes, layouts, or renderers. When an architecture or workflow is consolidated, all superseded code, layouts, and helpers must be removed immediately rather than left behind.
 - **Import integrity**: every name imported from a project module must exist in that module. A token or constant is defined in its home module before anything references it.
-- **Load gate**: no build is verified, ready, or done unless the packaged extension imports and registers cleanly in a real Blender — every module, no mocks. Mocked headless tests never count as evidence for import or UI-registration correctness. Reports list real-Blender checks separately from mocked checks.
-- Automated enforcement: `python -m tools.check_dead_code` checks all package modules for unused imports, missing cross-module imports, and unreferenced module-level definitions; `python tools/check_comments.py` enforces Rule Zero; `tests/blender_smoke.py` imports and registers the add-on and packaged extension in real Blender with zero mocks. All are enforced during extension packaging and test runs (`tools/build.py` and `tests/test_checks.py`).
+- **Load gate**: no build is verified, ready, or done unless the packaged extension imports cleanly in a real Blender — every module, no mocks. Mocked headless tests never count as evidence for import or GUI-path correctness. Reports list real-Blender checks separately from mocked checks.
+- **Draw-path integrity**: code in any draw handler may only access attributes and dict keys that verifiably exist on the target object/dict as defined in this codebase. Referencing an attribute or key that is not defined on its target type is a build-blocking defect, on the same level as a bad import. Extend the static checks to cover attribute accesses on the add-on's own classes and known dict shapes wherever statically determinable; where a case cannot be determined statically, the GUI draw coverage rule below is the enforcement.
+- **Draw coverage gate**: no build is verified, ready, or done unless the real-Blender test suite exercises the active UI draw/registration path (`DEVIL_PAINTER_PT_main` in validation stage, and every painting mode/state once implemented) and asserts that no render or registration error occurs. A mode or state without draw coverage blocks the build from being reported ready — the same standing as the load gate.
+- **Core workflow end-to-end gate**: no build is verified, ready, or done unless the real-Blender test suite exercises the active user journey end-to-end without mocked scene properties (in validation stage: packaged extension install, enable, `DEVIL_PAINTER_PT_main` registration, and clean disable/unregister; once painting features exist: layer creation, stroke/fill authoring, compositing, and texture export). Calling internal backend helpers directly does not satisfy this gate.
+- Automated enforcement: `python -m tools.check_dead_code` checks all package modules for unused imports, missing cross-module imports, unreferenced module-level definitions, and statically determinable draw-path attribute/key integrity (`check_draw_integrity`), while `tests/blender_smoke.py` imports every module of the package and tests registration in real Blender with zero mocks. All are enforced during extension packaging and verification (`tools/build.py`, `tools/dev.py`, and `tests/test_dead_code.py`).
 
 ---
 
@@ -31,31 +34,76 @@
 - Keep shipping reports brief while retaining the required verification, package, merge, and cleanup facts. Documentation-only changes do not require an artificial artist test.
 
 ## ARCHITECTURE & IMPLEMENTATION PRINCIPLES
-- Validation stage: keep the repository focused on clean package layout, Blender 5.2+ extension packaging, static checks, and headless Blender load verification until painting architecture is designed and approved.
-- Keep `devil_painter/` strictly for add-on runtime code and manifest, `tests/` for automated unit and Blender smoke tests, and `tools/` for build and verification scripts.
-- Never reference proprietary third-party painting or cloth-authoring tool names in any public file.
+1. **Layer & Painting Pipeline Integrity**:
+   - Validation stage: repository carries only the `devil_painter` package skeleton (`__init__.py` and `blender_manifest.toml`), build/check tooling, and Blender smoke verification. Do not introduce painting feature code until the validation stage is approved.
+   - Once painting features are designed, keep the non-destructive layer document as the source of truth and composited textures as downstream outputs.
+   - Never reference proprietary third-party painting or cloth-authoring tool names in any public file.
+2. **UI & Rendering Architecture**:
+   - Blender native UI and GPU rendering (`gpu.shader.from_builtin('UNIFORM_COLOR')`, `POLYLINE_UNIFORM_COLOR`) when custom overlays or canvases are introduced.
+   - Shared computed bounds for rendering and hit detection.
+   - Minimalist design language with cohesive tokens once UI modules are added.
+3. **UX & Workflow Priority**:
+   - Prioritize artist flow and time-to-first-painted-texture once feature development starts.
+   - Maintain a clear, non-destructive layer workflow.
+   - Provide real-time visual feedback during painting and authoring.
 
 ---
 
+## MINIMAL CONTEXTUAL UX CONTRACT
+- Validation stage: expose only one minimal 3D View sidebar panel (`DEVIL_PAINTER_PT_main` in `View3D > Sidebar > Devil Painter`) proving add-on registration and lifecycle without adding speculative controls or painting placeholders.
+- Keep the workspace uncluttered and free of abandoned UI panels or unused layouts as painting UX is designed in later milestones.
+
 ## REQUIRED ARTIST ACCEPTANCE AND SHIPPING WORKFLOW
 - The required sequence is: implement -> automated verification -> ready for artist testing -> artist approval -> PR and merge -> verified session closure. Do not replace artist acceptance with automated tests or agent reviews.
-- Before handing off for artist testing, finish the requested work, run all unit tests, static checks, and real-Blender package/load verification, verify Rule Zero, and prepare the exact installable build. State what changed, give a short focused test checklist and the build location, and explicitly ask the user to test it. Stop and wait at this acceptance gate; do not open or merge a PR while the build is still awaiting artist acceptance.
-- Honor narrower instructions such as "draft PR only", "do not merge", "wait", or "do not push".
-- Once shipping is authorized, run `python -m unittest discover -s tests -p "test_*.py" -v`, `python tools/build.py`, `python tools/check_public.py`, `python -m tools.check_dead_code`, and `git diff --check`, verify the package matches the source, and push/merge cleanly targeting `main`.
-- Never remove `main`, the default branch, protected/release/long-lived branches, active sessions' branches or worktrees, branches supporting an open PR, or unmerged work.
-- Clean disposable scratch after diagnostics and reviews are resolved; preserve `dist/`, required fixtures, and user projects.
+- Before handing off for artist testing, finish the requested work, run all test suites and Blender package validation, verify Rule Zero, and prepare the exact installable build. State what changed, give a short focused test checklist and the build location, and explicitly ask the user to test it. Stop and wait at this acceptance gate; do not open or merge a PR while the build is still awaiting artist acceptance.
+- Use this handoff wording or its clear equivalent: "Ready for your test. Please test this build. If it passes, reply PR or ship it; I will run the final checks, create or update the PR, merge it into main, and close the session."
+- After that test handoff, the user's standalone "PR", "ship it", "go ahead", "looks good, ship", or equivalent instruction is both artist acceptance of the handed-off build and authorization to complete the entire commit/push/PR/merge workflow. Do not require a separate "approved", a second merge command, or a second manual test. If the user reports a problem or says testing is incomplete, acceptance has not been granted.
+- Honor narrower instructions such as "draft PR only", "do not merge", "wait", or "do not push". A mention or quotation of these commands while discussing the rules is not a shipping instruction. If no ready-for-test handoff or prior confirmed artist test exists, ask for that one acceptance step instead of assuming an untested build is approved.
+- Record the accepted source commit or source-tree fingerprint, the tested package checksum, and the acceptance message in the thread or PR. Preserve this acceptance across resumed sessions. Deterministic rebuilds, automated checks, PR creation, merges that do not change behavior, and documentation-only or test-only changes do not require the artist to repeat the same manual test.
+- If a later fix or conflict resolution changes artist-visible behavior from the accepted build, explain exactly what changed and request only the affected manual checks. Do not request a complete repeat of unaffected testing. Never silently apply acceptance to materially different behavior.
+- Once shipping is authorized, execute without another permission round: inspect current status and branch ancestry; preserve unrelated work; run `python tools/dev.py --test --build`, `python tools/check_public.py`, `python -m tools.check_dead_code`, `git diff --check`, Rule Zero token/AST checks, and equivalent checks for other code and generated scripts; verify the package matches the source; commit and push the verified task changes; create or update the PR targeting `main`; and register the PR with the session when supported.
+- Require all test suites, Blender package validation, required remote checks, and required reviews to pass on the exact source being merged. Resolve actionable review findings and conflicts without bypassing protections. Reverify after changes and apply the acceptance rule above if behavior changes. Never force-push or overwrite unrelated work merely to finish shipping.
+- Merge the verified PR into `main` as part of the authorized workflow; do not stop at "PR ready" and ask the user to merge it manually. Verify the remote merge, safely synchronize local `main`, and rerun the required tests, build, privacy, and Rule Zero checks against the resulting `main`. Confirm remote checks are green and the final package matches that source.
+- Clean disposable scratch through the validated developer runner after diagnostics and reviews are resolved; preserve `dist/`, required fixtures, and user projects.
+- After the merge and post-merge checks pass, audit all local branches, branches on the repository's owned remotes, and registered repository-owned worktrees, not just this session's task branch. Refresh remote references and inspect current tips, ancestry, PR state, worktree status, active sessions, and branch/PR dependents before deciding which candidates are unused. Do not treat a branch as disposable merely because it is old or has a familiar name.
+- Delete confirmed unused, integrated task branches locally and remotely, and clean unused repository-owned worktrees, as part of the authorized shipping workflow without another cleanup permission round. Verify that every candidate's current commits are integrated into remote `main`; for squash/rebase merges, verify equivalent integrated changes and the corresponding PR history instead of assuming ancestry. Recheck the remote tip before deleting a remote branch; preserve it if it moved or cannot be verified safely.
+- Never remove `main`, the default branch, protected/release/long-lived branches, active sessions' branches or worktrees, branches supporting an open PR or dependent stack, unmerged work, dirty worktrees, user projects, or uncertain candidates. A branch containing unmerged work requires separate explicit discard authorization, even if it appears abandoned. Preserve unrelated work and any candidate whose ownership, integration, cleanliness, or lack of dependents cannot be established.
+- Verify each worktree removal target against Git's registered absolute paths and repository ownership before removal. Use normal Git branch/worktree removal, never forced deletion or recursive shell deletion to bypass safeguards. If normal removal refuses, preserve the candidate and report why. Audit and prune obsolete remote-tracking references separately; pruning a tracking reference is not deletion of an actual remote branch.
+- Complete and report this cleanup audit before closing the session. List the local branches, remote branches, and worktrees removed, plus every retained cleanup candidate and its reason; report "none eligible" when appropriate rather than skipping the audit or claiming everything was deleted.
+- Close the session only after the merge and post-merge verification succeed: report the merge commit, local/remote `main` synchronization, checks, package, cleanup, and any preserved branches. When the session platform supports settlement, mark the session settled after that report. If blocked by failing checks, permissions, required reviews, or changed behavior needing acceptance, keep the session open and report the precise blocker; do not claim shipment is complete.
+- The final shipping report is a completion report, not a new testing assignment. Do not append "restart and test again", "manual testing pending", "please merge", or another approval request for the unchanged build the artist already accepted.
+- "PR" or "ship it" means complete the tested changes through merge and session closure. It does not by itself request a version bump, tag, or public GitHub release; the separate release checklist applies only when a release is explicitly requested.
+- Changes that only correct workflow rules or documentation do not need an artificial Blender/manual artist acceptance test. Validate those changes appropriately, preserve the existing accepted application build, and do not claim that editing a rule has itself authorized publication or merging.
+
+## DEVELOPER WORKFLOW SHORTCUTS
+Run the unified developer runner from the repository root:
+- `.\dev.cmd --quick`: Fast headless unit tests (includes dead code, unused import, and rule checks)
+- `.\dev.cmd --test`: Complete verification across unit and real-Blender smoke suites
+- `.\dev.cmd --build`: Packages extension ZIP in `dist/`, validates it with Blender, and syncs to user addons
+- `.\dev.cmd --all`: Full end-to-end test and build pass
+- `.\dev.cmd --keep-scratch`: Combine with a task to retain artifacts for manual review
+- `.\dev.cmd --clean`: Delete only the disposable scratch workspace after review
+
+All test suites must pass 100% with no regressions on every change.
 
 ## DISPOSABLE ARTIFACT CONTRACT
 - Keep installable deliverables in `dist/`; never auto-delete that directory.
-- Put every disposable development artifact in ignored `scratch/`: screenshots, crops, test scenes/backups, reports, generated scripts, logs, downloads, and temporary dependencies. Never use the repository root, source folders, or `dist/` as a dumping ground.
-- Disable Python bytecode generation (`PYTHONDONTWRITEBYTECODE=1` or `python -B`) for development subprocesses; do not create scattered `__pycache__` directories.
-- Cleanup must validate its repository-local target and refuse links/junctions. Never delete source, required assets/licenses, installable ZIPs, or user projects.
-- Before handing off finished work, verify the installable ZIP still exists in `dist/` and `scratch/` has been cleaned unless diagnostics are pending.
+- Put every disposable development artifact in ignored `scratch/`: screenshots, crops, test scenes/backups, reports, generated scripts, preview logs, downloads, temporary dependencies, and test libraries. Never use the repository root, source folders, or `dist/` as a dumping ground.
+- Use the developer runner and disable bytecode generation for development subprocesses; do not recreate scattered `__pycache__` directories.
+- Successful runner tasks delete scratch automatically after all requested steps finish. Failed runs preserve diagnostic artifacts. Use `--keep-scratch` for visual audits and `--clean` immediately after review is complete.
+- Cleanup must validate its repository-local target and refuse links/junctions. Never delete source, required assets/licenses, installable ZIPs, or user projects, and never silently discard an unsaved scene to unlock a file.
+- Before handing off finished work, verify the installable ZIP still exists and scratch has been removed unless diagnostics or an explicitly requested review are still pending.
 
 ## WORKING REPORTS AND REPOSITORY ROOT
-- Working reports (session reports, benchmarks, diagnoses, verification logs, audits) never live in the repository root — they go in `reports/`.
-- The repository root is reserved strictly for product and project configuration files (`README.md`, `LICENSE`, `AGENTS.md`, and top-level configuration). Never place working reports or diagnostic writeups in the root directory.
+- Working reports (session reports, benchmarks, diagnoses, verification logs, audits) never live in the repository root — they go in a new top-level folder named `reports/`.
+- The repository root is reserved strictly for product and project configuration files (`README.md`, `SPEC.md`, `LICENSE`, `AGENTS.md`, and top-level runner scripts). Never place working reports or diagnostic writeups in the root directory.
 
-## PUBLIC HYGIENE
-- Keep local git identity configured to `Artbyo3` (`170281415+Artbyo3@users.noreply.github.com`).
-- Never commit personal paths, local account names, unapproved email addresses, or credentials. Verify with `python tools/check_public.py`.
+## REQUIRED RELEASE CHECKLIST
+Follow this sequence whenever the user requests a release:
+1. Inspect Git status, remotes, branch ancestry, manifest version, tags, and existing GitHub releases. Preserve current work and never release an older commit in its place.
+2. Audit unused prototypes, screenshots, old Blender scenes/backups, logs, downloaded archives, caches, and temporary files. Remove confirmed leftovers only inside the repository; preserve runtime assets, provenance, licenses, tests, and required fixtures. Never touch user projects outside the repository or bypass blocked operations.
+3. Check current source, publication archives, and reachable Git history for personal paths, identities, and credentials with `python tools/check_public.py`. Keep generated files and machine settings ignored. Never print secrets or claim a complete privacy purge from a targeted scan; report its scope and any remaining findings. Do not rewrite history without explicit authorization.
+4. Run `python tools/dev.py --test --build`, `python tools/check_public.py`, `python -m tools.check_dead_code`, and `git diff --check`. Require every suite and Blender package validation to pass. Verify Rule Zero with comment-token and AST standalone-string/docstring checks, not tokenization alone. Confirm archive contents match the exact source being released, with no private or generated artifacts.
+5. With user authorization, commit and push the verified current source. Ensure the intended release branch contains that commit without force-pushing or overwriting unrelated work. Tag the exact source commit matching the package; never publish uncommitted changes against a stale source tag.
+6. Publish the manifest version as a GitHub release with accurate release notes, the installable extension ZIP from `dist/`, and its SHA-256 checksum. Upload only deliberate public release assets, never scratch, local scenes, screenshots, or test reports. Delete scratch after verification is complete.
+7. Verify the remote commit, tag, release status, downloadable assets, checksums, and final working-tree status. Report the release URL, validation results, cleanup performed, privacy scan scope, and any remaining blockers. Never mark incomplete cleanup or publication complete.

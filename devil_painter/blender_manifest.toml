@@ -8,8 +8,11 @@ type = "add-on"
 website = "https://github.com/Artbyo3/DEVIL-PAINTER"
 tags = ["Paint", "3D View"]
 license = ["SPDX:GPL-3.0-or-later"]
-copyright = ["2026 Artbyo3"]
+copyright = ["2026 Artbyo3", "2002-2026 Blender Authors"]
 blender_version_min = "5.2.0"
+
+[permissions]
+files = "Save and load texture layers, presets, and reference images"
 
 [build]
 paths_exclude_pattern = [
@@ -21,6 +24,7 @@ paths_exclude_pattern = [
     "*.blend[1-9]",
     "*.md",
     "!README.md",
+    "!SPEC.md",
     "assets/icons/*.png",
     "assets/icons/*.svg",
 ]

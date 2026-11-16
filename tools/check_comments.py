@@ -23,10 +23,7 @@ def check_source(text, filename='<source>'):
 def check_repository(root):
     count = 0
     for directory in ('devil_painter', 'tests', 'tools'):
-        folder = root / directory
-        if not folder.is_dir():
-            continue
-        for source in sorted(folder.rglob('*.py')):
+        for source in sorted((root / directory).rglob('*.py')):
             check_source(source.read_text(encoding='utf-8-sig'), str(source.relative_to(root)))
             count += 1
     return count

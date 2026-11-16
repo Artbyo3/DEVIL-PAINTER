@@ -20,13 +20,13 @@ def build_extension():
     source = root / 'devil_painter'
     output = extension_archive()
     output.parent.mkdir(exist_ok=True)
-    with ZipFile(output, 'w', ZIP_DEFLATED) as archive:
+    with ZipFile(output,'w',ZIP_DEFLATED) as archive:
         for file in sorted(source.rglob('*')):
             rel = file.relative_to(source)
-            if file.is_file() and '__pycache__' not in file.parts and not any(rel.match(pattern) for pattern in EXCLUDE_PATTERNS) and file.suffix in {'.py', '.toml', '.md', '.txt', '.json', '.svg', '.png'}:
-                archive.write(file, rel.as_posix())
-        for name in ('README.md', 'LICENSE'):
-            archive.write(root / name, name)
+            if file.is_file() and '__pycache__' not in file.parts and not any(rel.match(pattern) for pattern in EXCLUDE_PATTERNS) and file.suffix in {'.py','.toml','.md','.txt','.json','.svg','.png'}:
+                archive.write(file,rel.as_posix())
+        for name in ('README.md','LICENSE','SPEC.md'):
+            archive.write(root/name,name)
     print(output)
     return output
 
