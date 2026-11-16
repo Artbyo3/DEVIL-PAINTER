@@ -1,3 +1,4 @@
+import colorsys
 import math
 import time
 import blf
@@ -5,12 +6,12 @@ import gpu
 from gpu_extras.batch import batch_for_shader
 from .canvas import Rect
 from .icons import ICON_LEVELS, icon_pixels, icon_spans
+from .minimal import THUMBNAIL
 from .previews import draw_image
 from .ui_system import (ACCENT, ACCENT_BG, ACCENT_BORDER, ACCENT_HOVER, BG_ELEVATED, BG_WELL, BORDER, SURFACE_FLOATING,
                         SURFACE_OUTLINE, TEXT_MUTED, TEXT_ON_ACCENT, TEXT_PRIMARY, TEXT_SECONDARY, ComponentRenderer, Tooltip)
 
 TOAST_SECONDS = 3
-THUMBNAIL = 32
 CHECKER = ((0.32, 0.32, 0.32, 1.0), (0.22, 0.22, 0.22, 1.0))
 
 
@@ -18,7 +19,9 @@ class Renderer:
     def __init__(self):
         self.shader = None
         self.line_shader = None
+        self.smooth_shader = None
         self.s = 1
+        self.offset = (0, 0)
         self.icon_batches = {}
 
     def triangles(self, points, color, indices=None):
@@ -180,14 +183,49 @@ class Renderer:
                 self.shader.uniform_float('color', (*color[:3], color[3] * level / ICON_LEVELS))
                 batch.draw(self.shader)
 
+    def clip(self, rect):
+        if rect is None:
+            gpu.state.scissor_test_set(False)
+            blf.disable(0, blf.CLIPPING)
+            return
+        x, y, w, h = round(rect.x), round(rect.y), round(rect.w), round(rect.h)
+        gpu.state.scissor_test_set(True)
+        gpu.state.scissor_set(int(self.offset[0] + x), int(self.offset[1] + y), max(1, int(w)), max(1, int(h)))
+        blf.enable(0, blf.CLIPPING)
+        blf.clipping(0, x, y, x + w, y + h)
+
+    def gradient(self, rect, corners):
+        if self.smooth_shader is None:
+            self.smooth_shader = gpu.shader.from_builtin('SMOOTH_COLOR')
+        x, y, w, h = rect.x, rect.y, rect.w, rect.h
+        batch = batch_for_shader(self.smooth_shader, 'TRIS', {'pos': ((x, y), (x + w, y), (x + w, y + h), (x, y + h)), 'color': corners},
+                                 indices=((0, 1, 2), (0, 2, 3)))
+        gpu.state.blend_set('ALPHA')
+        self.smooth_shader.bind()
+        batch.draw(self.smooth_shader)
+
+    def controls(self, ed, controls, metrics):
+        hovered = None
+        for control in controls:
+            self.clip(control.clip)
+            hover = control.hit(*ed.pointer)
+            DRAWERS[control.kind](self, control, hover, metrics)
+            if hover and control.tip:
+                hovered = control
+        self.clip(None)
+        return hovered
+
     def draw(self, ed):
         layout = ed.workspace
         self.s = s = layout.scale
         metrics = layout.metrics
         blend = gpu.state.blend_get()
         depth = gpu.state.depth_test_get()
+        scissor = gpu.state.scissor_get()
+        self.offset = gpu.state.viewport_get()[:2]
         gpu.state.blend_set('ALPHA')
         gpu.state.depth_test_set('NONE')
+        split = layout.popover_start if layout.popover_start >= 0 else len(layout.controls)
         try:
             for rect, title in layout.cards:
                 self.round_rect(rect, SURFACE_FLOATING, radius=metrics.menu_back)
@@ -196,14 +234,14 @@ class Renderer:
                     self.text(rect.x + 14 * s, rect.y + rect.h - 24 * s, title, 13, TEXT_PRIMARY)
             for group in layout.tool_groups:
                 self.round_rect(group, SURFACE_FLOATING, radius=metrics.toolbar_item)
-            hovered = None
-            for control in layout.controls:
-                hover = control.rect.contains(*ed.pointer)
-                DRAWERS[control.kind](self, control, hover, metrics)
-                if hover and control.tip:
-                    hovered = control
+            hovered = self.controls(ed, layout.controls[:split], metrics)
             for group in layout.tool_groups:
                 self.round_rect_outline(group, SURFACE_OUTLINE, radius=metrics.toolbar_item)
+            if layout.popover is not None:
+                self.round_rect(layout.popover, SURFACE_FLOATING, radius=metrics.menu_back)
+                self.round_rect_outline(layout.popover, SURFACE_OUTLINE, radius=metrics.menu_back)
+                inside = layout.popover.contains(*ed.pointer)
+                hovered = self.controls(ed, layout.controls[split:], metrics) or (None if inside else hovered)
             self.toast(ed, metrics)
             if hovered is not None:
                 rect = hovered.rect
@@ -213,6 +251,8 @@ class Renderer:
                     position = (min(rect.x, ed.bounds.x + ed.bounds.w - 260 * s), rect.y - 18 * s)
                 ComponentRenderer.draw_tooltip(self, Tooltip(text=hovered.tip, shortcut=hovered.shortcut, pos=position, visible=True), s, metrics)
         finally:
+            self.clip(None)
+            gpu.state.scissor_set(*scissor)
             gpu.state.depth_test_set(depth)
             gpu.state.blend_set(blend)
 
@@ -223,9 +263,8 @@ class Renderer:
             ed.toast_until = time.monotonic() + TOAST_SECONDS
         if not ed.message or time.monotonic() >= ed.toast_until:
             return
-        bounds = ed.bounds
-        width = min(460 * s, max(120 * s, bounds.w - 520 * s))
-        toast = Rect(bounds.x + 60 * s, bounds.y + 12 * s, width, 30 * s)
+        stage = ed.workspace.zones.stage
+        toast = Rect(stage.x, stage.y, min(460 * s, max(120 * s, stage.w)), 30 * s)
         self.round_rect(toast, SURFACE_FLOATING, radius=metrics.tooltip)
         self.text(toast.x + 12 * s, toast.y + 10 * s, ed.message, 10, TEXT_SECONDARY, max_width=toast.w - 24 * s)
 
@@ -305,14 +344,100 @@ class Renderer:
         size = THUMBNAIL * s
         y = rect.y + (rect.h - size) / 2
         x = rect.x + 30 * s
-        self.thumbnail(Rect(x, y, size, size), control.preview, control.color, False, control.active)
+        self.thumbnail(Rect(x, y, size, size), control.preview, control.color, False, control.second > 0)
         if control.mask is not None:
             x += size + 4 * s
-            self.thumbnail(Rect(x, y, size, size), control.mask, None, True, False)
         x += size + 8 * s
         baseline = rect.y + (rect.h - 11 * s) / 2
-        self.text(x, baseline, control.label, 11, TEXT_PRIMARY, max_width=rect.x + rect.w - x - 44 * s)
+        if control.caret >= 0:
+            field = Rect(x - 4 * s, rect.y + 8 * s, rect.x + rect.w - x - 40 * s, rect.h - 16 * s)
+            self.round_rect(field, BG_WELL, radius=metrics.text)
+            self.round_rect_outline(field, ACCENT_BORDER, radius=metrics.text)
+            self.text(x, baseline, control.label, 11, TEXT_PRIMARY)
+            self.caret(x, baseline, control.label, control.caret, 11)
+        else:
+            self.text(x, baseline, control.label, 11, TEXT_PRIMARY, max_width=rect.x + rect.w - x - 44 * s)
         self.text_right(rect.x + rect.w - 8 * s, baseline + s, control.text, 9, TEXT_MUTED)
+
+    def thumb(self, control, hover, metrics):
+        self.thumbnail(control.rect, control.preview, None, True, control.active)
+        if hover and not control.active:
+            self.round_rect_outline(control.rect, ACCENT_BORDER, radius=0)
+
+    def grip(self, control, hover, metrics):
+        if not hover:
+            return
+        rect, s = control.rect, self.s
+        if rect.h > rect.w:
+            x = rect.x + rect.w / 2
+            self.lines([(x, rect.y), (x, rect.top)], ACCENT, 2)
+        else:
+            y = rect.y + rect.h / 2
+            self.lines([(rect.x + 8 * s, y), (rect.x + rect.w - 8 * s, y)], ACCENT, 2)
+
+    def caret(self, x, baseline, text, cursor, size):
+        blf.size(0, size * self.s)
+        offset = blf.dimensions(0, text[:cursor])[0]
+        self.rect(Rect(x + offset, baseline - 2 * self.s, max(1, round(self.s)), (size + 4) * self.s), ACCENT)
+
+    def header(self, control, hover, metrics):
+        rect, s = control.rect, self.s
+        if hover:
+            self.round_rect(rect, BG_ELEVATED, radius=metrics.menu_back)
+        self.draw_icon('DOWN' if control.active else 'DISCLOSURE', rect.x + 14 * s, rect.y + rect.h / 2, 10, TEXT_SECONDARY)
+        self.text(rect.x + 26 * s, rect.y + (rect.h - 12 * s) / 2, control.label, 12, TEXT_PRIMARY, max_width=rect.w - 160 * s)
+
+    def dropdown(self, control, hover, metrics):
+        rect, s = control.rect, self.s
+        self.round_rect(rect, BG_ELEVATED if hover else BG_WELL, radius=metrics.regular)
+        baseline = rect.y + (rect.h - 10 * s) / 2
+        self.text(rect.x + 8 * s, baseline, control.label, 10, TEXT_SECONDARY)
+        self.text_right(rect.x + rect.w - 24 * s, baseline, control.text, 10, TEXT_PRIMARY)
+        self.draw_icon('DOWN', rect.x + rect.w - 12 * s, rect.y + rect.h / 2, 10, TEXT_SECONDARY)
+
+    def field(self, control, hover, metrics):
+        rect, s = control.rect, self.s
+        editing = control.caret >= 0
+        self.round_rect(rect, BG_WELL, radius=metrics.text)
+        self.round_rect_outline(rect, ACCENT_BORDER if editing or hover else BORDER, radius=metrics.text)
+        baseline = rect.y + (rect.h - 10 * s) / 2
+        self.text(rect.x + 8 * s, baseline, control.text, 10, TEXT_PRIMARY, max_width=None if editing else rect.w - 16 * s)
+        if editing:
+            self.caret(rect.x + 8 * s, baseline, control.text, control.caret, 10)
+
+    def menu_item(self, control, hover, metrics):
+        rect, s = control.rect, self.s
+        if hover:
+            self.round_rect(rect, ACCENT_BG, radius=metrics.menu_item)
+        if control.active:
+            self.draw_icon('CHECK', rect.x + rect.w - 14 * s, rect.y + rect.h / 2, 12, ACCENT)
+        self.text(rect.x + 10 * s, rect.y + (rect.h - 10 * s) / 2, control.label, 10, ACCENT if hover else TEXT_PRIMARY)
+
+    def saturation_value(self, control, hover, metrics):
+        rect, s = control.rect, self.s
+        hue = control.color
+        self.gradient(rect, ((1, 1, 1, 1), hue, hue, (1, 1, 1, 1)))
+        self.gradient(rect, ((0, 0, 0, 1), (0, 0, 0, 1), (0, 0, 0, 0), (0, 0, 0, 0)))
+        center = (rect.x + control.value * rect.w, rect.y + control.second * rect.h)
+        marker = Rect(center[0] - 5 * s, center[1] - 5 * s, 10 * s, 10 * s)
+        self.round_rect_outline(marker, (0, 0, 0, 1), radius=5)
+        self.round_rect_outline(Rect(marker.x + s, marker.y + s, marker.w - 2 * s, marker.h - 2 * s), (1, 1, 1, 1), radius=4)
+
+    def hue(self, control, hover, metrics):
+        rect, s = control.rect, self.s
+        stops = [tuple(colorsys.hsv_to_rgb(index / 6, 1, 1)) + (1.0,) for index in range(7)]
+        width = rect.w / 6
+        for index in range(6):
+            segment = Rect(rect.x + index * width, rect.y, width, rect.h)
+            self.gradient(segment, (stops[index], stops[index + 1], stops[index + 1], stops[index]))
+        x = rect.x + control.value * rect.w
+        self.rect(Rect(x - 2 * s, rect.y - 2 * s, 4 * s, rect.h + 4 * s), (1, 1, 1, 1))
+
+    def scrollbar(self, control, hover, metrics):
+        rect = control.rect
+        thumb_h = max(12 * self.s, rect.h * min(1.0, control.second))
+        y = rect.y + (rect.h - thumb_h) * (1 - control.value)
+        self.round_rect(Rect(rect.x, y, rect.w, thumb_h), SURFACE_OUTLINE, radius=2)
 
     def note(self, control, hover, metrics):
         rect = control.rect
@@ -320,4 +445,7 @@ class Renderer:
 
 
 DRAWERS = {'TOOL': Renderer.tool, 'ICON': Renderer.icon_button, 'CHIP': Renderer.chip, 'PRIMARY': Renderer.primary,
-           'SLIDER': Renderer.slider, 'SWATCH': Renderer.swatch, 'TOGGLE': Renderer.toggle, 'ROW': Renderer.row, 'NOTE': Renderer.note}
+           'SLIDER': Renderer.slider, 'SWATCH': Renderer.swatch, 'TOGGLE': Renderer.toggle, 'ROW': Renderer.row, 'NOTE': Renderer.note,
+           'HEADER': Renderer.header, 'DROPDOWN': Renderer.dropdown, 'FIELD': Renderer.field, 'MENUITEM': Renderer.menu_item,
+           'SV': Renderer.saturation_value, 'HUE': Renderer.hue, 'SCROLLBAR': Renderer.scrollbar, 'THUMB': Renderer.thumb,
+           'GRIP': Renderer.grip}

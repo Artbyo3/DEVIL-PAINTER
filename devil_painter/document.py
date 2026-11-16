@@ -28,6 +28,7 @@ class DEVIL_PAINTER_PG_texture_set(bpy.types.PropertyGroup):
     paint_mask: bpy.props.BoolProperty(default=False)
     material: bpy.props.PointerProperty(type=bpy.types.Material)
     serial: bpy.props.IntProperty(default=0)
+    export_directory: bpy.props.StringProperty(default='', subtype='DIR_PATH')
 
 
 CLASSES = (DEVIL_PAINTER_PG_layer, DEVIL_PAINTER_PG_texture_set)

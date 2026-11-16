@@ -80,11 +80,11 @@ def do_build():
         return False
 
     import shutil
-    user_ext = Path(os.path.expandvars(r"%APPDATA%\Blender Foundation\Blender\5.2\extensions\user_default\devil_painter"))
-    if user_ext.exists():
+    installs = sorted(Path(os.path.expandvars(r"%APPDATA%\Blender Foundation\Blender")).glob("*/extensions/user_default/devil_painter"))
+    for user_ext in installs:
         shutil.copytree(ROOT / "devil_painter", user_ext, dirs_exist_ok=True, ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
         print(f"    Synced to {user_ext}")
-    else:
+    if not installs:
         print(f"    (User extensions folder not found, skipping sync)")
 
     if not run_cmd([BLENDER_PATH, "--background", "--factory-startup", "--python-exit-code", "1", "--python", "tests/blender_smoke.py"],

@@ -96,11 +96,11 @@ def move_layer(context, obj, data, step):
     return refresh(context, obj, data, 'Moved ' + data.layers[target].name + (' up.' if step > 0 else ' down.'))
 
 
-def select_layer(context, obj, data, index):
+def select_layer(context, obj, data, index, mask=False):
     data.active = index
-    data.paint_mask = data.paint_mask and data.layers[index].mask is not None
+    data.paint_mask = mask and data.layers[index].mask is not None
     painting.update_canvas(context, data)
-    return f'{data.layers[index].name} selected.'
+    return f'{data.layers[index].name}{" mask" if data.paint_mask else ""} selected.'
 
 
 def toggle_visible(context, obj, data, index):
@@ -109,11 +109,39 @@ def toggle_visible(context, obj, data, index):
     return refresh(context, obj, data, f'{layer.name} {"shown" if layer.visible else "hidden"}.')
 
 
-def cycle_blend(context, obj, data):
+def set_blend(context, obj, data, mode):
     layer = active_layer(data)
-    keys = [key for key, _ in BLEND_MODES]
-    layer.blend = keys[(keys.index(layer.blend) + 1) % len(keys)]
-    return refresh(context, obj, data, f'{layer.name} blends with {dict(BLEND_MODES)[layer.blend]}.')
+    layer.blend = mode
+    return refresh(context, obj, data, f'{layer.name} blends with {dict(BLEND_MODES)[mode]}.')
+
+
+def rename_layer(context, obj, data, index, name):
+    layer = data.layers[index]
+    layer.name = name.strip() or layer.name
+    return refresh(context, obj, data, f'Renamed to {layer.name}.')
+
+
+def duplicate_layer(context, obj, data):
+    source = active_layer(data)
+    if source is None:
+        return 'No layer to duplicate.'
+    data.serial += 1
+    layer = data.layers.add()
+    for key in ('kind', 'visible', 'opacity', 'blend', 'color', 'use_color', 'roughness', 'use_roughness', 'metallic', 'use_metallic'):
+        setattr(layer, key, getattr(source, key))
+    layer.uid = f'L{data.serial}'
+    layer.name = source.name + ' copy'
+    for key in ('image', 'mask'):
+        image = getattr(source, key)
+        if image is not None:
+            copy = image.copy()
+            copy.name = f'DP {obj.name} {layer.uid}' + (' mask' if key == 'mask' else '')
+            copy.pack()
+            setattr(layer, key, copy)
+    target = data.active + 1
+    data.layers.move(len(data.layers) - 1, target)
+    data.active = target
+    return refresh(context, obj, data, f'Duplicated {source.name}.')
 
 
 def toggle_channel(context, obj, data, channel):

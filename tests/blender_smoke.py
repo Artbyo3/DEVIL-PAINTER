@@ -28,7 +28,7 @@ def check_registered(label):
     check(len(launcher_entries()) == 1, label + ' View menu launcher added once')
     check(not any(name.startswith('DEVIL_PAINTER_PT') for name in dir(bpy.types)), label + ' adds no sidebar panel')
     check(hasattr(bpy.types.Object, 'devil_painter'), label + ' layer stack property registered')
-    check(all(hasattr(bpy.types, name) for name in ('DEVIL_PAINTER_OT_export_textures', 'DEVIL_PAINTER_OT_pick_color', 'DEVIL_PAINTER_OT_rename_layer')), label + ' export, color and rename operators registered')
+    check(hasattr(bpy.types, 'DEVIL_PAINTER_OT_choose_export_folder'), label + ' export folder picker registered')
 
 
 def check_unregistered(label):

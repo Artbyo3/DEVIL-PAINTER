@@ -37,6 +37,27 @@ Blender's native painting.
 - Tools: Paint, Erase, Fill, Blur, Smear, and Clone from Blender's essential
   brushes, plus Undo and Redo. The brush strip edits the color, size, and
   strength the active brush actually uses.
+- Workspace UI, fully custom-drawn, laid out in fixed zones that new features
+  plug into (`shell.py`):
+  - Workspace bar across the top: texture set name and channels, Export, Close.
+    Future mode, view, and channel switches land here.
+  - Tool strip under it: active tool, brush color, size, strength. Future brush
+    settings land here.
+  - Tool dock on the left, top-aligned under the tool strip.
+  - Right column of collapsible, scrollable panels (Layers, Properties). Its
+    width is dragged at the left edge (260 to 480 px). A divider shares the
+    height between panels when they do not fit, and a collapsed panel gives
+    its height to the others. New panels are `ColumnPanel` entries.
+  - Stage: the free viewport area between dock and column. Toasts anchor to
+    it, and the future bottom shelf is carved from its bottom edge.
+  - Properties follows the selection. Clicking a layer row selects the layer
+    content, clicking the mask thumbnail selects the mask, and each selection
+    kind lists its own sections in `PROPERTY_SECTIONS`.
+  - Popovers for the color picker, dropdowns, layer context menus, and export.
+    Layers rename inline. Rows outside the scrolled view are not built. Blender's own header, tool
+  header, toolbar, brush shelf, and navigation gizmo are hidden while the
+  workspace is open. The only native Blender UI is the folder picker behind
+  Browse in the export card.
 - Live preview: the stack compiles into the material's node tree. Value edits
   update node inputs without recompiling. Structural edits rebuild the tree.
 - Export: Base Color (sRGB), Roughness, and Metallic PNGs composited with the
