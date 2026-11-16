@@ -51,7 +51,7 @@
 
 ## MINIMAL CONTEXTUAL UX CONTRACT
 - Zero sidebars and zero docked inspectors: Devil Painter never adds an N-panel tab, Properties panel, or other docked Blender panel. Its UI is its own GPU-drawn editor over the 3D viewport.
-- Product line: Devil Painter shares Devil Designer's workspace. Port UI structure, tokens, icons, and interaction behavior from Devil Designer's `master` and tune them for painting instead of rebuilding them.
+- Product line: Devil Painter shares Devil Designer's workspace. Port UI structure, tokens, icons, and interaction behavior from Devil Designer's `master` and tune them for painting instead of rebuilding them. Painter's identity color is pink-red: its tokens in `ui_system.py` are Devil Designer's tokens re-hued to 350° at the same lightness and saturation, so the two products read as one family.
 - Launch: `View3D > View > Devil Painter` and Ctrl+Alt+P open the editor as a full canvas over the 3D viewport. The close button or Ctrl+Alt+P closes it. `3D view` shrinks it into a movable, resizable window beside the viewport and `Full canvas` restores it; the window bounds are saved with the scene. Pointer input inside the editor stays in the editor; everything outside it reaches Blender as usual.
 - Validation stage: the workspace shows the shared canvas, grid, pan and zoom, window controls, tooltips, and status toast, without a tool dock, speculative controls, or painting placeholders. The tool dock arrives with the first real painting tools.
 - Keep the workspace uncluttered and free of abandoned UI panels or unused layouts as painting UX is designed in later milestones.

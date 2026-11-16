@@ -5,7 +5,7 @@ import gpu
 from gpu_extras.batch import batch_for_shader
 from .canvas import Rect, grid_step
 from .icons import ICON_LEVELS, icon_pixels, icon_spans
-from .ui_system import (BG_BASE, BG_ELEVATED, BG_WELL, BORDER, TEXT_PRIMARY, TEXT_SECONDARY,
+from .ui_system import (BG_BASE, BG_ELEVATED, BG_WELL, BORDER, GRID_MAJOR, GRID_MINOR, GRID_ORIGIN, TEXT_PRIMARY, TEXT_SECONDARY,
                         SURFACE_FLOATING, ComponentRenderer, Tooltip)
 
 SHELL = BG_BASE
@@ -256,8 +256,8 @@ class Renderer:
                     y = view.screen((0, val), c)[1]
                     pts = [(c.x, y), (c.x + c.w, y)]
                 (major if i % 5 == 0 else minor).extend(pts)
-        self.lines(minor, (0.15, 0.18, 0.22, 0.28))
-        self.lines(major, (0.22, 0.27, 0.32, 0.42))
+        self.lines(minor, GRID_MINOR)
+        self.lines(major, GRID_MAJOR)
         origin = view.screen((0, 0), c)
         self.lines([(origin[0], c.y), (origin[0], c.y + c.h),
-                    (c.x, origin[1]), (c.x + c.w, origin[1])], (0.29, 0.44, 0.42, 0.6))
+                    (c.x, origin[1]), (c.x + c.w, origin[1])], GRID_ORIGIN)
