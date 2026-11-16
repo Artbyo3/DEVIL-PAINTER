@@ -53,9 +53,23 @@ Blender's native painting.
     patterns project by UV or tri-planar, with tiling.
   - Masks: white or black, painted with the same brushes. Painted alpha reveals
     the layer.
-- Tools: Paint, Erase, Fill, Blur, Smear, and Clone from Blender's essential
-  brushes, plus Undo and Redo. The brush strip edits the color, size, and
-  strength the active brush actually uses.
+- Tools: Paint, Erase, Fill, Blur, Smear, and Clone, plus Undo and Redo. Each
+  tool uses a Devil Painter brush, a local copy of Blender's essential brush
+  that Devil Painter configures.
+- Brushes: the tool strip holds color, size, opacity (the most one stroke can
+  cover), the brush alpha, the brush card, and a value chip per channel the
+  brush paints. The brush card sets flow, spacing, hardness (the falloff
+  curve), smoothing (the stroke stabilizer), jitter, pressure for size and
+  flow, random alpha angle, and which channels each stroke paints. The shelf
+  has Brushes (presets with stroke previews) and Alphas (stamp shapes); any
+  texture can become the brush alpha from its right-click menu.
+- Multi-channel painting: Paint and Fill strokes land in a per-set stroke
+  buffer that the material composites live over the selected paint layer and
+  its channels. When a stroke ends it merges into the layer's color and into
+  a canvas per enabled channel with the brush values, so one stroke paints
+  color, roughness, metallic, height, and the rest together. Undo and redo
+  restore the merged region on every channel. Erase, Blur, Smear, and Clone
+  work on the layer image directly.
 - Workspace UI, fully custom-drawn, laid out in fixed zones that new features
   plug into (`shell.py`):
   - Workspace bar across the top: texture set name and channels, Export, Close.

@@ -4,12 +4,12 @@ import traceback
 from pathlib import Path
 import bpy
 import numpy
-from . import actions, library, painting, shelf, thumbnails
+from . import actions, brushes, compositing, library, painting, shelf, strokes, thumbnails
 from .blending import BLEND_MODES, CHANNEL, CHANNELS, linear_to_srgb, srgb_to_linear
 from .canvas import Rect
 from .document import active_layer, set_channels, slot_value, texture_set
 from .draw import Renderer
-from .minimal import MAX_BRUSH_SIZE, REPLACE_TARGET, SCALE_RANGE, TILING_RANGE, from_slider, painter_layout
+from .minimal import BRUSH_SLIDERS, BRUSH_TOGGLES, MAX_BRUSH_SIZE, REPLACE_TARGET, SCALE_RANGE, TILING_RANGE, from_slider, painter_layout
 from .shell import MARGIN, clamp_column, clamp_split
 from .state import Popover, TextEdit, WorkspaceState
 
@@ -20,6 +20,8 @@ POINTER_TOKENS = ('MOUSE', 'TRACKPAD', 'NDOF', 'PEN', 'ERASER')
 HIDDEN_REGIONS = ('show_region_header', 'show_region_tool_header', 'show_region_toolbar', 'show_region_asset_shelf', 'show_gizmo_navigate')
 MOVES = {'MOVE_UP': 1, 'MOVE_DOWN': -1}
 PROJECTION_LABELS = {'UV': 'UV', 'TRIPLANAR': 'Tri-planar'}
+BRUSH_RANGES = {key: (field, top, .01 if key == 'BRUSH_FLOW' else 1.0 if key == 'BRUSH_SPACING' else 0.0) for key, _, field, top, _ in BRUSH_SLIDERS}
+BRUSH_FLAGS = {key: field for key, _, field in BRUSH_TOGGLES}
 _active = None
 
 
@@ -71,9 +73,12 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         self.hide_regions()
         obj = context.view_layer.objects.active
         data = texture_set(obj)
+        self.stroke_pending = False
         if data is not None:
+            actions.prepare(obj, data)
             painting.enter_paint_mode(context, obj)
             painting.update_canvas(context, data)
+            brushes.sync(context, data)
         self.renderer = Renderer()
         self.workspace = self.make_layout()
         try:
@@ -124,8 +129,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         scale = max(.5, system_scale)
         self.bounds = Rect(left, bottom, max(1, region.width - left - right), max(1, region.height - top - bottom))
         obj, data = self.painted()
-        brush = (painting.brush_value(self.scene, 'size'), painting.brush_value(self.scene, 'strength'),
-                 (*painting.brush_value(self.scene, 'color'), 1.0))
+        brush = (painting.brush_value(self.scene, 'size'), (*painting.brush_value(self.scene, 'color'), 1.0))
         name = obj.name if obj is not None and obj.type == 'MESH' else ''
         directory = (data.export_directory or default_directory(obj)) if data is not None else ''
         return painter_layout(self.bounds, scale, self.state, data, name, painting.active_tool(self.scene), brush, directory)
@@ -162,6 +166,8 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         if self._area not in list(self._window.screen.areas) or self._area.type != 'VIEW_3D':
             self.cleanup()
             return {'FINISHED'}
+        if event.type in {'TIMER', 'MOUSEMOVE'} and self.stroke_pending:
+            self.finish_stroke(context)
         if event.type == 'TIMER':
             if thumbnails.waiting():
                 thumbnails.render_next()
@@ -196,6 +202,8 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
                 self.state.popover = None
                 self._area.tag_redraw()
                 if not over:
+                    if event.type == 'LEFTMOUSE':
+                        self.begin_stroke(context)
                     return {'PASS_THROUGH'}
                 if event.type == 'LEFTMOUSE':
                     return {'RUNNING_MODAL'}
@@ -210,7 +218,12 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
                 self.state.scroll[key] = self.state.scroll.get(key, 0.0) + step
                 self._area.tag_redraw()
             return {'RUNNING_MODAL'}
+        if press and event.type == 'Z' and event.ctrl:
+            self.history_step(context, redo=event.shift)
+            return {'PASS_THROUGH'}
         if not over or not pointer_event:
+            if press and event.type == 'LEFTMOUSE' and not event.alt:
+                self.begin_stroke(context)
             return {'PASS_THROUGH'}
         if control is not None and press and event.type == 'RIGHTMOUSE' and control.key.startswith('ROW_'):
             obj, data = self.painted()
@@ -225,7 +238,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             elif item.kind == 'TEXTURE':
                 obj, data = self.painted()
                 layer = active_layer(data) if data is not None else None
-                items = [(f'TEXTURE_FILL.{index}', 'New fill layer', False)]
+                items = [(f'TEXTURE_FILL.{index}', 'New fill layer', False), (f'USE_ALPHA.{index}', 'Use as brush alpha', False)]
                 if layer is not None and layer.kind == 'FILL':
                     items += [(f'ASSIGN_TEXTURE.{channel.key}.{index}', f'Use for {channel.label.lower()}', False) for channel in set_channels(data)]
                 if item.managed:
@@ -242,6 +255,31 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             if result is not None:
                 return result
         return {'RUNNING_MODAL'}
+
+    def begin_stroke(self, context):
+        obj, data = self.painted()
+        if data is None or obj.mode != 'TEXTURE_PAINT':
+            return
+        if painting.uses_stroke_buffer(context, data):
+            self.stroke_pending = True
+        else:
+            strokes.record(None)
+
+    def finish_stroke(self, context):
+        if any(operator.bl_idname.startswith('PAINT_OT') for operator in self._window.modal_operators):
+            return
+        self.stroke_pending = False
+        obj, data = self.painted()
+        if data is not None and strokes.merge(obj, data):
+            self._area.tag_redraw()
+
+    def history_step(self, context, redo):
+        self.state.popover = None
+        if redo:
+            strokes.redo()
+            self.stroke_pending = True
+        else:
+            strokes.undo()
 
     def open_layer_menu(self, anchor, data):
         layer = active_layer(data)
@@ -344,8 +382,15 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.state.split = clamp_split((top - self.pointer[1]) / room) if room > 0 else self.state.split
         elif key == 'BRUSH_SIZE':
             painting.set_brush_value(self.scene, 'size', max(1, round(x * MAX_BRUSH_SIZE)))
-        elif key == 'BRUSH_STRENGTH':
-            painting.set_brush_value(self.scene, 'strength', x)
+        elif key == 'BRUSH_STRENGTH' and data is not None:
+            data.brush_opacity = x
+            self.brush_changed(context, data)
+        elif key in BRUSH_RANGES and data is not None:
+            setattr(data, BRUSH_RANGES[key][0], max(BRUSH_RANGES[key][2], x * BRUSH_RANGES[key][1]))
+            self.brush_changed(context, data)
+        elif key.startswith('BRUSHVAL.') and data is not None:
+            data.brush_slots[key.removeprefix('BRUSHVAL.')].value = x
+            self.brush_changed(context, data)
         elif key == 'OPACITY' and data is not None:
             actions.set_opacity(context, obj, data, x)
             if release:
@@ -377,12 +422,22 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.state.hsv = (x, self.state.hsv[1], self.state.hsv[2])
             self.apply_color(context, release)
 
+    def brush_changed(self, context, data):
+        data.brush_preset = 'Custom'
+        brushes.sync(context, data)
+        compositing.sync(data)
+
     def apply_color(self, context, commit):
         display = colorsys.hsv_to_rgb(*self.state.hsv)
         obj, data = self.painted()
         target = self.state.popover.target
         if target == 'BRUSH':
             painting.set_brush_value(self.scene, 'color', display)
+        elif target.startswith('brush:') and data is not None:
+            channel = target.removeprefix('brush:')
+            value = srgb_to_linear(numpy.array(display)) if CHANNEL[channel].srgb else display
+            data.brush_slots[channel].color = tuple(float(part) for part in value)
+            compositing.update_values(data)
         elif data is not None:
             channel, _, second = target.partition(':')
             value = srgb_to_linear(numpy.array(display)) if CHANNEL[channel].srgb else display
@@ -394,6 +449,10 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         obj, data = self.painted()
         if target == 'BRUSH':
             display = painting.brush_value(self.scene, 'color')
+        elif target.startswith('brush:'):
+            channel = target.removeprefix('brush:')
+            value = numpy.array(data.brush_slots[channel].color)
+            display = linear_to_srgb(value) if CHANNEL[channel].srgb else value
         else:
             channel, _, second = target.partition(':')
             value = numpy.array(slot_value(active_layer(data).slots[channel], bool(second)))
@@ -423,11 +482,32 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.apply_drag(context, key, x, y, False)
         elif key in painting.BRUSH_NAMES:
             painting.activate_tool(context, key)
+            painting.update_canvas(context, data)
+            brushes.sync(context, data)
             self.message = control.label + ' tool.'
         elif key == 'UNDO':
+            self.history_step(context, redo=False)
             bpy.ops.ed.undo()
         elif key == 'REDO':
+            self.history_step(context, redo=True)
             bpy.ops.ed.redo()
+        elif key == 'BRUSH_CARD':
+            self.state.popover = None if self.state.popover is not None and self.state.popover.kind == 'BRUSH' else Popover('BRUSH', control.rect)
+        elif key in BRUSH_FLAGS:
+            setattr(data, BRUSH_FLAGS[key], not getattr(data, BRUSH_FLAGS[key]))
+            self.brush_changed(context, data)
+        elif key.startswith('BRUSHUSE.'):
+            slot = data.brush_slots[key.removeprefix('BRUSHUSE.')]
+            slot.enabled = not slot.enabled
+            self.brush_changed(context, data)
+        elif key.startswith('BRUSHSW.'):
+            self.open_color(control, 'brush:' + key.removeprefix('BRUSHSW.'))
+        elif key == 'BRUSH_ALPHA':
+            self.state.shelf_open, self.state.shelf_tab = True, 'ALPHAS'
+        elif key.startswith('USE_ALPHA.'):
+            data.brush_alpha = bpy.data.images.load(str(self.shelf_item('ITEM.' + key.removeprefix('USE_ALPHA.')).payload), check_existing=True)
+            self.brush_changed(context, data)
+            self.message = 'The texture is now the brush alpha.'
         elif key == 'BRUSH_COLOR':
             self.open_color(control, 'BRUSH')
         elif key.startswith('SWATCH.'):
@@ -569,6 +649,14 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             return actions.replace_material(context, obj, data, item.payload)
         armed = '' if armed == REPLACE_TARGET else armed
         target = armed if armed and layer is not None and layer.kind == 'FILL' else ''
+        if item.kind == 'BRUSH':
+            brushes.apply_preset(context, data, item.payload)
+            compositing.sync(data)
+            return f'{item.label} brush.'
+        if item.kind == 'ALPHA':
+            data.brush_alpha = brushes.load_alpha(item.payload) if item.payload else None
+            brushes.sync(context, data)
+            return f'Brush alpha: {item.label}.'
         if item.kind == 'TEXTURE' and target:
             return actions.assign_image(context, obj, data, target, library.load_image(item.payload, CHANNEL[target]))
         if item.kind == 'PATTERN' and target:

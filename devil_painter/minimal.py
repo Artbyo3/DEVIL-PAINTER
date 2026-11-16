@@ -155,23 +155,56 @@ def workspace_bar(layout, zone, data, obj_name):
                label=f'{obj_name}  ·  {data.resolution} px')
 
 
-def tool_strip(layout, zone, tool, brush):
+BRUSH_SLIDERS = (('BRUSH_FLOW', 'Flow', 'brush_flow', 1.0, 'How much paint each dab lays down; low flow builds up gradually'),
+                 ('BRUSH_SPACING', 'Spacing', 'brush_spacing', 200.0, 'Distance between dabs, in percent of the brush size'),
+                 ('BRUSH_HARDNESS', 'Hardness', 'brush_hardness', 1.0, 'Soft or hard brush edge'),
+                 ('BRUSH_SMOOTHING', 'Smoothing', 'brush_smoothing', 1.0, 'Stabilize the stroke so it trails the pointer smoothly'),
+                 ('BRUSH_JITTER', 'Jitter', 'brush_jitter', 1.0, 'Scatter dabs around the stroke'))
+BRUSH_TOGGLES = (('BRUSH_PRESSURE_SIZE', 'Pressure size', 'brush_pressure_size'), ('BRUSH_PRESSURE_OPACITY', 'Pressure flow', 'brush_pressure_opacity'),
+                 ('BRUSH_RANDOM_ANGLE', 'Random angle', 'brush_random_angle'))
+SHORT_NAMES = {'roughness': 'Rough', 'metallic': 'Metal', 'normal': 'Normal', 'height': 'Height', 'emission': 'Emit', 'opacity': 'Alpha'}
+
+
+def brush_value_control(layout, channel, slot, rect):
+    if channel.width == 3:
+        return layout.add('BRUSHSW.' + channel.key, rect, 'SWATCH', color=slot_display(slot), tip=f'{channel.label} the brush paints')
+    return layout.add('BRUSHVAL.' + channel.key, rect, 'SLIDER', label=SHORT_NAMES[channel.key], value=slot.value, text=f'{slot.value:.2f}',
+                      tip=f'{channel.label} the brush paints')
+
+
+def tool_strip(layout, zone, tool, brush, data):
     s = layout.scale
-    size, strength, color = brush
+    size, color = brush
     layout.cards.append((zone, ''))
     y, h = zone.y + 6 * s, zone.h - 12 * s
     x = zone.x + 12 * s
     label = next((name for key, name, _, _ in TOOLS if key == tool), 'Brush')
-    layout.add('TOOL_NAME', Rect(x, y, 70 * s, h), 'NOTE', label=label)
-    x += 74 * s
-    layout.add('BRUSH_COLOR', Rect(x, y, 32 * s, h), 'SWATCH', color=color, tip='Brush color')
-    x += 42 * s
-    slider = max(60 * s, min(200 * s, (zone.x + zone.w - 18 * s - x) / 2))
+    layout.add('TOOL_NAME', Rect(x, y, 60 * s, h), 'NOTE', label=label)
+    x += 62 * s
+    layout.add('BRUSH_COLOR', Rect(x, y, 30 * s, h), 'SWATCH', color=color, tip='Brush color')
+    x += 36 * s
+    slider = max(80 * s, min(150 * s, (zone.x + zone.w - x) / 5))
     layout.add('BRUSH_SIZE', Rect(x, y, slider, h), 'SLIDER', label='Size', value=size / MAX_BRUSH_SIZE, text=f'{size} px',
                tip='Brush radius', shortcut='F')
     x += slider + 6 * s
-    layout.add('BRUSH_STRENGTH', Rect(x, y, slider, h), 'SLIDER', label='Strength', value=strength, text=f'{strength * 100:.0f}%',
-               tip='Brush strength', shortcut='Shift F')
+    layout.add('BRUSH_STRENGTH', Rect(x, y, slider, h), 'SLIDER', label='Opacity', value=data.brush_opacity,
+               text=f'{data.brush_opacity * 100:.0f}%', tip='Most a single stroke can cover', shortcut='Shift F')
+    x += slider + 6 * s
+    layout.add('BRUSH_ALPHA', Rect(x, y, h, h), 'SOURCE', icon='ELLIPSE', preview=data.brush_alpha, tip='Brush alpha: pick a stamp shape in the Alphas shelf')
+    x += h + 6 * s
+    layout.add('BRUSH_CARD', Rect(x, y, 120 * s, h), 'DROPDOWN', label='Brush', text=data.brush_preset,
+               tip='Flow, spacing, hardness, smoothing, jitter, pressure, and the channels the brush paints')
+    x += 126 * s
+    right = zone.x + zone.w - 8 * s
+    for channel in set_channels(data):
+        slot = data.brush_slots[channel.key]
+        width = (46 if channel.width == 3 else 92) * s
+        if channel.key == 'base_color' or not slot.enabled:
+            continue
+        if x + width > right:
+            break
+        brush_value_control(layout, channel, slot, Rect(x, y, width, h))
+        x += width + 4 * s
 
 
 def dock_layout(layout, zone, tool):
@@ -303,8 +336,8 @@ def channels_section(flow, data, layer, w):
         value = Rect(left, y, x + w - blend - opacity - 10 * s - left, h)
         if key == 'base_color' and not fill:
             flow.add('PAINTED', value, 'NOTE', label='Brush color')
-        elif fill and slot.source == 'IMAGE' and slot.image is not None:
-            flow.add('IMAGE_NAME.' + key, value, 'NOTE', label=slot.image.name)
+        elif slot.source == 'IMAGE' and slot.image is not None:
+            flow.add('IMAGE_NAME.' + key, value, 'NOTE', label=slot.image.name if fill else 'Painted with the brush')
         elif fill and slot.source == 'PATTERN':
             half = (value.w - 4 * s) / 2
             value_control(flow, channel, slot, Rect(value.x, y, half, h), False)
@@ -525,6 +558,32 @@ def menu_popover(layout, state, bounds):
     return card
 
 
+def brush_popover(layout, state, bounds, data):
+    s = layout.scale
+    channels = [channel for channel in set_channels(data) if channel.key != 'base_color']
+    lines = len(BRUSH_SLIDERS) + len(BRUSH_TOGGLES) + len(channels) + 1
+    card = place_popover(bounds, state.popover.anchor, 300 * s, (lines * LINE_HEIGHT + 20) * s, s)
+    x, w = card.x + 12 * s, card.w - 24 * s
+    y = card.top - 10 * s
+    for key, label, field, top, tip in BRUSH_SLIDERS:
+        y -= LINE_HEIGHT * s
+        value = getattr(data, field)
+        text = f'{value:.0f}%' if key == 'BRUSH_SPACING' else f'{value * 100:.0f}%'
+        layout.add(key, Rect(x, y + 2 * s, w, 24 * s), 'SLIDER', label=label, value=value / top, text=text, tip=tip)
+    for key, label, field in BRUSH_TOGGLES:
+        y -= LINE_HEIGHT * s
+        layout.add(key, Rect(x, y + 2 * s, w, 24 * s), 'TOGGLE', label=label, active=getattr(data, field))
+    y -= LINE_HEIGHT * s
+    layout.add('BRUSH_PAINTS', Rect(x, y + 2 * s, w, 24 * s), 'NOTE', label='Each stroke also paints')
+    for channel in channels:
+        y -= LINE_HEIGHT * s
+        slot = data.brush_slots[channel.key]
+        layout.add('BRUSHUSE.' + channel.key, Rect(x, y + 2 * s, 110 * s, 24 * s), 'TOGGLE', label=channel.label, active=slot.enabled,
+                   tip=f'Paint {channel.label.lower()} with every stroke')
+        brush_value_control(layout, channel, slot, Rect(x + 116 * s, y + 2 * s, w - 116 * s, 24 * s))
+    return card
+
+
 def export_popover(layout, state, bounds, data, directory):
     s = layout.scale
     card = place_popover(bounds, state.popover.anchor, 360 * s, 150 * s, s)
@@ -545,7 +604,7 @@ def painter_layout(bounds, scale, state, data, obj_name, tool, brush, directory)
         start_layout(layout, bounds, obj_name, state.resolution)
     else:
         workspace_bar(layout, layout.zones.bar, data, obj_name)
-        tool_strip(layout, layout.zones.strip, tool, brush)
+        tool_strip(layout, layout.zones.strip, tool, brush, data)
         dock_layout(layout, layout.zones.dock, tool)
         shelf_layout(layout, state, layout.zones.shelf)
         column_layout(layout, state, data, layout.zones.column)
@@ -555,6 +614,8 @@ def painter_layout(bounds, scale, state, data, obj_name, tool, brush, directory)
             layout.popover = color_popover(layout, state, bounds)
         elif state.popover.kind == 'MENU':
             layout.popover = menu_popover(layout, state, bounds)
+        elif state.popover.kind == 'BRUSH' and data is not None:
+            layout.popover = brush_popover(layout, state, bounds, data)
         elif data is not None:
             layout.popover = export_popover(layout, state, bounds, data, directory)
     return layout

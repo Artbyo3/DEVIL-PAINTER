@@ -1,10 +1,10 @@
 import json
 import bpy
 import numpy
-from . import baking, compositing, library, painting
+from . import baking, brushes, compositing, library, painting, strokes
 from .blending import BLEND_MODES, CHANNEL
 from .procedural import PATTERN
-from .document import SLOT_FIELDS, active_layer, add_set_channels, add_slots, children, descendants, find_layer, layer_index, set_slot_value
+from .document import SLOT_FIELDS, active_layer, add_set_channels, add_slots, children, descendants, fill_slots, find_layer, layer_index, set_slot_value
 
 KIND_NAMES = {'PAINT': 'Paint', 'FILL': 'Fill', 'FOLDER': 'Folder'}
 LAYER_FIELDS = ('kind', 'visible', 'opacity', 'projection', 'tiling', 'material')
@@ -27,10 +27,18 @@ def has_uvs(obj):
 
 
 def refresh(context, obj, data, message):
+    strokes.ensure_canvases(obj, data)
     compositing.sync(data)
     painting.update_canvas(context, data)
     bpy.ops.ed.undo_push(message='Devil Painter: ' + message)
+    strokes.record(None)
     return message
+
+
+def prepare(obj, data):
+    if not data.brush_slots:
+        fill_slots(data.brush_slots)
+    strokes.ensure_buffer(obj, data)
 
 
 def start(context, obj, resolution):
@@ -50,6 +58,7 @@ def start(context, obj, resolution):
     data.enabled = True
     data.channels.clear()
     add_set_channels(data)
+    prepare(obj, data)
     material = bpy.data.materials.new(f'Devil Painter {obj.name}')
     data.material = material
     if obj.material_slots:
@@ -60,6 +69,8 @@ def start(context, obj, resolution):
     painting.enter_paint_mode(context, obj)
     add_layer(context, obj, data, 'PAINT')
     painting.activate_tool(context, 'PAINT')
+    painting.update_canvas(context, data)
+    brushes.sync(context, data)
     return f'Painting {obj.name} at {resolution} px.' + unwrapped
 
 
@@ -115,10 +126,14 @@ def reset_material(context, obj, data):
     return refresh(context, obj, data, f'{layer.name} reset to its material.')
 
 
+def owned_images(layer):
+    canvases = [slot.image for slot in layer.slots if slot.source == 'IMAGE'] if layer.kind == 'PAINT' else []
+    return [image for image in (layer.image, layer.mask, *canvases) if image is not None]
+
+
 def remove_images(layer):
-    for image in (layer.image, layer.mask):
-        if image is not None:
-            bpy.data.images.remove(image)
+    for image in owned_images(layer):
+        bpy.data.images.remove(image)
 
 
 def delete_layer(context, obj, data):
@@ -217,6 +232,11 @@ def copy_layer(obj, data, source, parent, position):
         slot.name = slot_name
         for key, value in slot_values.items():
             setattr(slot, key, value)
+        if values['kind'] == 'PAINT' and slot.image is not None:
+            canvas = slot.image.copy()
+            canvas.name = f'DP {obj.name} {layer.uid} {slot_name}'
+            canvas.pack()
+            slot.image = canvas
     for key, image in images.items():
         if image is not None:
             copy = image.copy()

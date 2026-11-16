@@ -53,6 +53,20 @@ class DEVIL_PAINTER_PG_texture_set(bpy.types.PropertyGroup):
     solo: bpy.props.StringProperty()
     material: bpy.props.PointerProperty(type=bpy.types.Material)
     serial: bpy.props.IntProperty(default=0)
+    stroke: bpy.props.PointerProperty(type=bpy.types.Image)
+    stroke_owner: bpy.props.StringProperty()
+    brush_slots: bpy.props.CollectionProperty(type=DEVIL_PAINTER_PG_slot)
+    brush_opacity: bpy.props.FloatProperty(default=1.0, min=0.0, max=1.0)
+    brush_flow: bpy.props.FloatProperty(default=1.0, min=0.01, max=1.0)
+    brush_spacing: bpy.props.FloatProperty(default=10.0, min=1.0, max=200.0)
+    brush_hardness: bpy.props.FloatProperty(default=0.0, min=0.0, max=1.0)
+    brush_smoothing: bpy.props.FloatProperty(default=0.0, min=0.0, max=1.0)
+    brush_jitter: bpy.props.FloatProperty(default=0.0, min=0.0, max=1.0)
+    brush_random_angle: bpy.props.BoolProperty(default=False)
+    brush_pressure_size: bpy.props.BoolProperty(default=False)
+    brush_pressure_opacity: bpy.props.BoolProperty(default=True)
+    brush_alpha: bpy.props.PointerProperty(type=bpy.types.Image)
+    brush_preset: bpy.props.StringProperty(default='Soft Round')
     export_directory: bpy.props.StringProperty(default='', subtype='DIR_PATH')
 
 
@@ -78,8 +92,12 @@ def add_set_channels(data):
 
 
 def add_slots(layer):
+    fill_slots(layer.slots)
+
+
+def fill_slots(slots):
     for channel in CHANNELS:
-        slot = layer.slots.add()
+        slot = slots.add()
         slot.name = channel.key
         slot.enabled = channel.on_new_layers
         set_slot_value(slot, channel.default)

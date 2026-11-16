@@ -1,10 +1,11 @@
 from dataclasses import dataclass
 from pathlib import Path
 from . import thumbnails
+from .brushes import ALPHAS, PRESETS, alpha_path, preview_path
 from .library import BUILTIN_MATERIALS, is_managed, material, pattern, plain, scan, texture, user_materials
 from .procedural import PATTERN, PATTERNS
 
-TABS = (('MATERIALS', 'Materials'), ('TEXTURES', 'Textures'), ('PATTERNS', 'Patterns'))
+TABS = (('MATERIALS', 'Materials'), ('TEXTURES', 'Textures'), ('PATTERNS', 'Patterns'), ('BRUSHES', 'Brushes'), ('ALPHAS', 'Alphas'))
 
 
 @dataclass(frozen=True)
@@ -35,6 +36,10 @@ def items(tab):
     if tab == 'TEXTURES':
         files, _ = scan()
         return [Item(path.stem, 'TEXTURE', path, managed=is_managed(path)) for path in files]
+    if tab == 'BRUSHES':
+        return [Item(preset['name'], 'BRUSH', preset, preview_file=str(preview_path(preset))) for preset in PRESETS]
+    if tab == 'ALPHAS':
+        return [Item('No alpha', 'ALPHA', '')] + [Item(name, 'ALPHA', name, preview_file=str(alpha_path(name))) for name in ALPHAS]
     return [Item(entry.label, 'PATTERN', entry.key) for entry in PATTERNS]
 
 
@@ -43,6 +48,8 @@ def thumbnail(item):
         return thumbnails.file_texture(item.payload)
     if item.preview_file:
         return thumbnails.file_texture(item.preview_file)
+    if item.kind == 'ALPHA':
+        return None
     if item.kind == 'PATTERN':
         return thumbnails.material_texture(pattern_definition(item.payload))
     return thumbnails.material_texture(item.payload)

@@ -31,22 +31,57 @@ def signature(data):
     layers = '|'.join(':'.join((layer.uid, layer.kind, layer.parent, layer.projection, layer.image.name if layer.image else '',
                                 layer.mask.name if layer.mask else '', *(slot_signature(slot) for slot in layer.slots if slot.enabled)))
                       for layer in shown_layers(data.layers))
-    return f'{channels};{data.solo};{layers}'
+    stroke = stroke_link(data)
+    owner = f'{stroke[0]}:{",".join(stroke[2])}' if stroke else ''
+    return f'{channels};{data.solo};{layers};{owner}'
 
 
-def layer_coverage(nodes, links, layer, x):
+def math_node(nodes, links, operation, first, second, x, y, name=''):
+    node = nodes.new('ShaderNodeMath')
+    node.operation = operation
+    node.location = (x, y)
+    if name:
+        node.name = name
+    for index, value in enumerate((first, second)):
+        if isinstance(value, float):
+            node.inputs[index].default_value = value
+        else:
+            links.new(value, node.inputs[index])
+    return node.outputs[0]
+
+
+def stroke_over(nodes, links, image, alpha, color, x):
+    texture = nodes.new('ShaderNodeTexImage')
+    texture.image = image
+    texture.location = (x - 300, -1600)
+    added = math_node(nodes, links, 'MINIMUM', texture.outputs['Alpha'], 1.0, x - 150, -1600, 'stroke.opacity')
+    total = math_node(nodes, links, 'SUBTRACT', math_node(nodes, links, 'ADD', alpha, added, x - 150, -1700),
+                      math_node(nodes, links, 'MULTIPLY', alpha, added, x - 150, -1800), x, -1700)
+    weight = math_node(nodes, links, 'DIVIDE', added, math_node(nodes, links, 'MAXIMUM', total, 1e-4, x, -1800), x + 150, -1700)
+    mix = nodes.new('ShaderNodeMix')
+    mix.data_type = 'RGBA'
+    mix.location = (x + 150, -1500)
+    links.new(weight, socket(mix.inputs, 'Factor', 'VALUE'))
+    links.new(color, socket(mix.inputs, 'A', 'RGBA'))
+    links.new(texture.outputs['Color'], socket(mix.inputs, 'B', 'RGBA'))
+    return total, socket(mix.outputs, 'Result', 'RGBA'), weight
+
+
+def layer_coverage(nodes, links, layer, x, stroke=None):
     factor = nodes.new('ShaderNodeMath')
     factor.name = layer.uid + '.opacity'
     factor.operation = 'MULTIPLY'
     factor.location = (x - 150, -900)
     factor.inputs[0].default_value = 1.0
-    coverage, source = factor.outputs[0], None
+    coverage, source, weight = factor.outputs[0], None, None
     if layer.kind == 'PAINT' and layer.image:
         texture = nodes.new('ShaderNodeTexImage')
         texture.image = layer.image
         texture.location = (x - 300, -1100)
-        links.new(texture.outputs['Alpha'], factor.inputs[0])
-        source = texture.outputs['Color']
+        alpha, source = texture.outputs['Alpha'], texture.outputs['Color']
+        if stroke is not None:
+            alpha, source, weight = stroke_over(nodes, links, stroke, alpha, source, x)
+        links.new(alpha, factor.inputs[0])
     if layer.mask:
         mask = nodes.new('ShaderNodeTexImage')
         mask.image = layer.mask
@@ -57,7 +92,7 @@ def layer_coverage(nodes, links, layer, x):
         links.new(coverage, masked.inputs[0])
         links.new(mask.outputs['Alpha'], masked.inputs[1])
         coverage = masked.outputs[0]
-    return coverage, source
+    return coverage, source, weight
 
 
 def layer_coordinates(nodes, links, layer, x):
@@ -149,8 +184,9 @@ def scaled(nodes, links, factor, name, x, y):
     return node.outputs[0]
 
 
-def compose_layer(nodes, links, channels, layer, results, x):
-    coverage, painted = layer_coverage(nodes, links, layer, x)
+def compose_layer(nodes, links, channels, layer, results, x, stroke):
+    owner = stroke is not None and stroke[0] == layer.uid
+    coverage, painted, weight = layer_coverage(nodes, links, layer, x, stroke[1] if owner else None)
     vector = layer_coordinates(nodes, links, layer, x) if uses_coordinates(layer) else None
     for row, channel in enumerate(channels):
         slot = layer.slots[channel.key]
@@ -161,23 +197,32 @@ def compose_layer(nodes, links, channels, layer, results, x):
         factor = scaled(nodes, links, coverage, name + '.opacity', x - 100, y - 60)
         node = channel_mix(nodes, links, name, results[channel.key], factor, slot.blend, x, y)
         content = painted if channel.key == 'base_color' and painted is not None else slot_content(nodes, links, layer, slot, vector, name, x, y)
+        if owner and channel.key != 'base_color' and channel.key in stroke[2]:
+            brushed = nodes.new('ShaderNodeMix')
+            brushed.name = name + '.stroke'
+            brushed.data_type = 'RGBA'
+            brushed.location = (x - 150, y + 60)
+            links.new(weight, socket(brushed.inputs, 'Factor', 'VALUE'))
+            if content is not None:
+                links.new(content, socket(brushed.inputs, 'A', 'RGBA'))
+            content = socket(brushed.outputs, 'Result', 'RGBA')
         if content is not None:
             links.new(content, socket(node.inputs, 'B', 'RGBA'))
         results[channel.key] = socket(node.outputs, 'Result', 'RGBA')
 
 
-def compose(nodes, links, channels, layers, parent, results, column):
+def compose(nodes, links, channels, layers, parent, results, column, stroke=None):
     for layer in children(layers, parent):
         if not layer.visible:
             continue
         x = 300 * column[0]
         column[0] += 1
         if layer.kind != 'FOLDER':
-            compose_layer(nodes, links, channels, layer, results, x)
+            compose_layer(nodes, links, channels, layer, results, x, stroke)
             continue
         below = dict(results)
-        inner = compose(nodes, links, channels, layers, layer.uid, dict(results), column)
-        coverage, _ = layer_coverage(nodes, links, layer, 300 * column[0])
+        inner = compose(nodes, links, channels, layers, layer.uid, dict(results), column, stroke)
+        coverage, _, _ = layer_coverage(nodes, links, layer, 300 * column[0])
         for row, channel in enumerate(channels):
             if inner[channel.key] is not below[channel.key]:
                 node = channel_mix(nodes, links, f'{layer.uid}.{channel.key}', below[channel.key], coverage, 'MIX', 300 * column[0], 300 - 250 * row)
@@ -187,7 +232,7 @@ def compose(nodes, links, channels, layers, parent, results, column):
     return results
 
 
-def build_tree(tree, channels, layers, solo=None, raw=False):
+def build_tree(tree, channels, layers, solo=None, raw=False, stroke=None):
     nodes, links = tree.nodes, tree.links
     nodes.clear()
     output = nodes.new('ShaderNodeOutputMaterial')
@@ -199,7 +244,7 @@ def build_tree(tree, channels, layers, solo=None, raw=False):
         node.location = (-400, 300 - 250 * row)
         results[channel.key] = node.outputs[0]
     column = [0]
-    results = compose(nodes, links, channels, layers, '', results, column)
+    results = compose(nodes, links, channels, layers, '', results, column, stroke)
     end = 300 * column[0]
     output.location, shader.location = (end + 600, 0), (end + 300, 0)
     for key, name in SHADER_INPUTS.items():
@@ -214,7 +259,9 @@ def build_tree(tree, channels, layers, solo=None, raw=False):
     links.new(surface, output.inputs['Surface'])
 
 
-def write_values(nodes, channels, layers):
+def write_values(nodes, channels, layers, brush=None):
+    if brush is not None and 'stroke.opacity' in nodes:
+        nodes['stroke.opacity'].inputs[1].default_value = brush[0]
     for layer in shown_layers(layers):
         nodes[layer.uid + '.opacity'].inputs[1].default_value = layer.opacity
         if layer.kind == 'FOLDER':
@@ -227,6 +274,10 @@ def write_values(nodes, channels, layers):
                 continue
             name = f'{layer.uid}.{channel.key}'
             nodes[name + '.opacity'].inputs[1].default_value = slot.opacity
+            if brush is not None and name + '.stroke' in nodes:
+                brushed = nodes[name + '.stroke']
+                socket(brushed.inputs, 'B', 'RGBA').default_value = rgba(brush[1][channel.key])
+                socket(brushed.inputs, 'A', 'RGBA').default_value = rgba(slot_value(slot))
             if channel.key == 'base_color' and layer.kind == 'PAINT':
                 continue
             if slot.source == 'PATTERN':
@@ -240,18 +291,28 @@ def write_values(nodes, channels, layers):
                 socket(nodes[name].inputs, 'B', 'RGBA').default_value = rgba(slot_value(slot))
 
 
+def stroke_link(data):
+    if not data.stroke_owner or data.stroke is None:
+        return None
+    return data.stroke_owner, data.stroke, tuple(slot.name for slot in data.brush_slots if slot.enabled)
+
+
+def brush_values(data):
+    return data.brush_opacity, {slot.name: slot_value(slot) for slot in data.brush_slots}
+
+
 def solo_channel(data):
     return next((channel for channel in set_channels(data) if channel.key == data.solo), None)
 
 
 def rebuild(data, solo=None, raw=False):
     material = data.material
-    build_tree(material.node_tree, set_channels(data), list(data.layers), solo or solo_channel(data), raw)
+    build_tree(material.node_tree, set_channels(data), list(data.layers), solo or solo_channel(data), raw, None if raw else stroke_link(data))
     material[SIGNATURE_KEY] = '' if raw else signature(data)
 
 
 def update_values(data):
-    write_values(data.material.node_tree.nodes, set_channels(data), list(data.layers))
+    write_values(data.material.node_tree.nodes, set_channels(data), list(data.layers), brush_values(data))
 
 
 def sync(data):

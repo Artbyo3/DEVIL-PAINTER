@@ -176,7 +176,8 @@ def journey():
     paint_layer = data.layers[0]
     check(data.enabled and data.resolution == 1024 and len(data.layers) == 1 and paint_layer.kind == 'PAINT', 'Start painting creates a 1K stack with a paint layer')
     check(cube.mode == 'TEXTURE_PAINT' and space.shading.type == 'MATERIAL', 'the viewport switches to texture paint with material preview')
-    check(bpy.context.scene.tool_settings.image_paint.canvas == paint_layer.image, 'the brush paints on the selected layer')
+    check(bpy.context.scene.tool_settings.image_paint.canvas == data.stroke and data.stroke_owner == paint_layer.uid,
+          'the brush paints into the stroke buffer of the selected layer')
     check(has('PANEL_LAYERS') and has('PANEL_PROPERTIES'), 'the right column shows the layers and properties panels')
     check(control('SET_NAME').label.startswith('Cube'), 'the workspace bar names the texture set')
     zones = editor._active.workspace.zones
@@ -189,7 +190,80 @@ def journey():
 
     stroke(window, region)
     yield 1.0
-    check(alpha(paint_layer.image).max() > .5, 'a brush stroke in the viewport paints the layer')
+    check(alpha(paint_layer.image).max() > .5 and alpha(data.stroke).max() == 0.0, 'a brush stroke in the viewport paints the layer')
+    roughness_canvas = paint_layer.slots['roughness'].image
+    check(paint_layer.slots['roughness'].source == 'IMAGE' and roughness_canvas is not None and not paint_layer.slots['height'].image,
+          'the same stroke paints the roughness canvas and leaves channels the brush skips alone')
+
+    click(window, region, 'BRUSH_CARD')
+    yield 0.4
+    check(all(has(key) for key in ('BRUSH_FLOW', 'BRUSH_SPACING', 'BRUSH_HARDNESS', 'BRUSH_SMOOTHING', 'BRUSH_JITTER', 'BRUSHUSE.metallic')),
+          'the brush card offers flow, spacing, hardness, smoothing, jitter and the painted channels')
+    rect = control('BRUSH_HARDNESS').rect
+    press(window, 'LEFTMOUSE', region.x + rect.x + rect.w * .8, region.y + rect.y + rect.h / 2)
+    yield 0.3
+    brush = bpy.context.scene.tool_settings.image_paint.brush
+    check(abs(data.brush_hardness - .8) < .05 and brush.curve_distance_falloff_preset == 'CUSTOM' and brush.library is None,
+          'hardness shapes the falloff of the Devil Painter brush')
+    rect = control('BRUSH_SMOOTHING').rect
+    press(window, 'LEFTMOUSE', region.x + rect.x + rect.w * .5, region.y + rect.y + rect.h / 2)
+    yield 0.3
+    check(brush.use_smooth_stroke and data.brush_preset == 'Custom', 'smoothing turns on the stroke stabilizer')
+    press(window, 'ESC', *middle)
+    yield 0.3
+    click(window, region, 'SHELF_TAB.BRUSHES')
+    yield 0.4
+    for _ in range(20):
+        if control('ITEM.0').preview is not None:
+            break
+        yield 0.2
+    check(control('ITEM.0').preview is not None, 'brush presets show stroke previews')
+    click(window, region, f'ITEM.{shelf_index("Hard Round")}')
+    yield 0.4
+    brush = bpy.context.scene.tool_settings.image_paint.brush
+    check(data.brush_preset == 'Hard Round' and brush.spacing == 8 and not brush.use_smooth_stroke, 'clicking a brush preset sets the brush')
+    click(window, region, 'SHELF_TAB.ALPHAS')
+    yield 0.4
+    click(window, region, f'ITEM.{shelf_index("Star")}')
+    yield 0.4
+    check(data.brush_alpha is not None and brush.mask_texture is not None and brush.mask_texture.image == data.brush_alpha,
+          'clicking an alpha stamps the brush with it')
+    check(control('BRUSH_ALPHA').preview == data.brush_alpha, 'the tool strip shows the brush alpha')
+    click(window, region, f'ITEM.{shelf_index("No alpha")}')
+    yield 0.4
+    check(data.brush_alpha is None and brush.mask_texture is None, 'No alpha clears the stamp')
+    click(window, region, 'SHELF_TAB.MATERIALS')
+    yield 0.3
+
+    rect = control('BRUSHVAL.metallic').rect
+    press(window, 'LEFTMOUSE', region.x + rect.x + rect.w - 1, region.y + rect.y + rect.h / 2)
+    yield 0.3
+    check(data.brush_slots['metallic'].value > .95, 'the metallic chip in the tool strip sets what the brush paints')
+    stroke(window, region)
+    yield 1.0
+    metallic_canvas = paint_layer.slots['metallic'].image
+
+    def channel_max(image):
+        values = numpy.empty(len(image.pixels), dtype=numpy.float32)
+        image.pixels.foreach_get(values)
+        return float(values.reshape(-1, 4)[:, 0].max())
+
+    check(channel_max(metallic_canvas) > .9, 'one stroke paints color, roughness and metallic together')
+    press(window, 'Z', *middle, ctrl=True)
+    yield 0.8
+    cube = bpy.data.objects['Cube']
+    data = cube.devil_painter
+    paint_layer = data.layers[0]
+    check(editor._active is not None and channel_max(bpy.data.images[metallic_canvas.name]) < .1, 'Ctrl+Z undoes the stroke on every channel')
+    press(window, 'Z', *middle, ctrl=True, shift=True)
+    yield 1.0
+    cube = bpy.data.objects['Cube']
+    data = cube.devil_painter
+    paint_layer = data.layers[0]
+    check(channel_max(bpy.data.images[metallic_canvas.name]) > .9 and alpha(data.stroke).max() == 0.0, 'Ctrl+Shift+Z repaints it')
+    rect = control('BRUSHVAL.metallic').rect
+    press(window, 'LEFTMOUSE', region.x + rect.x + 1, region.y + rect.y + rect.h / 2)
+    yield 0.3
 
     click(window, region, 'ADD_FILL')
     yield 0.5
@@ -651,10 +725,13 @@ def journey():
     rect = control('BRUSH_STRENGTH').rect
     press(window, 'LEFTMOUSE', region.x + rect.x + rect.w * .25, region.y + rect.y + rect.h / 2)
     yield 0.3
-    check(abs(painting.brush_value(bpy.context.scene, 'strength') - .25) < .03, 'the strength slider sets the strength the brush uses')
+    nodes = data.material.node_tree.nodes
+    check(abs(data.brush_opacity - .25) < .03 and abs(nodes['stroke.opacity'].inputs[1].default_value - data.brush_opacity) < 1e-5,
+          'the opacity slider caps what one stroke can cover')
     click(window, region, 'ERASE')
     yield 0.5
-    check(control('ERASE').active, 'the dock switches to the eraser')
+    check(control('ERASE').active and bpy.context.scene.tool_settings.image_paint.canvas == next(layer for layer in data.layers if layer.uid == data.active_uid).image
+          and abs(painting.brush_value(bpy.context.scene, 'strength') - .25) < .03, 'the eraser works on the layer itself at the brush opacity')
 
     click(window, region, 'CLOSE')
     yield 0.5

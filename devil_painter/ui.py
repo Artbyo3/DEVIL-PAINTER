@@ -1,6 +1,6 @@
 import bpy
 from bpy.app.handlers import persistent
-from . import document, operators, thumbnails
+from . import actions, document, operators, strokes, thumbnails
 from .editor import DEVIL_PAINTER_OT_editor, close_active
 
 
@@ -14,6 +14,7 @@ KEYMAPS = []
 @persistent
 def on_load(_):
     close_active()
+    strokes.forget()
 
 
 @persistent
@@ -22,10 +23,10 @@ def on_save(_):
         data = document.texture_set(obj)
         if data is None:
             continue
-        for layer in data.layers:
-            for image in (layer.image, layer.mask):
-                if image is not None and (image.is_dirty or image.packed_file is None):
-                    image.pack()
+        images = [image for layer in data.layers for image in actions.owned_images(layer)] + ([data.stroke] if data.stroke else [])
+        for image in images:
+            if image.is_dirty or image.packed_file is None:
+                image.pack()
 
 
 classes = (DEVIL_PAINTER_OT_editor,) + operators.CLASSES
