@@ -27,11 +27,13 @@ def check_registered(label):
     check(hasattr(bpy.types, 'DEVIL_PAINTER_OT_editor'), label + ' editor operator registered')
     check(len(launcher_entries()) == 1, label + ' View menu launcher added once')
     check(not any(name.startswith('DEVIL_PAINTER_PT') for name in dir(bpy.types)), label + ' adds no sidebar panel')
+    check(hasattr(bpy.types.Scene, 'dp_ui_rect'), label + ' editor window bounds property registered')
 
 
 def check_unregistered(label):
     check(not hasattr(bpy.types, 'DEVIL_PAINTER_OT_editor'), label + ' editor operator unregistered cleanly')
     check(not launcher_entries(), label + ' View menu launcher removed')
+    check(not hasattr(bpy.types.Scene, 'dp_ui_rect'), label + ' editor window bounds property removed')
 
 
 pkg_dir = ROOT / 'devil_painter'

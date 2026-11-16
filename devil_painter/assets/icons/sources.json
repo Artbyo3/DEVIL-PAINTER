@@ -1,0 +1,244 @@
+{
+  "GRID": {
+    "collection": "Blender built-in icons",
+    "icon": "ASSET_MANAGER",
+    "url": "https://raw.githubusercontent.com/blender/blender/e13b728c6880d3084d9d57c30031ed5df8b39dee/release/datafiles/icons_svg/asset_manager.svg",
+    "sha256": "1ddab43cf964ad15e91b0c5c04a55a0ddb10c24bf435473466caf21ed2bf7f02",
+    "license": "GPL-2.0-or-later"
+  },
+  "CLOSE": {
+    "collection": "Blender built-in icons",
+    "icon": "X",
+    "url": "https://raw.githubusercontent.com/blender/blender/e13b728c6880d3084d9d57c30031ed5df8b39dee/release/datafiles/icons_svg/x.svg",
+    "sha256": "7f0ae571ac217e45f033f8ac4fe46a499a521b6ca6e908ddb83ee3410a9f5c58",
+    "license": "GPL-2.0-or-later"
+  },
+  "PLAY": {
+    "collection": "Blender built-in icons",
+    "icon": "PLAY",
+    "url": "https://raw.githubusercontent.com/blender/blender/e13b728c6880d3084d9d57c30031ed5df8b39dee/release/datafiles/icons_svg/play.svg",
+    "sha256": "354497080cdfdcc06206cf9dad004abc04530926e94da8f4c5ed77eae23fa5f4",
+    "license": "GPL-2.0-or-later"
+  },
+  "PAUSE": {
+    "collection": "Blender built-in icons",
+    "icon": "PAUSE",
+    "url": "https://raw.githubusercontent.com/blender/blender/e13b728c6880d3084d9d57c30031ed5df8b39dee/release/datafiles/icons_svg/pause.svg",
+    "sha256": "74e79096516749a8e486e47d102a7ed5097ed35d3b7891ef57d4c47f2b1c0db4",
+    "license": "GPL-2.0-or-later"
+  },
+  "FIT": {
+    "collection": "Blender built-in icons",
+    "icon": "ZOOM_SELECTED",
+    "url": "https://raw.githubusercontent.com/blender/blender/e13b728c6880d3084d9d57c30031ed5df8b39dee/release/datafiles/icons_svg/zoom_selected.svg",
+    "sha256": "2d70e3f1c7731f67b085e68c7a51a2fc1fcd9859c9c0f20d320ce0cb5fd153a7",
+    "license": "GPL-2.0-or-later"
+  },
+  "MORE": {
+    "collection": "Kenney Game Icons",
+    "file": "PNG/White/2x/barsHorizontal.png",
+    "sha256": "3b8529604d7c8a3a28aa39709b8838031c87062a8e5a5ee0087c7e9d0357a14d"
+  },
+  "SAVE": {
+    "collection": "Blender built-in icons",
+    "icon": "FILE_TICK",
+    "url": "https://raw.githubusercontent.com/blender/blender/e13b728c6880d3084d9d57c30031ed5df8b39dee/release/datafiles/icons_svg/file_tick.svg",
+    "sha256": "ee7b1058d51ba23378dbd25cb082ac1cff2f73c4bc2d3b3d7c886da0733e1d2e",
+    "license": "GPL-2.0-or-later"
+  },
+  "UNDO": {
+    "collection": "Blender built-in icons",
+    "icon": "LOOP_BACK",
+    "url": "https://raw.githubusercontent.com/blender/blender/e13b728c6880d3084d9d57c30031ed5df8b39dee/release/datafiles/icons_svg/loop_back.svg",
+    "sha256": "03c1f289ede0dbbde3fa5fecda293591180eb7216239ebaae2ecadbf15ed197e",
+    "license": "GPL-2.0-or-later"
+  },
+  "CHEVRON": {
+    "collection": "Blender built-in icons",
+    "icon": "TRIA_UP",
+    "url": "https://raw.githubusercontent.com/blender/blender/e13b728c6880d3084d9d57c30031ed5df8b39dee/release/datafiles/icons_svg/tria_up.svg",
+    "sha256": "4e5adaf285c163f10aedc12c80c82e51828f7aed214b185f0c5b72b15557fe82",
+    "license": "GPL-2.0-or-later"
+  },
+  "DISCLOSURE": {
+    "collection": "Blender built-in icons",
+    "icon": "DISCLOSURE_TRI_RIGHT",
+    "url": "https://raw.githubusercontent.com/blender/blender/e13b728c6880d3084d9d57c30031ed5df8b39dee/release/datafiles/icons_svg/disclosure_tri_right.svg",
+    "sha256": "fc578b2fa85b886f78fea7a60f30d15fc79351ff0e8d9162224086b62e98838a",
+    "license": "GPL-2.0-or-later"
+  },
+  "EXPAND": {
+    "collection": "Blender built-in icons",
+    "icon": "FULLSCREEN_ENTER",
+    "url": "https://raw.githubusercontent.com/blender/blender/e13b728c6880d3084d9d57c30031ed5df8b39dee/release/datafiles/icons_svg/fullscreen_enter.svg",
+    "sha256": "d921422d7c90088d549d2c2e7b546251ff53932faa07c8f805e90890f4d19cc4",
+    "license": "GPL-2.0-or-later"
+  },
+  "DOWN": {
+    "collection": "Blender built-in icons",
+    "icon": "TRIA_DOWN",
+    "url": "https://raw.githubusercontent.com/blender/blender/e13b728c6880d3084d9d57c30031ed5df8b39dee/release/datafiles/icons_svg/tria_down.svg",
+    "sha256": "55cc02eb89143156100e074788e8313a69bff1ca1bc33675f77428b32dd3f483",
+    "license": "GPL-2.0-or-later"
+  },
+  "SETTINGS": {
+    "collection": "Blender built-in icons",
+    "icon": "SETTINGS",
+    "url": "https://raw.githubusercontent.com/blender/blender/e13b728c6880d3084d9d57c30031ed5df8b39dee/release/datafiles/icons_svg/settings.svg",
+    "sha256": "57a0ec7ef8fca5d32d49ece992c220930b8c8fa7978bd4cc846521405d11a85a",
+    "license": "GPL-2.0-or-later"
+  },
+  "CHECK": {
+    "collection": "Blender built-in icons",
+    "icon": "CHECKMARK",
+    "url": "https://raw.githubusercontent.com/blender/blender/e13b728c6880d3084d9d57c30031ed5df8b39dee/release/datafiles/icons_svg/checkmark.svg",
+    "sha256": "a9192f3d01de6e583476a3ce72668dd0b67e946a0b641b03c9499ce7f52b1dfa",
+    "license": "GPL-2.0-or-later"
+  },
+  "SELECT": {
+    "collection": "Blender built-in icons",
+    "icon": "OPS.GENERIC.SELECT",
+    "url": "https://raw.githubusercontent.com/blender/blender/e13b728c6880d3084d9d57c30031ed5df8b39dee/release/datafiles/icons/ops.generic.select.dat",
+    "sha256": "3f09dda7752731609385ee216288cc0ed416a0ee174efa34117130dd53fd7900",
+    "license": "GPL-2.0-or-later"
+  },
+  "POLYGON": {
+    "collection": "Blender built-in icons",
+    "icon": "OPS.GPENCIL.PRIMITIVE_POLYLINE",
+    "url": "https://raw.githubusercontent.com/blender/blender/e13b728c6880d3084d9d57c30031ed5df8b39dee/release/datafiles/icons/ops.gpencil.primitive_polyline.dat",
+    "sha256": "d071717a9bfe74e3737979ac8619f051d1658a56b8b9d28e1a2d1dc9500e08ef",
+    "license": "GPL-2.0-or-later"
+  },
+  "INTERNAL": {
+    "collection": "Blender built-in icons",
+    "icon": "OPS.CURVE.DRAW",
+    "url": "https://raw.githubusercontent.com/blender/blender/e13b728c6880d3084d9d57c30031ed5df8b39dee/release/datafiles/icons/ops.curve.draw.dat",
+    "sha256": "eb8572b4837645a62f714e13b12d80351a5418c9b729089b4f2dc297b1106d4d",
+    "license": "GPL-2.0-or-later"
+  },
+  "RECTANGLE": {
+    "collection": "Blender built-in icons",
+    "icon": "OPS.GPENCIL.PRIMITIVE_BOX",
+    "url": "https://raw.githubusercontent.com/blender/blender/e13b728c6880d3084d9d57c30031ed5df8b39dee/release/datafiles/icons/ops.gpencil.primitive_box.dat",
+    "sha256": "11487a34115e894cc370f0f932d8dbab7d72ddd66d3404a9df0c79cc153f3cfa",
+    "license": "GPL-2.0-or-later"
+  },
+  "ELLIPSE": {
+    "collection": "Blender built-in icons",
+    "icon": "OPS.GPENCIL.PRIMITIVE_CIRCLE",
+    "url": "https://raw.githubusercontent.com/blender/blender/e13b728c6880d3084d9d57c30031ed5df8b39dee/release/datafiles/icons/ops.gpencil.primitive_circle.dat",
+    "sha256": "22a9bcf107bc051100c8e635d4380c90024a166779f21845eaf858caa114e5e7",
+    "license": "GPL-2.0-or-later"
+  },
+  "DART": {
+    "collection": "mapbox/maki",
+    "url": "https://raw.githubusercontent.com/mapbox/maki/28e2a3602e4bde033a1dd388e86e9c117b425e34/icons/triangle-stroked.svg",
+    "sha256": "75a6348b510186413a832d681f499529062602808548b66972fac9fd7d4ccb0e"
+  },
+  "GARMENT": {
+    "collection": "mapbox/maki",
+    "url": "https://raw.githubusercontent.com/mapbox/maki/28e2a3602e4bde033a1dd388e86e9c117b425e34/icons/clothing-store.svg",
+    "sha256": "34d756d74c62d7a9a642bf252b9f3d20d5308614fdd01f3c4f7d4e09a25871ed"
+  },
+  "SEW": {
+    "collection": "rapideditor/temaki",
+    "url": "https://raw.githubusercontent.com/rapideditor/temaki/6d9ac860d1d615d4449aab049f630d25d036c19e/icons/needle_and_spool.svg",
+    "sha256": "a60bc14c7aecbeca1380961599640a50c169a60e87de6fbd75f741962ce0adbe"
+  },
+  "PIN": {
+    "collection": "Blender built-in icons",
+    "icon": "PINNED",
+    "url": "https://raw.githubusercontent.com/blender/blender/e13b728c6880d3084d9d57c30031ed5df8b39dee/release/datafiles/icons_svg/pinned.svg",
+    "sha256": "34b03f9436a3eb6e3e0dc6e1d8af06a01dbbda93f3d79906a3d36982aa485263",
+    "license": "GPL-2.0-or-later"
+  },
+  "REDO": {
+    "collection": "Blender built-in icons",
+    "icon": "LOOP_FORWARDS",
+    "url": "https://raw.githubusercontent.com/blender/blender/e13b728c6880d3084d9d57c30031ed5df8b39dee/release/datafiles/icons_svg/loop_forwards.svg",
+    "sha256": "e68758e7ae73abc7be363aba01e85f15df1488063134d452caf36de25f725a6f",
+    "license": "GPL-2.0-or-later"
+  },
+  "LIBRARY": {
+    "collection": "Blender built-in icons",
+    "icon": "ASSET_MANAGER",
+    "url": "https://raw.githubusercontent.com/blender/blender/e13b728c6880d3084d9d57c30031ed5df8b39dee/release/datafiles/icons_svg/asset_manager.svg",
+    "sha256": "1ddab43cf964ad15e91b0c5c04a55a0ddb10c24bf435473466caf21ed2bf7f02",
+    "license": "GPL-2.0-or-later"
+  },
+  "SNAP_ON": {
+    "collection": "Blender built-in icons",
+    "icon": "SNAP_ON",
+    "url": "https://raw.githubusercontent.com/blender/blender/e13b728c6880d3084d9d57c30031ed5df8b39dee/release/datafiles/icons_svg/snap_on.svg",
+    "sha256": "7d1b26c4dc296bf4e016b3e8b824014c3efdb11d511dd1c6630a0bc68966bcd8",
+    "license": "GPL-2.0-or-later"
+  },
+  "SNAP_OFF": {
+    "collection": "Blender built-in icons",
+    "icon": "SNAP_OFF",
+    "url": "https://raw.githubusercontent.com/blender/blender/e13b728c6880d3084d9d57c30031ed5df8b39dee/release/datafiles/icons_svg/snap_off.svg",
+    "sha256": "6e5682e8e3f9e2e46ed8512bc449a1d94742fca9d2c0ccc29963613758c5ccb8",
+    "license": "GPL-2.0-or-later"
+  },
+  "HIDE_OFF": {
+    "collection": "Blender built-in icons",
+    "icon": "HIDE_OFF",
+    "url": "https://raw.githubusercontent.com/blender/blender/e13b728c6880d3084d9d57c30031ed5df8b39dee/release/datafiles/icons_svg/hide_off.svg",
+    "sha256": "2b7b6445b7ea9d3a524351501d09f471540f223d8d3d35b485de3517b250de83",
+    "license": "GPL-2.0-or-later"
+  },
+  "HIDE_ON": {
+    "collection": "Blender built-in icons",
+    "icon": "HIDE_ON",
+    "url": "https://raw.githubusercontent.com/blender/blender/e13b728c6880d3084d9d57c30031ed5df8b39dee/release/datafiles/icons_svg/hide_on.svg",
+    "sha256": "8fd39f0bb7e0b43005b5dcd3dbd9afaec43acc8b7eaae6ef9050717de240559a",
+    "license": "GPL-2.0-or-later"
+  },
+  "KNIFE": {
+    "collection": "Blender built-in icons",
+    "icon": "OPS.MESH.KNIFE_TOOL",
+    "url": "https://raw.githubusercontent.com/blender/blender/e13b728c6880d3084d9d57c30031ed5df8b39dee/release/datafiles/icons/ops.mesh.knife_tool.dat",
+    "sha256": "8fec9a897bb43f07ec691f0aaffcc9943884250cf2d98f44db68872fc9e95e20",
+    "license": "GPL-2.0-or-later"
+  },
+  "RULER": {
+    "collection": "Blender built-in icons",
+    "icon": "OPS.VIEW3D.RULER",
+    "url": "https://raw.githubusercontent.com/blender/blender/e13b728c6880d3084d9d57c30031ed5df8b39dee/release/datafiles/icons/ops.view3d.ruler.dat",
+    "sha256": "c3cc4544b73d8546460457fe157cb079a77af16bfbb27f84d2360772fcb99570",
+    "license": "GPL-2.0-or-later"
+  },
+  "OBJECT_DATA": {
+    "collection": "Blender built-in icons",
+    "icon": "OBJECT_DATA",
+    "url": "https://raw.githubusercontent.com/blender/blender/e13b728c6880d3084d9d57c30031ed5df8b39dee/release/datafiles/icons_svg/object_data.svg",
+    "sha256": "cfe32e515b13d6b15d81fa676d1c0c32c3776c4279ca7feb8c4b748bd0ffb494",
+    "license": "GPL-2.0-or-later"
+  },
+  "OUTLINER_OB_MESH": {
+    "collection": "Blender built-in icons",
+    "icon": "OUTLINER_OB_MESH",
+    "url": "https://raw.githubusercontent.com/blender/blender/e13b728c6880d3084d9d57c30031ed5df8b39dee/release/datafiles/icons_svg/outliner_ob_mesh.svg",
+    "sha256": "ea5199353617e3d7e9762709f3719196afd122a463f341f3784f5575ac54146a",
+    "license": "GPL-2.0-or-later"
+  },
+  "EYEDROPPER": {
+    "collection": "Blender built-in icons",
+    "icon": "EYEDROPPER",
+    "url": "https://raw.githubusercontent.com/blender/blender/e13b728c6880d3084d9d57c30031ed5df8b39dee/release/datafiles/icons_svg/eyedropper.svg",
+    "sha256": "22cde207d4cabc93246bbbd7576a649b5e9e79100796ed56140be9bb061d12f3",
+    "license": "GPL-2.0-or-later"
+  },
+  "PANEL_CLOSE": {
+    "collection": "Blender built-in icons",
+    "icon": "PANEL_CLOSE",
+    "url": "https://raw.githubusercontent.com/blender/blender/e13b728c6880d3084d9d57c30031ed5df8b39dee/release/datafiles/icons_svg/panel_close.svg",
+    "sha256": "e2db88ba7e868c87d414cca75d17c6d7047b9d8797fa3594f5d2c6e0dd3012a1",
+    "license": "GPL-2.0-or-later"
+  },
+  "SHAPE": {
+    "collection": "rapideditor/temaki",
+    "url": "https://raw.githubusercontent.com/rapideditor/temaki/6d9ac860d1d615d4449aab049f630d25d036c19e/icons/hand.svg",
+    "sha256": "3f0cd6db9d0b17902bdde687745acb49f927e6dc498c27ae72cce0f6cae0f912"
+  }
+}

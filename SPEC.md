@@ -17,8 +17,10 @@ load verification.
   exclusion rules.
 - Lifecycle registration (`register` / `unregister`) with no sidebar or docked
   panels. The add-on adds `View3D > View > Devil Painter` and Ctrl+Alt+P, which
-  open an empty GPU-drawn editor over the 3D viewport. Esc or Ctrl+Alt+P closes
-  it. Clicks inside the editor stay in the editor.
+  open the Devil workspace shared with Devil Designer as a full canvas over the
+  3D viewport. `3D view` turns it into a movable, resizable window and
+  `Full canvas` restores it. The close button or Ctrl+Alt+P closes it. Clicks
+  inside the editor stay in the editor.
 - No texture-painting, layer-stack, brush, mask, or export implementation yet.
 
 ## Architecture requirements
@@ -39,4 +41,6 @@ load verification.
 - Enable `devil_painter` in headless Blender and confirm the editor operator and
   View menu entry register and unregister without errors.
 - In a real Blender window, open the editor with Ctrl+Alt+P, confirm it renders
-  and keeps clicks away from the scene, then close it with Esc and Ctrl+Alt+P.
+  and keeps clicks away from the scene, zoom the canvas, switch to the 3D view
+  window and move it, restore the full canvas, then close it with the close
+  button and Ctrl+Alt+P.

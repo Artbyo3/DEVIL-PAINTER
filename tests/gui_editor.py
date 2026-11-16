@@ -13,6 +13,7 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, str(ROOT))
 import devil_painter
 from devil_painter import editor
+from devil_painter.ui_system import BG_BASE
 
 TIMEOUT = 60
 STARTED = time.time()
@@ -37,20 +38,22 @@ def viewport():
     return window, area, region
 
 
+def move(window, x, y):
+    window.event_simulate(type='MOUSEMOVE', value='NOTHING', x=int(x), y=int(y))
+
+
 def press(window, kind, x, y, **modifiers):
-    window.event_simulate(type='MOUSEMOVE', value='NOTHING', x=x, y=y)
-    window.event_simulate(type=kind, value='PRESS', x=x, y=y, **modifiers)
-    window.event_simulate(type=kind, value='RELEASE', x=x, y=y, **modifiers)
+    move(window, x, y)
+    window.event_simulate(type=kind, value='PRESS', x=int(x), y=int(y), **modifiers)
+    window.event_simulate(type=kind, value='RELEASE', x=int(x), y=int(y), **modifiers)
 
 
-def rendered_pixels(window, area, region):
+def on_screen(region, rect):
+    return region.x + rect.x + rect.w / 2, region.y + rect.y + rect.h / 2
+
+
+def rendered_pixels(window, area, region, probes):
     offscreen = gpu.types.GPUOffScreen(region.width, region.height)
-    surface, bar, _ = editor.editor_frame(region)
-    probes = {
-        'bar': (int(bar[0] + bar[2] / 2), int(bar[1] + bar[3] / 2)),
-        'surface': (int(surface[0] + surface[2] / 2), int(surface[1] + surface[3] / 3)),
-        'margin': (int(surface[0] / 2), int(surface[1] / 2)),
-    }
     pixels = {}
     with offscreen.bind():
         framebuffer = gpu.state.active_framebuffer_get()
@@ -59,56 +62,85 @@ def rendered_pixels(window, area, region):
             gpu.matrix.load_identity()
             gpu.matrix.load_projection_matrix(Matrix(((2 / region.width, 0, 0, -1), (0, 2 / region.height, 0, -1), (0, 0, 1, 0), (0, 0, 0, 1))))
             with bpy.context.temp_override(window=window, area=area, region=region):
-                editor._active.draw_overlay()
+                editor._active.renderer.draw(editor._active)
         for name, (x, y) in probes.items():
-            pixels[name] = tuple(framebuffer.read_color(x, y, 1, 1, 4, 0, 'FLOAT').to_list()[0][0])
+            pixels[name] = tuple(framebuffer.read_color(int(x), int(y), 1, 1, 4, 0, 'FLOAT').to_list()[0][0])
     offscreen.free()
     return pixels
-
-
-def close_to(color, expected):
-    return all(abs(a - b) < 0.02 for a, b in zip(color, expected))
 
 
 def journey():
     devil_painter.register()
     yield 0.5
     window, area, region = viewport()
+    scene = bpy.context.scene
     cube = bpy.data.objects['Cube']
     cube.select_set(True)
-    shortcut = (area.x + area.width // 2, area.y + area.height // 2)
-    empty_spot = (region.x + int(region.width * 0.12), region.y + int(region.height * 0.2))
+    middle = (area.x + area.width / 2, area.y + area.height / 2)
 
-    press(window, 'P', *shortcut, ctrl=True, alt=True)
+    press(window, 'P', *middle, ctrl=True, alt=True)
     yield 0.5
-    check(editor._active is not None, 'Ctrl+Alt+P opens the editor over the 3D viewport')
-    check(editor._active._handle is not None, 'editor draw handler is installed')
+    active = editor._active
+    check(active is not None and active.full, 'Ctrl+Alt+P opens the full-canvas editor over the 3D viewport')
+    layout = active.canvas_layout
+    check({'CLOSE', 'SHOW_3D'} <= set(layout.buttons), 'editor shows the close and 3D view buttons')
 
     with bpy.context.temp_override(window=window, area=area, region=region):
         bpy.ops.wm.redraw_timer(type='DRAW', iterations=2)
-    pixels = rendered_pixels(window, area, region)
-    check(close_to(pixels['bar'], editor.BAR_COLOR), 'editor title bar renders its color')
-    check(pixels['surface'][3] > 0.9, 'editor surface covers the viewport')
-    check(pixels['margin'][3] == 0.0, 'editor leaves its margin uncovered')
+    canvas = layout.canvas
+    pixels = rendered_pixels(window, area, region, {
+        'canvas': (canvas.x + canvas.w * .23, canvas.y + canvas.h * .27),
+        'outside': (1, 1),
+    })
+    check(all(abs(a - b) < .06 for a, b in zip(pixels['canvas'], BG_BASE)), 'canvas renders the shared dark base color')
+    check(pixels['outside'][3] == 0.0, 'editor leaves the viewport margin uncovered')
 
+    empty_spot = (region.x + canvas.x + canvas.w * .2, region.y + canvas.y + canvas.h * .3)
     press(window, 'LEFTMOUSE', *empty_spot)
     yield 0.5
-    check(cube.select_get(), 'clicks inside the editor do not reach the scene behind it')
+    check(cube.select_get(), 'clicks inside the editor stay in the editor')
 
-    press(window, 'ESC', *shortcut)
+    zoom = active.view.zoom
+    move(window, *empty_spot)
+    window.event_simulate(type='WHEELUPMOUSE', value='PRESS', x=int(empty_spot[0]), y=int(empty_spot[1]))
+    yield 0.3
+    check(active.view.zoom > zoom, 'scrolling over the canvas zooms it')
+
+    press(window, 'LEFTMOUSE', *on_screen(region, layout.buttons['SHOW_3D'][0]))
     yield 0.5
-    check(editor._active is None, 'Esc closes the editor')
+    check(not active.full and 'RESTORE_CANVAS' in active.canvas_layout.buttons, '3D view shrinks the editor into a window')
+    panel = active.canvas_layout.panel
+    check(panel.x > region.width * .2, 'the editor window sits on the right and reveals the 3D viewport')
 
-    press(window, 'LEFTMOUSE', *empty_spot)
+    grab = (region.x + panel.x + panel.w * .4, region.y + panel.y + panel.h - 15 * active.canvas_layout.scale)
+    move(window, *grab)
+    window.event_simulate(type='LEFTMOUSE', value='PRESS', x=int(grab[0]), y=int(grab[1]))
+    move(window, grab[0] - 60, grab[1] - 40)
+    window.event_simulate(type='LEFTMOUSE', value='RELEASE', x=int(grab[0] - 60), y=int(grab[1] - 40))
     yield 0.5
-    check(not cube.select_get(), 'the same click reaches the scene once the editor is closed')
+    moved = active.canvas_layout.panel
+    check(abs(moved.x - (panel.x - 60)) < 2 and abs(moved.y - (panel.y - 40)) < 2, 'dragging the top bar moves the editor window')
+    check(abs(scene.dp_ui_rect[0] * active.canvas_layout.scale - moved.x) < 2, 'the window position is saved with the scene')
 
-    press(window, 'P', *shortcut, ctrl=True, alt=True)
+    viewport_spot = (region.x + moved.x * .5, region.y + region.height * .3)
+    press(window, 'LEFTMOUSE', *viewport_spot)
+    yield 0.5
+    check(not cube.select_get(), 'clicks beside the editor window reach the 3D viewport')
+
+    press(window, 'LEFTMOUSE', *on_screen(region, active.canvas_layout.buttons['RESTORE_CANVAS'][0]))
+    yield 0.5
+    check(active.full and 'SHOW_3D' in active.canvas_layout.buttons, 'Full canvas restores the full editor')
+
+    press(window, 'LEFTMOUSE', *on_screen(region, active.canvas_layout.buttons['CLOSE'][0]))
+    yield 0.5
+    check(editor._active is None, 'the close button closes the editor')
+
+    press(window, 'P', *middle, ctrl=True, alt=True)
     yield 0.5
     check(editor._active is not None, 'Ctrl+Alt+P reopens the editor')
-    press(window, 'P', *shortcut, ctrl=True, alt=True)
+    press(window, 'P', *middle, ctrl=True, alt=True)
     yield 0.5
-    check(editor._active is None, 'Ctrl+Alt+P toggles the editor closed')
+    check(editor._active is None, 'Ctrl+Alt+P closes the editor again')
 
     devil_painter.unregister()
     check(not hasattr(bpy.types, 'DEVIL_PAINTER_OT_editor'), 'editor unregisters cleanly')
