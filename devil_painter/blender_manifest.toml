@@ -1,0 +1,26 @@
+schema_version = "1.0.0"
+id = "devil_painter"
+version = "0.1.0"
+name = "Devil Painter"
+tagline = "Layer-based texture painting inside Blender"
+maintainer = "Artbyo3"
+type = "add-on"
+website = "https://github.com/Artbyo3/DEVIL-PAINTER"
+tags = ["Paint", "3D View"]
+license = ["SPDX:GPL-3.0-or-later"]
+copyright = ["2026 Artbyo3"]
+blender_version_min = "5.2.0"
+
+[build]
+paths_exclude_pattern = [
+    ".*",
+    "__pycache__/",
+    "tests/",
+    "tools/",
+    "*.zip",
+    "*.blend[1-9]",
+    "*.md",
+    "!README.md",
+    "assets/icons/*.png",
+    "assets/icons/*.svg",
+]
