@@ -1,5 +1,4 @@
 from pathlib import Path
-import hashlib
 import re
 import subprocess
 import sys
@@ -15,14 +14,12 @@ FORBIDDEN_SUFFIXES = {'.blend','.blend1','.zip','.pyc','.pyo','.pem','.key'}
 PUBLIC_IDENTITIES = {(ALIAS, EMAIL), ('T3 Code', 't3code@users.noreply.github.com'),
                      ('github-actions[bot]', 'github-actions[bot]@users.noreply.github.com')}
 PUBLIC_COMMITTERS = PUBLIC_IDENTITIES | {('GitHub', 'noreply' + '@github.com')}
-APPROVED_AUTHOR_FINGERPRINTS = {'b18b665c5f6c803b9215ddde43d51f1d8c60927f051acaf08c2989da82883697'}
 
 
 PUBLISHED_REFS = ('--branches', '--tags', '--remotes')
 
 
 def inspect_commit_metadata(records, errors):
-    acknowledged_authors = 0
     for record in records.splitlines():
         fields = record.split('\0')
         if len(fields) != 5 or not re.fullmatch(r'[0-9a-f]{40,64}', fields[0]):
@@ -32,21 +29,14 @@ def inspect_commit_metadata(records, errors):
         author = tuple(fields[1:3])
         committer = tuple(fields[3:5])
         if author not in PUBLIC_IDENTITIES:
-            fingerprint = hashlib.sha256('\0'.join(author).encode('utf-8')).hexdigest()
-            if fingerprint in APPROVED_AUTHOR_FINGERPRINTS:
-                acknowledged_authors += 1
-            else:
-                errors.append(f'commit {commit_id}: unapproved author identity')
+            errors.append(f'commit {commit_id}: unapproved author identity')
         if committer not in PUBLIC_COMMITTERS:
             errors.append(f'commit {commit_id}: unapproved committer identity')
-    return acknowledged_authors
 
 
 def inspect_payload(name, payload, errors):
-    is_icon = name.startswith('devil_painter/assets/icons/') and name.endswith('.png')
-    is_docs_image = name.startswith('docs-site/') and name.endswith('.png')
-    if is_icon or is_docs_image:
-        kind = 'icon image' if is_icon else 'image'
+    if name.startswith('devil_painter/assets/icons/') and name.endswith('.png'):
+        kind = 'icon image'
         if not payload.startswith(b'\x89PNG\r\n\x1a\n'):
             errors.append(name+': invalid '+kind)
             return
@@ -64,8 +54,8 @@ def inspect_payload(name, payload, errors):
                 errors.append(name+': unexpected image metadata')
             if chunk_type == b'IHDR':
                 if length != 13:
-                    errors.append(name+': unexpected icon dimensions' if is_icon else name+': corrupt image')
-                elif is_icon and struct.unpack('>II', chunk_data[:8]) != (64, 64):
+                    errors.append(name+': unexpected icon dimensions')
+                elif struct.unpack('>II', chunk_data[:8]) != (64, 64):
                     errors.append(name+': unexpected icon dimensions')
             chunk_types.append(chunk_type)
             offset += length + 12
@@ -122,7 +112,7 @@ def main():
                 inspect_payload('devil_painter/'+member, z.read(member), errors)
                 errors[before:] = ['extension archive/'+error for error in errors[before:]]
     commits=subprocess.run(['git','log',*PUBLISHED_REFS,'--format=%H%x00%an%x00%ae%x00%cn%x00%ce'],cwd=ROOT,capture_output=True,text=True,check=True)
-    acknowledged_authors = inspect_commit_metadata(commits.stdout, errors)
+    inspect_commit_metadata(commits.stdout, errors)
     messages=subprocess.run(['git','log',*PUBLISHED_REFS,'--format=%B'],cwd=ROOT,capture_output=True,text=True)
     if messages.returncode==0:
         inspect_text('commit messages',messages.stdout,errors)
@@ -138,8 +128,6 @@ def main():
         payload = subprocess.run(['git', 'cat-file', 'blob', object_id], cwd=ROOT, capture_output=True, check=True).stdout
         inspect_payload(name, payload, errors)
         history_count += 1
-    if acknowledged_authors:
-        print(f'Privacy notice: {acknowledged_authors} commit(s) retain an explicitly accepted published author identity; original metadata remains in Git history.')
     if errors:
         print('Publication check failed:')
         print('\n'.join(sorted(set(errors))))
