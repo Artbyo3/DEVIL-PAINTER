@@ -5,10 +5,13 @@ import gpu
 from gpu_extras.batch import batch_for_shader
 from .canvas import Rect
 from .icons import ICON_LEVELS, icon_pixels, icon_spans
+from .previews import draw_image
 from .ui_system import (ACCENT, ACCENT_BG, ACCENT_BORDER, ACCENT_HOVER, BG_ELEVATED, BG_WELL, BORDER, SURFACE_FLOATING,
                         SURFACE_OUTLINE, TEXT_MUTED, TEXT_ON_ACCENT, TEXT_PRIMARY, TEXT_SECONDARY, ComponentRenderer, Tooltip)
 
 TOAST_SECONDS = 3
+THUMBNAIL = 32
+CHECKER = ((0.32, 0.32, 0.32, 1.0), (0.22, 0.22, 0.22, 1.0))
 
 
 class Renderer:
@@ -278,13 +281,37 @@ class Renderer:
             self.draw_icon('CHECK', rect.x + 12 * s, rect.y + rect.h / 2, 12, ACCENT)
         self.text(rect.x + 24 * s, rect.y + (rect.h - 10 * s) / 2, control.label, 10, TEXT_PRIMARY if control.active else TEXT_MUTED)
 
+    def checker(self, rect):
+        cells = 4
+        size = rect.w / cells
+        for column in range(cells):
+            for row in range(cells):
+                self.rect(Rect(rect.x + column * size, rect.y + row * size, size, size), CHECKER[(column + row) % 2])
+
+    def thumbnail(self, rect, image, color, mask, selected):
+        if mask:
+            draw_image(image, rect, True)
+        elif image is not None:
+            self.checker(rect)
+            draw_image(image, rect, False)
+        else:
+            self.rect(rect, color)
+        self.round_rect_outline(rect, ACCENT if selected else SURFACE_OUTLINE, radius=0)
+
     def row(self, control, hover, metrics):
         rect, s = control.rect, self.s
         if control.active or hover:
             self.round_rect(rect, ACCENT_BG if control.active else BG_ELEVATED, radius=metrics.menu_item)
-        self.draw_icon(control.icon, rect.x + 38 * s, rect.y + rect.h / 2, 14, ACCENT if control.active else TEXT_MUTED)
+        size = THUMBNAIL * s
+        y = rect.y + (rect.h - size) / 2
+        x = rect.x + 30 * s
+        self.thumbnail(Rect(x, y, size, size), control.preview, control.color, False, control.active)
+        if control.mask is not None:
+            x += size + 4 * s
+            self.thumbnail(Rect(x, y, size, size), control.mask, None, True, False)
+        x += size + 8 * s
         baseline = rect.y + (rect.h - 11 * s) / 2
-        self.text(rect.x + 52 * s, baseline, control.label, 11, TEXT_PRIMARY, max_width=rect.w - 120 * s)
+        self.text(x, baseline, control.label, 11, TEXT_PRIMARY, max_width=rect.x + rect.w - x - 44 * s)
         self.text_right(rect.x + rect.w - 8 * s, baseline + s, control.text, 9, TEXT_MUTED)
 
     def note(self, control, hover, metrics):

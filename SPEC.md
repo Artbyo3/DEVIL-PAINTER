@@ -41,7 +41,37 @@ Blender's native painting.
   update node inputs without recompiling. Structural edits rebuild the tree.
 - Export: Base Color (sRGB), Roughness, and Metallic PNGs composited with the
   same math as the preview.
+- Layer rows show thumbnails: the painted image over a checkerboard or the
+  fill color, plus a grayscale mask thumbnail when the layer has a mask.
 - Saving packs every layer image and mask into the `.blend`.
+
+## Long-term direction
+
+The target is the complete workflow of a dedicated layer-based texture painting
+application, inside Blender, in a simple image-led UI. Artists coming from those
+applications should recognize every step. Blender artists should be able to
+follow the same workflow without learning a second program. Images replace text
+wherever they can: thumbnails, previews, and swatches.
+
+Planned stages, each shipped as a tested increment:
+
+1. Project setup: a new-project card with mesh, template, resolution, and
+   channel choices, and a texture set per material slot with previews.
+2. Channels: base color, metallic, roughness, normal, height, emission,
+   opacity, and ambient occlusion, with a solo-channel view of any of them.
+3. Layers: folders, per-channel blend and opacity, drag reordering, and
+   duplicate, all with thumbnails.
+4. Mesh-map baking: normal, ambient occlusion, curvature, position, thickness,
+   and ID, from the mesh itself or a high-poly source.
+5. Masks and generators: curvature, ambient occlusion, position, and edge wear
+   generators driven by the baked maps, plus levels, blur, and fill effects.
+6. Materials and smart materials: a shelf of rendered material previews to drop
+   onto layers, and saving any layer or folder as a smart material.
+7. Brushes, alphas, and stencils: preview shelves, and painting several
+   channels in one stroke.
+8. A 2D texture view in the workspace.
+9. Export presets: glTF, game-engine packed maps, and custom channel packing per
+   texture set.
 
 ## Not in the MVP
 

@@ -7,7 +7,7 @@ from .ui_system import MinimalMetrics
 
 MAX_BRUSH_SIZE = 500
 CARD_WIDTH = 264
-ROW_HEIGHT = 30
+ROW_HEIGHT = 42
 LINE_HEIGHT = 28
 
 
@@ -68,10 +68,10 @@ def layer_rows(layout, card, data, top, rows):
         layer = data.layers[index]
         y -= ROW_HEIGHT * s
         row = Rect(card.x + 6 * s, y, card.w - 12 * s, ROW_HEIGHT * s - 2 * s)
-        detail = ('mask  ' if layer.mask else '') + f'{layer.opacity * 100:.0f}%'
-        layout.add(f'ROW_{index}', row, 'ROW', label=layer.name, text=detail, active=index == data.active,
-                   icon='PAINT' if layer.kind == 'PAINT' else 'FILL', tip='Select layer; double-click to rename')
-        layout.add(f'EYE_{index}', Rect(row.x + 4 * s, row.y + 3 * s, 22 * s, row.h - 6 * s), 'ICON',
+        layout.add(f'ROW_{index}', row, 'ROW', label=layer.name, text=f'{layer.opacity * 100:.0f}%', active=index == data.active,
+                   preview=layer.image if layer.kind == 'PAINT' else None, mask=layer.mask,
+                   color=display_color(layer.color), tip='Select layer; double-click to rename')
+        layout.add(f'EYE_{index}', Rect(row.x + 4 * s, row.y + 6 * s, 22 * s, row.h - 12 * s), 'ICON',
                    icon='HIDE_OFF' if layer.visible else 'HIDE_ON', tip='Hide layer' if layer.visible else 'Show layer')
     return y
 

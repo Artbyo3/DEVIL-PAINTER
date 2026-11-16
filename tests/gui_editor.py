@@ -84,6 +84,7 @@ def rendered_pixel(window, area, region, point):
             gpu.matrix.load_identity()
             gpu.matrix.load_projection_matrix(Matrix(((2 / region.width, 0, 0, -1), (0, 2 / region.height, 0, -1), (0, 0, 1, 0), (0, 0, 0, 1))))
             with bpy.context.temp_override(window=window, area=area, region=region):
+                editor._active.workspace = editor._active.make_layout()
                 editor._active.renderer.draw(editor._active)
         pixel = tuple(framebuffer.read_color(int(point[0]), int(point[1]), 1, 1, 4, 0, 'FLOAT').to_list()[0][0])
     offscreen.free()
@@ -148,6 +149,21 @@ def journey():
     card = next(rect for rect, title in editor._active.workspace.cards if title == 'Layers')
     pixel = rendered_pixel(window, area, region, (card.x + card.w / 2, card.y + 6))
     check(all(abs(a - b) < .03 for a, b in zip(pixel[:3], SURFACE_FLOATING)), 'the layer card renders in the Devil palette')
+
+    scale = editor._active.workspace.scale
+    red = numpy.zeros((data.resolution * data.resolution, 4), dtype=numpy.float32)
+    red[:] = (1.0, 0.0, 0.0, 1.0)
+    paint_layer.image.pixels.foreach_set(red.ravel())
+    paint_layer.image.update()
+    fill.color = (0.0, 0.0, 1.0)
+    rows = {index: control(f'ROW_{index}').rect for index in (0, 1)}
+    thumb = lambda rect, slot: (rect.x + (30 + 16 + slot * 36) * scale, rect.y + rect.h / 2)
+    paint_thumb = rendered_pixel(window, area, region, thumb(rows[0], 0))
+    fill_thumb = rendered_pixel(window, area, region, thumb(rows[1], 0))
+    mask_thumb = rendered_pixel(window, area, region, thumb(rows[1], 1))
+    check(paint_thumb[0] > .9 and paint_thumb[1] < .1 and paint_thumb[2] < .1, 'the paint layer thumbnail shows the painted image')
+    check(fill_thumb[2] > .9 and fill_thumb[0] < .1, 'the fill layer thumbnail shows the fill color')
+    check(mask_thumb[0] < .2, 'the mask thumbnail shows the mostly black mask')
 
     export_dir = scratch / 'export'
     with bpy.context.temp_override(window=window, area=area, region=region):

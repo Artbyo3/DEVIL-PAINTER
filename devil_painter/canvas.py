@@ -24,6 +24,8 @@ class Control:
     active: bool = False
     value: float = 0.0
     color: Optional[Tuple[float, ...]] = None
+    preview: object = None
+    mask: object = None
     tip: str = ''
     shortcut: str = ''
 
