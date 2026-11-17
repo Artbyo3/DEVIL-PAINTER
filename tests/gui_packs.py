@@ -128,6 +128,10 @@ def drag(window, x, y, dx, dy, count=8):
     window.event_simulate(type='LEFTMOUSE', value='RELEASE', x=int(x + dx), y=int(y + dy))
 
 
+def file_tile(stem):
+    return next((key for key in keys('ITEM.') if control(key).label == stem or control(key).label.startswith(stem + ' ')), None)
+
+
 def journey():
     scratch = prepare_scratch()
     check(library.library_root().resolve().is_relative_to(scratch.resolve()), 'the test library lives in scratch')
@@ -175,54 +179,91 @@ def journey():
     click(window, region, 'PACKS_REFRESH')
     yield 0.5
     shown = yield from wait_for(lambda: pack_tile() is not None and pack_tile(ALPHA_PACK) is not None, 20)
-    check(shown and packs.requests() == 1, f'Check for packs reads the real catalog and lists the packs ({editor._active.message} | requests {packs.requests()} | catalog {len(packs.catalog())} | tab {editor._active.state.shelf_tab} | items {[control(key).label for key in keys("ITEM.")][:3]} | scope {editor._active.state.shelf_scope} | query {editor._active.state.shelf_query!r})')
+    check(shown and packs.requests() >= 1, f'Check for packs reads the real catalog and lists the packs ({editor._active.message})')
     entry = entry_named(TEXTURE_PACK)
-    check(all(packs.allowed(item) for item in packs.catalog()) and any('thumbs' in item or 'fileTags' in item for item in packs.catalog()),
-          'every catalog entry is allowed and extra catalog fields are tolerated')
+    check(all(packs.allowed(item) for item in packs.catalog()) and all('thumbs' in item and 'fileHashes' in item for item in packs.catalog()),
+          'every catalog entry is allowed and the extra catalog fields are read')
     check(entry['downloadUrl'].startswith(packs.RELEASE_PREFIX) and len(entry['sha256']) == 64, 'the catalog entry points at the asset library releases with a SHA-256')
     check(not packs.allowed(dict(entry, downloadUrl='https://example.com/pack.zip')) and not packs.allowed(dict(entry, sha256='')),
           'entries from another host or without a checksum are not allowed')
-    real = entry['sha256']
-    entry['sha256'] = 'f' * 64
-    click(window, region, pack_tile())
-    yield 0.5
-    check('Downloading' in editor._active.message, 'clicking the pack starts the download')
-    refused = yield from wait_for(lambda: 'refused' in editor._active.message, 240)
+    check(not packs.thumb_url(dict(entry, thumbs={'boucle-tweed-01.png': 'https://example.com/x.webp'}), 'boucle-tweed-01.png')
+          and not packs.file_url(entry, '../evil.png'), 'previews and files outside the library addresses are refused')
     folder = packs.folder_of(entry)
     staging = library.library_root() / 'packs' / 'downloads'
-    check(refused and not folder.exists() and not any(staging.glob('*.zip')), f'a pack whose checksum does not match is refused and deleted, nothing is installed {editor._active.message} {[(k, v["state"], v["message"], v["received"]) for k, v in packs._jobs.items()]}')
-    move(window, *middle)
-    yield 0.3
-    check('Refused' in control(pack_tile()).label, 'the shelf shows the refused download')
+    previewed = yield from wait_for(lambda: move(window, *middle) or (pack_tile() is not None and control(pack_tile()).preview is not None), 40)
+    check(previewed and not folder.exists(), 'pack previews from the library site appear before anything is downloaded')
+    click(window, region, pack_tile())
+    yield 0.5
+    check(file_tile('boucle-tweed-01') is not None and has('PACK_DOWNLOAD') and has('PACK_BACK'), 'opening the pack lists its files next to the whole-pack download')
+    files_shown = yield from wait_for(lambda: move(window, *middle) or sum(1 for key in keys('ITEM.') if control(key).preview is not None) >= 6, 60)
+    check(files_shown and not folder.exists(), 'file previews appear before any file is downloaded')
+    cached = list((library.library_root() / 'pack_previews' / entry['releaseTag']).glob('*.png'))
+    check(len(cached) >= 6 and not any(path.with_suffix('.webp').exists() for path in cached), 'previews are converted to PNG and cached on disk')
+    hashes = dict(entry['fileHashes'])
+    target = packs.file_path(entry, 'boucle-tweed-01.png')
+    entry['fileHashes']['boucle-tweed-01.png'] = 'f' * 64
+    click(window, region, file_tile('boucle-tweed-01'))
+    yield 0.4
+    refused = yield from wait_for(lambda: 'refused' in editor._active.message, 120)
+    check(refused and not target.exists() and not any(staging.glob('*')), 'a single file whose checksum does not match is refused and deleted')
+    del entry['fileHashes']['boucle-tweed-02.png']
+    click(window, region, file_tile('boucle-tweed-02'))
+    yield 0.4
+    check('no checksum' in editor._active.message and not packs.file_path(entry, 'boucle-tweed-02.png').exists(), 'a file without a checksum is refused before downloading')
+    entry['fileHashes'].clear()
+    entry['fileHashes'].update(hashes)
+    packs._jobs.clear()
+    click(window, region, file_tile('boucle-tweed-01'))
+    yield 0.4
+    single = yield from wait_for(lambda: target.is_file(), 120)
+    check(single and packs.digest(target) == hashes['boucle-tweed-01.png'] and target.parent.name == 'Textures' and not packs.installed(entry),
+          'one texture downloads alone, passes its checksum, and lands in the pack Textures folder')
+    click(window, region, 'SHELF_TAB.TEXTURES')
+    yield 0.6
+    check('boucle-tweed-01' in labels() and 'boucle-tweed-02' not in labels(), 'the single file appears in the shelf on its own')
+    click(window, region, labels()['boucle-tweed-01'])
+    yield 1.0
+    fabric = active_layer(data)
+    check(fabric.slots['base_color'].source == 'IMAGE' and fabric.slots['base_color'].image.name.startswith('boucle-tweed-01')
+          and any(node.type == 'TEX_IMAGE' and node.image == fabric.slots['base_color'].image for node in data.material.node_tree.nodes),
+          'the single downloaded texture paints the model as a fill layer')
+    click(window, region, 'SHELF_TAB.PACKS')
+    yield 0.4
+    real = entry['sha256']
+    entry['sha256'] = 'f' * 64
+    click(window, region, 'PACK_DOWNLOAD')
+    yield 0.5
+    check('Downloading' in editor._active.message, 'Download whole pack starts the download')
+    refused = yield from wait_for(lambda: 'refused' in editor._active.message, 240)
+    check(refused and not packs.installed(entry) and not any(staging.glob('*.zip')), 'a pack whose checksum does not match is refused and deleted, nothing is installed')
     entry['sha256'] = real
     packs._jobs.clear()
-    click(window, region, pack_tile())
+    click(window, region, 'PACK_DOWNLOAD')
     yield 0.5
     installed = yield from wait_for(lambda: packs.installed(entry), 240)
     check(installed and 'Installed' in editor._active.message, 'the real pack downloads, passes its checksum, and installs')
     check(len(list((folder / 'Textures').glob('*.png'))) == 164 and not any(staging.glob('*.zip')), 'the pack unpacks its 164 textures into the library')
+    click(window, region, 'PACK_BACK')
+    yield 0.4
     move(window, *middle)
     yield 0.3
     check(control(pack_tile()).label.endswith('Installed'), 'the shelf marks the pack as installed')
     click(window, region, 'SHELF_TAB.TEXTURES')
     yield 0.6
     names = labels()
-    check('boucle-tweed-01' in names and sum(1 for name in names if name.startswith(('boucle', 'corduroy', 'denim', 'silk'))) > 20,
+    check('boucle-tweed-02' in names and sum(1 for name in names if name.startswith(('boucle', 'corduroy', 'denim', 'silk'))) > 20,
           'the pack textures appear in the shelf')
-    click(window, region, names['boucle-tweed-01'])
-    yield 1.0
-    fabric = active_layer(data)
-    check(fabric.slots['base_color'].source == 'IMAGE' and fabric.slots['base_color'].image.name.startswith('boucle-tweed-01')
-          and any(node.type == 'TEX_IMAGE' and node.image == fabric.slots['base_color'].image for node in data.material.node_tree.nodes),
-          'a pack texture becomes a fill layer on the model')
     click(window, region, 'SHELF_TAB.PACKS')
     yield 0.4
     alphas_entry = entry_named(ALPHA_PACK)
     click(window, region, pack_tile(ALPHA_PACK))
+    yield 0.4
+    click(window, region, 'PACK_DOWNLOAD')
     yield 0.5
     done = yield from wait_for(lambda: packs.installed(alphas_entry), 120)
-    alpha_folder = packs.folder_of(alphas_entry)
-    check(done and len(list((alpha_folder / 'Alphas').glob('*.png'))) == 115, 'the alphas pack downloads, passes its checksum, and installs 115 alphas')
+    check(done and len(list((packs.folder_of(alphas_entry) / 'Alphas').glob('*.png'))) == 115, 'the alphas pack downloads, passes its checksum, and installs 115 alphas')
+    click(window, region, 'PACK_BACK')
+    yield 0.3
     click(window, region, 'SHELF_TAB.TEXTURES')
     yield 0.6
     check('belt-buckle-01' not in labels(), 'alphas from a pack do not show up as textures')
@@ -241,15 +282,23 @@ def journey():
     check((pixels(find_layer(data, stitched_uid).image)[:, 3] > .05).sum() > 0, 'painting with the pack alpha lays down paint')
 
     check(set_online(False), 'online access is turned off again')
-    before = len(CONNECTIONS)
+    settled = yield from wait_for(lambda: not packs.active(), 30)
+    check(settled, 'turning online access off stops queued preview fetches')
+    before, requested = len(CONNECTIONS), packs.requests()
     click(window, region, 'SHELF_TAB.PACKS')
     yield 0.5
-    check(pack_tile() is not None and control(pack_tile()).label.endswith('Installed'), 'offline, the installed pack is still listed')
+    check(pack_tile() is not None and control(pack_tile()).label.endswith('Installed') and control(pack_tile()).preview is None,
+          'offline, the installed pack is still listed with a placeholder preview')
+    click(window, region, pack_tile())
+    yield 0.5
+    check(file_tile('boucle-tweed-03') is not None and all(control(key).preview is None for key in keys('ITEM.')), 'offline, file tiles show placeholders')
+    click(window, region, 'PACK_BACK')
+    yield 0.3
     click(window, region, 'SHELF_TAB.TEXTURES')
     yield 0.4
-    click(window, region, labels()['denim-twill-01'] if 'denim-twill-01' in labels() else labels()['boucle-tweed-02'])
+    click(window, region, labels()['boucle-tweed-03'])
     yield 1.0
-    check(active_layer(data).slots['base_color'].source == 'IMAGE' and len(CONNECTIONS) == before, 'offline, installed pack textures keep working with no network')
+    check(active_layer(data).slots['base_color'].source == 'IMAGE', 'offline, installed pack textures keep working')
     click(window, region, 'SHELF_TAB.PACKS')
     yield 0.4
     click(window, region, pack_tile(), kind='RIGHTMOUSE')
@@ -257,7 +306,7 @@ def journey():
     click(window, region, next(key for key in keys('REMOVE_PACK.')))
     yield 0.6
     check(not folder.exists() and not packs.installed(entry), 'a pack can be removed')
-    check(len(CONNECTIONS) == before, 'removing a pack offline stays offline')
+    check(len(CONNECTIONS) == before and packs.requests() == requested, 'offline, browsing, previews, and removal make zero network attempts')
 
     click(window, region, 'CLOSE')
     yield 0.6

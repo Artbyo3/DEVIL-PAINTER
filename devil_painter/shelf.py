@@ -111,7 +111,10 @@ def items(tab):
         return ([Item('No alpha', 'ALPHA', '')] + [Item(name, 'ALPHA', name, preview_file=str(alpha_path(name))) for name in ALPHAS]
                 + [Item(path.stem, 'ALPHA', str(path), preview_file=str(path), mine=True) for path in pack_alphas()])
     if tab == 'PACKS':
-        return [Item(entry['name'], 'PACK', entry, mine=True) for entry in packs.catalog()]
+        opened = packs.open_entry()
+        if opened is not None:
+            return [Item(Path(name).stem, 'PACKFILE', (opened, name), preview_file=packs.preview(opened, name), mine=True) for name in packs.files(opened)]
+        return [Item(entry['name'], 'PACK', entry, preview_file=packs.preview(entry, packs.first_file(entry)), mine=True) for entry in packs.catalog()]
     return [Item(entry.label, 'PATTERN', entry.key) for entry in PATTERNS]
 
 
@@ -150,8 +153,8 @@ def thumbnail(item):
         return thumbnails.material_texture(pattern_definition(item.payload))
     if item.kind == 'MASK':
         return thumbnails.material_texture(mask_definition(item.payload))
-    if item.kind == 'PACK':
-        return None
+    if item.kind in {'PACK', 'PACKFILE'}:
+        return thumbnails.file_texture(item.preview_file) if item.preview_file else None
     if item.kind == 'GENERATOR':
         return thumbnails.material_texture(generator_definition(item.payload))
     if item.kind == 'FILTER':

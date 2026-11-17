@@ -987,9 +987,17 @@ def shelf_query(state):
 def packs_row(layout, zone, viewport):
     s = layout.scale
     y = viewport.top - 26 * s
+    opened = packs.open_entry()
+    if opened is not None:
+        layout.add('PACK_BACK', Rect(zone.x + 8 * s, y, 90 * s, 22 * s), 'CHIP', label='All packs', tip='Back to the list of packs')
+        layout.add('PACK_DOWNLOAD', Rect(zone.x + 104 * s, y, 170 * s, 22 * s), 'CHIP', label='Download whole pack',
+                   active=packs.installed(opened), tip=f'Download all of {opened["name"]} ({opened.get("size", "")})')
+        layout.add('PACKS_INFO', Rect(zone.x + 282 * s, y, zone.w - 296 * s, 22 * s), 'NOTE',
+                   label=packs.message() or f'{opened["name"]} · {packs.status(opened)}. Click a file to download only that file.')
+        return
     layout.add('PACKS_REFRESH', Rect(zone.x + 8 * s, y, 130 * s, 22 * s), 'CHIP', label='Check for packs',
                tip='Read the list of free packs from the Devil Painter asset library')
-    layout.add('PACKS_INFO', Rect(zone.x + 146 * s, y, zone.w - 160 * s, 22 * s), 'NOTE', label=packs.message() or 'Free CC0 packs. Click one to download it.')
+    layout.add('PACKS_INFO', Rect(zone.x + 146 * s, y, zone.w - 160 * s, 22 * s), 'NOTE', label=packs.message() or 'Free CC0 packs. Click one to browse it.')
 
 
 def search_row(layout, state, zone, row):
@@ -1096,8 +1104,15 @@ def shelf_layout(layout, state, zone):
         else:
             tip = 'Click to add as a fill layer'
         if item.kind == 'PACK':
-            tip = f'{item.payload.get("description", "")} {packs.status(item.payload)}. Click to download. Right-click to remove'
-            layout.add(f'ITEM.{index}', rect, 'TILE', label=f'{item.label} · {packs.status(item.payload)}', preview=None, clip=viewport, tip=tip)
+            state_text = packs.status(item.payload)
+            tip = f'{item.payload.get("description", "")} {state_text}. Click to browse its files. Right-click to remove'
+            layout.add(f'ITEM.{index}', rect, 'TILE', label=f'{item.label} · {state_text}', preview=shelf.thumbnail(item), clip=viewport, tip=tip)
+            continue
+        if item.kind == 'PACKFILE':
+            state_text = packs.file_status(*item.payload)
+            label = f'{item.label} · {state_text}' if state_text else item.label
+            tip = 'Installed: click to use it' if state_text == 'Installed' else 'Click to download only this file'
+            layout.add(f'ITEM.{index}', rect, 'TILE', label=label, preview=shelf.thumbnail(item), clip=viewport, tip=tip)
             continue
         if item.kind in SHELF_TIPS:
             tip = SHELF_TIPS[item.kind]

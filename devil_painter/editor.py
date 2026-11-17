@@ -407,7 +407,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             for note in packs.poll():
                 self.message = note
                 self._area.tag_redraw()
-            if packs.busy():
+            if packs.active():
                 self._area.tag_redraw()
             if thumbnails.waiting():
                 thumbnails.render_next()
@@ -518,6 +518,8 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
                 self.state.popover = Popover('MENU', control.rect, items=((f'DELETE_SMART_MASK.{item.user_index}', 'Delete smart mask', False),))
             elif item.kind == 'PACK':
                 self.state.popover = Popover('MENU', control.rect, items=((f'REMOVE_PACK.{index}', 'Remove pack', False),))
+            elif item.kind == 'PACKFILE':
+                self.state.popover = Popover('MENU', control.rect, items=((f'PACK_FILE.{index}', 'Download this file', False),))
             elif item.kind == 'BRUSH' and item.user_index >= 0:
                 self.state.popover = Popover('MENU', control.rect, items=((f'DELETE_BRUSH.{item.user_index}', 'Delete brush preset', False),))
             elif item.kind == 'MATERIAL':
@@ -1606,6 +1608,8 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.state.shelf_tab = key.removeprefix('SHELF_TAB.')
             self.state.shelf_open = True
             self.state.scroll['SHELF'] = 0.0
+            if self.state.shelf_tab == 'PACKS':
+                packs.browse()
             library.rescan()
         elif key == 'SHELF_TOGGLE':
             self.state.shelf_open = not self.state.shelf_open
@@ -1631,6 +1635,13 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.message = f'Deleted the saved search {shelf.remove_search(int(key.removeprefix("DELETE_SEARCH.")))}.'
         elif key == 'PACKS_REFRESH':
             self.message = packs.refresh()
+        elif key == 'PACK_BACK':
+            packs.open_pack(None)
+            self.state.scroll['SHELF'] = 0.0
+        elif key == 'PACK_DOWNLOAD':
+            self.message = packs.download(packs.open_entry())
+        elif key.startswith('PACK_FILE.'):
+            self.message = packs.download_file(*self.shelf_item('ITEM.' + key.removeprefix('PACK_FILE.')).payload)
         elif key.startswith('REMOVE_PACK.'):
             self.message = packs.remove(self.shelf_item('ITEM.' + key.removeprefix('REMOVE_PACK.')).payload)
         elif key == 'LIBRARIES':
@@ -1933,9 +1944,19 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             actions.add_effect(context, obj, data, 'FILTER', target)
             return actions.edit_effect(context, obj, data, 'filter', item.payload, True)
         if item.kind == 'PACK':
-            if packs.installed(item.payload):
-                return f'{item.label} is installed. Its textures are in the Textures tab and its alphas in Alphas.'
-            return packs.download(item.payload)
+            packs.open_pack(item.payload)
+            self.state.scroll['SHELF'] = 0.0
+            return f'{item.label}: {len(packs.files(item.payload))} files. Click one to download it, or download the whole pack.'
+        if item.kind == 'PACKFILE':
+            entry, name = item.payload
+            path = packs.file_path(entry, name)
+            if not path.is_file():
+                return packs.download_file(entry, name)
+            if packs.kind_folder(entry, name) == 'Alphas':
+                data.brush_alpha = brushes.load_alpha(str(path))
+                brushes.sync(context, data)
+                return f'Brush alpha: {item.label}.'
+            return actions.add_material(context, obj, data, shelf.texture_definition(path))
         if item.kind == 'VECTOR':
             data.brush_stencil = vectors.svg_stencil(item.payload)
             self.brush_changed(context, data)

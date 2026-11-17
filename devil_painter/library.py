@@ -16,6 +16,7 @@ CHANNEL_WORDS = {'base_color': {'basecolor', 'albedo', 'diffuse', 'diff', 'color
 DIRECTX_WORDS = {'dx', 'normaldx'}
 SETTINGS_FILE = 'library.json'
 PACK_MARKER = '.installed'
+PACK_KINDS = ('Textures', 'Alphas', 'Materials', 'Brushes', 'Generators')
 BLEND_SUFFIX = '.blend'
 VECTOR_SUFFIX = '.svg'
 BLEND_INPUTS = (('base_color', 'Base Color'), ('roughness', 'Roughness'), ('metallic', 'Metallic'), ('normal', 'Normal'),
@@ -243,7 +244,8 @@ def packs_folder():
 
 
 def installed_packs():
-    return [folder for folder in sorted(packs_folder().iterdir()) if folder.is_dir() and (folder / PACK_MARKER).is_file()]
+    return [folder for folder in sorted(packs_folder().iterdir()) if folder.is_dir() and folder.name != 'downloads' and not folder.name.endswith('.partial')
+            and ((folder / PACK_MARKER).is_file() or any((folder / kind).is_dir() for kind in PACK_KINDS))]
 
 
 def pack_texture_roots():
