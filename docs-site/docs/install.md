@@ -1,24 +1,56 @@
-# Install
+# Install Devil Painter
 
-!!! note "Placeholder"
-    Installation documentation for Devil Painter will be added here.
+## Before You Install
 
-## Requirements
+You need **Blender 5.2 or later**; no external Python packages or external tools are required.
 
-*Placeholder section for supported Blender versions and requirements.*
+## Install from GitHub Release ZIP
 
-## Installation Steps
+1. Download the latest `devil_painter-*.zip` archive from the [GitHub releases page](https://github.com/Artbyo3/DEVIL-PAINTER/releases).
+2. Open Blender and choose **Edit > Preferences**.
+3. Open **Add-ons**.
+4. Open the top-right menu (`⌄`) and choose **Install from Disk...**.
+5. Select the downloaded ZIP file and confirm.
 
-*Placeholder section for installation instructions.*
+<a id="build-and-install-from-source"></a>
+## Build and Install from Source
 
-<figure class="dp-shot" data-shot-framing="close-up" aria-labelledby="shot-install-placeholder-caption">
-  <div class="dp-shot__frame">
-    <span class="dp-shot__icon" aria-hidden="true"></span>
-    <span class="dp-shot__label">Media placeholder</span>
-  </div>
-  <figcaption id="shot-install-placeholder-caption">Placeholder media frame for installation steps.</figcaption>
-</figure>
+If you want to package the extension directly from the repository:
 
-## Troubleshooting
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/Artbyo3/DEVIL-PAINTER.git
+   cd DEVIL-PAINTER
+   ```
+2. Build the extension archive:
+   ```bash
+   python tools/build.py
+   ```
+3. In Blender, choose **Edit > Preferences > Add-ons > Install from Disk...** and select `dist/devil_painter-0.1.0.zip`.
 
-*Placeholder section for common installation issues.*
+## Enable Devil Painter
+
+Find **Devil Painter** in the add-on list and check its box to enable it.
+
+!!! warning "Only keep one copy enabled"
+    If more than one copy of Devil Painter is installed (for example, both a development link and a ZIP install), disable or remove the duplicate copy under **Preferences > Get Extensions** or **Preferences > Add-ons** and restart Blender.
+
+## Open the Workspace
+
+From any 3D Viewport, use one of these options:
+
+- Press <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>P</kbd>.
+- Press <kbd>F3</kbd>, search for **Devil Painter**, and press <kbd>Enter</kbd>.
+- Choose **View > Devil Painter** from the 3D Viewport header menu.
+
+## Upgrade or Reinstall
+
+1. Uncheck the older **Devil Painter** entry in **Edit > Preferences > Add-ons** (or remove it).
+2. Restart Blender.
+3. Install the newer `devil_painter-*.zip` using **Install from Disk...** and enable it again.
+
+## Fix Common Install Problems
+
+- **Devil Painter is missing from the add-on list:** Confirm the ZIP was built with `tools/build.py` (or downloaded from Releases) and check that Blender is version 5.2 or later.
+- **The checkbox stays off or warns about two copies:** Remove any older copy of Devil Painter in Preferences and restart Blender before enabling the new build.
+- **The workspace does not open:** Click inside a 3D Viewport so it is the active area, then press <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>P</kbd> or choose **View > Devil Painter**.
