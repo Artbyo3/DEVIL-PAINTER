@@ -34,6 +34,7 @@ CHANNELS = (Channel('base_color', 'Base Color', (0.8, 0.8, 0.8), True, 'BaseColo
             Channel('emission', 'Emission', (0.0, 0.0, 0.0), True, 'Emission', False, False),
             Channel('opacity', 'Opacity', (1.0,), False, 'Opacity', False, False),
             Channel('ambient_occlusion', 'Ambient Occlusion', (1.0,), False, 'AmbientOcclusion', False, False),
+            Channel('flow', 'Flow map', (0.5, 0.5, 0.0), False, 'FlowMap', False, False, False),
             Channel('user1', 'User 1', (0.0,), False, 'User1', False, False, False),
             Channel('user2', 'User 2', (0.0,), False, 'User2', False, False, False),
             Channel('user3', 'User 3', (0.0,), False, 'User3', False, False, False),

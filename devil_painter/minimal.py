@@ -6,7 +6,7 @@ import numpy
 from . import shelf, thumbnails
 from .blending import BLEND_MODES, CHANNEL, CHANNELS, FOLDER_BLENDS, linear_to_srgb
 from .canvas import Layout, Rect
-from .document import (BAKE_ID_LABELS, NORMAL_FORMATS, NORMAL_SPACES, PROJECTIONS, RESOLUTIONS, SHADERS, active_effect, active_layer, children, editing_mask, find_layer,
+from .document import (BAKE_ID_LABELS, NORMAL_FORMATS, PROJECTORS, STROKE_METHODS, NORMAL_SPACES, PROJECTIONS, RESOLUTIONS, SHADERS, active_effect, active_layer, children, editing_mask, find_layer,
                        linked_layer, set_channels, slot_value, uses_coordinates)
 from .effects import EFFECT_ICONS, EFFECT_KINDS, MASK_BLENDS, effect_label
 from .filters import FILTER, FILTERS
@@ -30,6 +30,9 @@ LINE_HEIGHT = 28
 MENU_ROW = 26
 MENU_WIDTH = 196
 MENU_HEADING = 'HEADING.'
+STROKE_LABELS = {key: label for key, label, _ in STROKE_METHODS}
+PROJECTOR_RANGE = (.05, 50.0)
+GIZMO_HANDLE = 9
 THUMBNAIL = 32
 RECENT_COLORS = 8
 FOV_RANGE = (10.0, 150.0)
@@ -233,8 +236,12 @@ def workspace_bar(layout, zone, data, obj_name, view_2d):
 BRUSH_SLIDERS = (('BRUSH_FLOW', 'Flow', 'brush_flow', 1.0, 'How much paint each dab lays down; low flow builds up gradually'),
                  ('BRUSH_SPACING', 'Spacing', 'brush_spacing', 200.0, 'Distance between dabs, in percent of the brush size'),
                  ('BRUSH_HARDNESS', 'Hardness', 'brush_hardness', 1.0, 'Soft or hard brush edge'),
-                 ('BRUSH_SMOOTHING', 'Smoothing', 'brush_smoothing', 1.0, 'Stabilize the stroke so it trails the pointer smoothly'),
-                 ('BRUSH_JITTER', 'Jitter', 'brush_jitter', 1.0, 'Scatter dabs around the stroke'))
+                 ('BRUSH_SMOOTHING', 'Lazy mouse', 'brush_smoothing', 1.0, 'Stabilize the stroke so it trails the pointer smoothly'),
+                 ('BRUSH_JITTER', 'Jitter', 'brush_jitter', 1.0, 'Scatter dabs around the stroke'),
+                 ('BRUSH_ANGLE', 'Angle', 'brush_angle', 360.0, 'Rotate the brush tip and its alpha'))
+NORMAL_SLIDERS = (('BRUSH_NORMAL_TILT', 'Normal tilt', 'brush_normal_tilt', 89.0), ('BRUSH_NORMAL_ANGLE', 'Normal direction', 'brush_normal_angle', 360.0))
+STENCIL_SLIDERS = (('STENCIL_SCALE', 'Scale', 'stencil_scale', 4.0), ('STENCIL_ANGLE', 'Rotation', 'stencil_angle', 360.0),
+                   ('STENCIL_X', 'Left to right', 'stencil_x', 1.0), ('STENCIL_Y', 'Bottom to top', 'stencil_y', 1.0))
 BRUSH_TOGGLES = (('BRUSH_PRESSURE_SIZE', 'Pressure size', 'brush_pressure_size'), ('BRUSH_PRESSURE_OPACITY', 'Pressure flow', 'brush_pressure_opacity'),
                  ('BRUSH_RANDOM_ANGLE', 'Random angle', 'brush_random_angle'))
 SHORT_NAMES = {'roughness': 'Rough', 'metallic': 'Metal', 'normal': 'Normal', 'height': 'Height', 'emission': 'Emit', 'opacity': 'Alpha'}
@@ -297,8 +304,12 @@ def tool_strip(layout, zone, tool, brush, data, state):
     layout.add('BRUSH_ALPHA', Rect(x, y, h, h), 'SOURCE', icon='ELLIPSE', preview=data.brush_alpha, tip='Brush alpha: pick a stamp shape in the Alphas shelf')
     x += h + 6 * s
     layout.add('BRUSH_CARD', Rect(x, y, 120 * s, h), 'DROPDOWN', label='Brush', text=data.brush_preset,
-               tip='Flow, spacing, hardness, smoothing, jitter, pressure, and the channels the brush paints')
+               tip='Flow, spacing, hardness, lazy mouse, jitter, angle, stroke, pressure, and the channels the brush paints')
     x += 126 * s
+    layout.add('SYMMETRY', Rect(x, y, 110 * s, h), 'DROPDOWN', label='Symmetry', text=symmetry_label(data), tip='Mirror and radial symmetry')
+    x += 116 * s
+    layout.add('STENCIL_CARD', Rect(x, y, h, h), 'SOURCE', icon='GRID', preview=data.brush_stencil, tip='Screen stencil and projection')
+    x += h + 6 * s
     for channel in set_channels(data):
         slot = data.brush_slots[channel.key]
         width = (46 if channel.width == 3 else 92) * s
@@ -667,6 +678,19 @@ def projection_section(flow, data, layer, w):
              tip='Map textures and patterns by UV or from three sides without seams')
     flow.add('TILING', Rect(x + half + 4 * s, y, half, h), 'SLIDER', label='Tiling', value=to_slider(layer.tiling, TILING_RANGE),
              text=f'{layer.tiling:.2f}x')
+    if layer.projection in PROJECTORS:
+        x, y, h = flow.field()
+        flow.add('PROJ_SIZE', Rect(x, y, half, h), 'SLIDER', label='Size', value=to_slider(layer.proj_size, PROJECTOR_RANGE), text=f'{layer.proj_size:.2f}',
+                 tip='Size of the projector; drag the corner handle on the model too')
+        flow.add('PROJ_SPIN', Rect(x + half + 4 * s, y, half, h), 'SLIDER', label='Spin', value=(math.degrees(layer.proj_rotation[2]) % 360) / 360,
+                 text=f'{math.degrees(layer.proj_rotation[2]) % 360:.0f}°', tip='Turn the projection around its axis')
+        x, y, h = flow.field()
+        flow.add('PROJ_ALIGN', Rect(x, y, half, h), 'CHIP', label='Align to view', tip='Point the projector along the current view')
+        flow.add('PROJ_RESET', Rect(x + half + 4 * s, y, half, h), 'CHIP', label='Reset', tip='Center the projector on the mesh again')
+    elif layer.projection == 'UV':
+        x, y, h = flow.field()
+        flow.add('TILE_MATCH', Rect(x, y, w, h), 'TOGGLE', label='Same on every UV tile', active=layer.tile_match,
+                 tip='Repeat the fill identically in each UDIM tile')
 
 
 def material_section(flow, data, layer, w):
@@ -763,7 +787,9 @@ def channel_lines(data):
 
 def projection_lines(data):
     layer = active_layer(data)
-    return int(layer.kind == 'FILL' and uses_coordinates(layer))
+    if not (layer.kind == 'FILL' and uses_coordinates(layer)):
+        return 0
+    return 3 if layer.projection in PROJECTORS else 2 if layer.projection == 'UV' else 1
 
 
 def material_lines(data):
@@ -1005,29 +1031,101 @@ def menu_popover(layout, state, bounds):
     return card
 
 
+def painting_normal(data):
+    return any(channel.key == 'normal' for channel in set_channels(data)) and data.brush_slots['normal'].enabled
+
+
 def brush_popover(layout, state, bounds, data):
     s = layout.scale
-    channels = [channel for channel in set_channels(data) if channel.key != 'base_color']
-    lines = len(BRUSH_SLIDERS) + len(BRUSH_TOGGLES) + len(channels) + 1
+    channels = list(set_channels(data))
+    lines = len(BRUSH_SLIDERS) + len(BRUSH_TOGGLES) + len(channels) + 3 + int(painting_normal(data)) + int(bool(data.brush_material))
     card = place_popover(bounds, state.popover.anchor, 300 * s, (lines * LINE_HEIGHT + 20) * s, s)
     x, w = card.x + 12 * s, card.w - 24 * s
     y = card.top - 10 * s
+    half = (w - 4 * s) / 2
     for key, label, field, top, tip in BRUSH_SLIDERS:
         y -= LINE_HEIGHT * s
         value = getattr(data, field)
-        text = f'{value:.0f}%' if key == 'BRUSH_SPACING' else f'{value * 100:.0f}%'
+        text = f'{value:.0f}%' if key == 'BRUSH_SPACING' else f'{value:.0f}°' if key == 'BRUSH_ANGLE' else f'{value * 100:.0f}%'
         layout.add(key, Rect(x, y + 2 * s, w, 24 * s), 'SLIDER', label=label, value=value / top, text=text, tip=tip)
+    y -= LINE_HEIGHT * s
+    layout.add('BRUSH_STROKE', Rect(x, y + 2 * s, half, 24 * s), 'DROPDOWN', label='Stroke', text=STROKE_LABELS[data.brush_stroke],
+               tip='Space dabs evenly, draw straight lines, dots, airbrush, or anchored stamps')
+    layout.add('SAVE_BRUSH', Rect(x + half + 4 * s, y + 2 * s, half, 24 * s), 'CHIP', label='Save as preset', tip='Add these settings to the brush shelf')
     for key, label, field in BRUSH_TOGGLES:
         y -= LINE_HEIGHT * s
         layout.add(key, Rect(x, y + 2 * s, w, 24 * s), 'TOGGLE', label=label, active=getattr(data, field))
     y -= LINE_HEIGHT * s
-    layout.add('BRUSH_PAINTS', Rect(x, y + 2 * s, w, 24 * s), 'NOTE', label='Each stroke also paints')
+    layout.add('BRUSH_PAINTS', Rect(x, y + 2 * s, w, 24 * s), 'NOTE', label='Each stroke paints and erases')
     for channel in channels:
         y -= LINE_HEIGHT * s
         slot = data.brush_slots[channel.key]
-        layout.add('BRUSHUSE.' + channel.key, Rect(x, y + 2 * s, 110 * s, 24 * s), 'TOGGLE', label=channel.label, active=slot.enabled,
-                   tip=f'Paint {channel.label.lower()} with every stroke')
-        brush_value_control(layout, channel, slot, Rect(x + 116 * s, y + 2 * s, w - 116 * s, 24 * s))
+        base = channel.key == 'base_color'
+        tip = 'Erase base color and coverage; when off, Erase only clears the other channels' if base else f'Paint {channel.label.lower()} with every stroke'
+        layout.add('BRUSHUSE.' + channel.key, Rect(x, y + 2 * s, 110 * s, 24 * s), 'TOGGLE', label=channel.label, active=slot.enabled, tip=tip)
+        if slot.source == 'IMAGE' and slot.image is not None:
+            layout.add('BRUSHIMG.' + channel.key, Rect(x + 116 * s, y + 2 * s, w - 116 * s, 24 * s), 'NOTE', label=slot.image.name)
+        elif not base:
+            brush_value_control(layout, channel, slot, Rect(x + 116 * s, y + 2 * s, w - 116 * s, 24 * s))
+    if painting_normal(data):
+        y -= LINE_HEIGHT * s
+        for column, (key, label, field, top) in enumerate(NORMAL_SLIDERS):
+            value = getattr(data, field)
+            layout.add(key, Rect(x + column * (half + 4 * s), y + 2 * s, half, 24 * s), 'SLIDER', label=label, value=value / top, text=f'{value:.0f}°',
+                       tip='Tilt and direction of the painted normal')
+    if data.brush_material:
+        y -= LINE_HEIGHT * s
+        layout.add('BRUSH_MATERIAL', Rect(x, y + 2 * s, w - 70 * s, 24 * s), 'NOTE', label='Material · ' + data.brush_material)
+        layout.add('BRUSH_MATERIAL_CLEAR', Rect(x + w - 64 * s, y + 2 * s, 64 * s, 24 * s), 'CHIP', label='Clear', tip='Paint plain values again')
+    return card
+
+
+def symmetry_label(data):
+    axes = [axis for axis, on in zip('XYZ', data.brush_mirror) if on]
+    parts = (['Mirror ' + ' '.join(axes)] if axes else []) + ([f'Radial {data.brush_radial}'] if data.brush_radial > 1 else [])
+    return ', '.join(parts) or 'Off'
+
+
+def symmetry_popover(layout, state, bounds, data):
+    s = layout.scale
+    card = place_popover(bounds, state.popover.anchor, 280 * s, (3 * LINE_HEIGHT + 20) * s, s)
+    x, w = card.x + 12 * s, card.w - 24 * s
+    y = card.top - 10 * s - LINE_HEIGHT * s
+    third = (w - 8 * s) / 3
+    for index, axis in enumerate('XYZ'):
+        layout.add('MIRROR.' + axis, Rect(x + index * (third + 4 * s), y + 2 * s, third, 24 * s), 'TOGGLE', label='Mirror ' + axis,
+                   active=data.brush_mirror[index], tip=f'Mirror strokes across the {axis} axis of the mesh')
+    y -= LINE_HEIGHT * s
+    layout.add('RADIAL', Rect(x, y + 2 * s, w, 24 * s), 'SLIDER', label='Radial copies', value=(data.brush_radial - 1) / 15, text=str(data.brush_radial),
+               tip='Repeat every stroke around the mesh')
+    y -= LINE_HEIGHT * s
+    for index, axis in enumerate('XYZ'):
+        layout.add('RADIAL_AXIS.' + axis, Rect(x + index * (third + 4 * s), y + 2 * s, third, 24 * s), 'CHIP', label='Around ' + axis,
+                   active=data.brush_radial_axis == axis, tip=f'Radial copies turn around the {axis} axis')
+    return card
+
+
+def stencil_popover(layout, state, bounds, data):
+    s = layout.scale
+    lines = 2 + (len(STENCIL_SLIDERS) if data.brush_stencil is not None else 0)
+    card = place_popover(bounds, state.popover.anchor, 300 * s, (lines * LINE_HEIGHT + 56) * s, s)
+    x, w = card.x + 12 * s, card.w - 24 * s
+    y = card.top - 10 * s - LINE_HEIGHT * s
+    if data.brush_stencil is None:
+        layout.add('STENCIL_NOTE', Rect(x, y + 2 * s, w, 24 * s), 'NOTE', label='Right-click a texture, then Use as stencil')
+    else:
+        layout.add('STENCIL_THUMB', Rect(x, y - 2 * s, 28 * s, 28 * s), 'SOURCE', icon='GRID', preview=data.brush_stencil)
+        layout.add('STENCIL_NAME', Rect(x + 34 * s, y + 2 * s, w - 104 * s, 24 * s), 'NOTE', label=data.brush_stencil.name)
+        layout.add('STENCIL_CLEAR', Rect(x + w - 64 * s, y + 2 * s, 64 * s, 24 * s), 'CHIP', label='Remove', tip='Stop painting through the stencil')
+        for key, label, field, top in STENCIL_SLIDERS:
+            y -= LINE_HEIGHT * s
+            value = getattr(data, field)
+            text = f'{value:.0f}°' if key == 'STENCIL_ANGLE' else f'{value:.2f}'
+            layout.add(key, Rect(x, y + 2 * s, w, 24 * s), 'SLIDER', label=label, value=value / top, text=text)
+    y -= LINE_HEIGHT * s
+    layout.add('STENCIL_TIP', Rect(x, y + 2 * s, w, 24 * s), 'NOTE', label='Paint through it, or project it in one click')
+    layout.add('PROJECT', Rect(x, card.y + 12 * s, w, 28 * s), 'PRIMARY', icon='PLAY', label='Project through the view',
+               tip='Project the stencil image and the brush channels onto the model as seen from here')
     return card
 
 
@@ -1254,8 +1352,19 @@ def export_popover(layout, state, bounds, data, directory):
     return card
 
 
+def gizmo_layout(layout, gizmo):
+    s = layout.scale
+    lines, center, corner = gizmo
+    handle = GIZMO_HANDLE * s
+    layout.add('GIZMO_MOVE', Rect(center[0] - handle, center[1] - handle, handle * 2, handle * 2), 'GIZMO', points=lines,
+               tip='Drag to move the projection')
+    layout.add('GIZMO_SIZE', Rect(corner[0] - handle, corner[1] - handle, handle * 2, handle * 2), 'GIZMO', tip='Drag to resize the projection')
+
+
 def painter_layout(bounds, scale, state, data, obj_name, tool, brush, directory, setup, viewport):
     layout = Layout(scale, MinimalMetrics.resolve(), zones(bounds, scale, state.column_width, state.shelf_open))
+    if data is not None and state.gizmo:
+        gizmo_layout(layout, state.gizmo)
     if data is None:
         start_layout(layout, state, bounds, obj_name, setup)
     else:
@@ -1280,6 +1389,10 @@ def painter_layout(bounds, scale, state, data, obj_name, tool, brush, directory,
             layout.popover = shortcuts_popover(layout, state, bounds)
         elif state.popover.kind == 'BAKE' and data is not None:
             layout.popover = bake_popover(layout, state, bounds, data)
+        elif state.popover.kind == 'SYMMETRY' and data is not None:
+            layout.popover = symmetry_popover(layout, state, bounds, data)
+        elif state.popover.kind == 'STENCIL' and data is not None:
+            layout.popover = stencil_popover(layout, state, bounds, data)
         elif state.popover.kind == 'BRUSH' and data is not None:
             layout.popover = brush_popover(layout, state, bounds, data)
         elif data is not None:

@@ -3,7 +3,9 @@ import json
 import math
 import bpy
 import numpy
-from .library import library_root
+from .blending import CHANNEL, linear_to_srgb
+from .document import set_channels, set_slot_value
+from .library import library_root, load_image, save_settings, settings
 from .painting import STROKE_TOOLS, active_tool, brush_source
 
 ALPHA_SIZE = 256
@@ -20,7 +22,9 @@ PRESETS = (
     dict(name='Square', hardness=.8, flow=1.0, spacing=25.0, smoothing=.3, jitter=0.0, alpha='Square', random_angle=False),
     dict(name='Scratches', hardness=.7, flow=.8, spacing=40.0, smoothing=0.0, jitter=.5, alpha='Scratches', random_angle=True),
 )
-PRESET_FIELDS = ('hardness', 'flow', 'spacing', 'smoothing', 'jitter', 'random_angle')
+PRESET_FIELDS = ('hardness', 'flow', 'spacing', 'smoothing', 'jitter', 'random_angle', 'stroke', 'angle')
+PRESET_DEFAULTS = dict(stroke='SPACE', angle=0.0)
+STENCIL_TEXTURE = 'DP Stencil'
 
 
 def alpha_folder():
@@ -98,7 +102,7 @@ def preview_path(preset):
     canvas = numpy.zeros((size, size), dtype=numpy.float32)
     stamp_x, stamp_y = grid(dab)
     stamp = falloff(numpy.hypot(stamp_x, stamp_y), preset['hardness'])
-    if preset['alpha']:
+    if preset['alpha'] in ALPHAS:
         shape = alpha_shape(preset['alpha'], ALPHA_SIZE)
         stamp = stamp * shape[::ALPHA_SIZE // dab, ::ALPHA_SIZE // dab][:dab, :dab]
     random = numpy.random.default_rng(5)
@@ -150,6 +154,7 @@ def sync(context, data):
     brush.jitter = data.brush_jitter
     brush.use_pressure_size = data.brush_pressure_size
     brush.use_pressure_strength = data.brush_pressure_opacity
+    brush.stroke_method = data.brush_stroke
     if data.brush_alpha is None:
         brush.mask_texture = None
     else:
@@ -158,6 +163,96 @@ def sync(context, data):
         slot.mask_map_mode = 'VIEW_PLANE'
         slot.use_random = data.brush_random_angle
         slot.random_angle = math.tau
+        slot.angle = math.radians(data.brush_angle)
+    sync_stencil(context, brush, data)
+    sync_symmetry(context, data)
+
+
+def view_region(context):
+    areas = [area for area in context.screen.areas if area.type == 'VIEW_3D'] if context.screen is not None else []
+    if not areas:
+        return None
+    area = max(areas, key=lambda item: item.width * item.height)
+    return next((region for region in area.regions if region.type == 'WINDOW'), None)
+
+
+def stencil_frame(data, width, height):
+    image = data.brush_stencil
+    aspect = image.size[0] / max(image.size[1], 1) if image is not None and image.size[1] else 1.0
+    half = data.stencil_scale * min(width, height) / 2
+    dimension = (half * aspect, half) if aspect >= 1 else (half, half / aspect)
+    return (data.stencil_x * width, data.stencil_y * height), dimension, math.radians(data.stencil_angle)
+
+
+def sync_stencil(context, brush, data):
+    if data.brush_stencil is None:
+        brush.texture = None
+        return
+    texture = bpy.data.textures.get(STENCIL_TEXTURE) or bpy.data.textures.new(STENCIL_TEXTURE, 'IMAGE')
+    texture.image = data.brush_stencil
+    brush.texture = texture
+    brush.texture_slot.map_mode = 'STENCIL'
+    region = view_region(context)
+    if region is not None:
+        position, dimension, angle = stencil_frame(data, region.width, region.height)
+        brush.stencil_pos, brush.stencil_dimension = position, dimension
+        brush.texture_slot.angle = angle
+
+
+def sync_symmetry(context, data):
+    obj = context.view_layer.objects.active if context.view_layer is not None else None
+    if obj is not None and obj.type == 'MESH':
+        obj.data.use_mirror_x, obj.data.use_mirror_y, obj.data.use_mirror_z = data.brush_mirror
+
+
+def normal_color(data):
+    tilt, angle = math.radians(data.brush_normal_tilt), math.radians(data.brush_normal_angle)
+    vector = (math.sin(tilt) * math.cos(angle), math.sin(tilt) * math.sin(angle), math.cos(tilt))
+    set_slot_value(data.brush_slots['normal'], tuple(value * .5 + .5 for value in vector))
+
+
+def user_presets():
+    return settings().setdefault('brush_presets', [])
+
+
+def save_preset(data):
+    names = {preset['name'] for preset in (*PRESETS, *user_presets())}
+    number = 1
+    while f'Custom {number}' in names:
+        number += 1
+    preset = dict(name=f'Custom {number}', alpha=bpy.path.abspath(data.brush_alpha.filepath) if data.brush_alpha is not None else '',
+                  **{field: getattr(data, 'brush_' + field) for field in PRESET_FIELDS})
+    user_presets().append(preset)
+    save_settings()
+    return preset['name']
+
+
+def remove_preset(index):
+    name = user_presets().pop(index)['name']
+    save_settings()
+    return name
+
+
+def use_material(context, data, definition):
+    for channel in set_channels(data):
+        slot, values = data.brush_slots[channel.key], definition['slots'].get(channel.key)
+        slot.enabled = values is not None or channel.key == 'base_color'
+        slot.source, slot.image = 'VALUE', None
+        if values is None:
+            continue
+        if values.get('source') == 'IMAGE':
+            slot.source, slot.image = 'IMAGE', load_image(values['image'], CHANNEL[channel.key])
+        value = values.get('value', channel.default)
+        set_slot_value(slot, tuple(value) if isinstance(value, (list, tuple)) else (value,))
+        if channel.key == 'base_color' and slot.source == 'VALUE':
+            brush_source(context, 'color').color = tuple(float(part) for part in linear_to_srgb(numpy.array(value[:3])))
+    data.brush_material = definition['name']
+
+
+def clear_material(data):
+    for slot in data.brush_slots:
+        slot.source, slot.image = 'VALUE', None
+    data.brush_material = ''
 
 
 def load_alpha(name):
@@ -166,7 +261,8 @@ def load_alpha(name):
 
 def apply_preset(context, data, preset):
     for field in PRESET_FIELDS:
-        setattr(data, 'brush_' + field, preset[field])
-    data.brush_alpha = load_alpha(preset['alpha']) if preset['alpha'] else None
+        setattr(data, 'brush_' + field, preset.get(field, PRESET_DEFAULTS.get(field)))
+    alpha = preset['alpha']
+    data.brush_alpha = (bpy.data.images.load(alpha, check_existing=True) if alpha.endswith('.png') else load_alpha(alpha)) if alpha else None
     data.brush_preset = preset['name']
     sync(context, data)

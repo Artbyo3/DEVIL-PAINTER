@@ -8,6 +8,9 @@ TOOLS = (('PAINT', 'Paint', 'Paint Soft', 'B'), ('ERASE', 'Erase', 'Erase Soft',
          ('BLUR', 'Blur', 'Blur', ''), ('SMEAR', 'Smear', 'Smear', ''), ('CLONE', 'Clone', 'Clone', ''))
 BRUSH_NAMES = {key: brush for key, _, brush, _ in TOOLS}
 STROKE_TOOLS = {'PAINT', 'FILL'}
+BUFFER_TOOLS = {'PAINT', 'FILL', 'ERASE', 'BLUR', 'SMEAR', 'CLONE'}
+NATIVE_TYPES = {'PAINT': ('DRAW', 'MIX'), 'FILL': ('FILL', 'MIX'), 'ERASE': ('DRAW', 'ERASE_ALPHA'), 'BLUR': ('SOFTEN', 'MIX'),
+                'SMEAR': ('SMEAR', 'MIX'), 'CLONE': ('CLONE', 'MIX')}
 DEVIL_PREFIX = 'DP '
 
 
@@ -62,13 +65,26 @@ def active_tool(context):
 def uses_stroke_buffer(context, data):
     layer = active_layer(data)
     return (layer is not None and layer.kind == 'PAINT' and data.target == 'CONTENT' and data.stroke is not None and data.quick_mask is None
-            and active_tool(context) in STROKE_TOOLS)
+            and active_tool(context) in BUFFER_TOOLS)
+
+
+def set_brush_mode(context, tool, buffered):
+    brush = context.tool_settings.image_paint.brush
+    if brush is None or brush.library is not None or tool not in NATIVE_TYPES:
+        return
+    kind, blend = NATIVE_TYPES['PAINT'] if buffered and tool != 'FILL' else NATIVE_TYPES[tool]
+    if brush.image_brush_type != kind:
+        brush.image_brush_type = kind
+    if brush.blend != blend:
+        brush.blend = blend
 
 
 def update_canvas(context, data):
     buffered = uses_stroke_buffer(context, data)
     owner = data.active_uid if buffered else ''
-    if data.stroke_owner != owner:
-        data.stroke_owner = owner
+    tool = active_tool(context) or ''
+    set_brush_mode(context, tool, buffered)
+    if data.stroke_owner != owner or data.stroke_tool != tool:
+        data.stroke_owner, data.stroke_tool = owner, tool
         compositing.sync(data)
     context.tool_settings.image_paint.canvas = data.stroke if buffered else variant(data, paint_target(data), active_tile(data))

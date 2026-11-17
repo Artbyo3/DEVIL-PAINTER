@@ -19,7 +19,7 @@ SOURCES = {'base_color.r': ('Base R', 'base_color', 0), 'base_color.g': ('Base G
            'normal.r': ('Normal X', 'normal', 0), 'normal.g': ('Normal Y', 'normal', 1), 'normal.g_dx': ('Normal Y DirectX', 'normal', 1),
            'normal.b': ('Normal Z', 'normal', 2), 'height': ('Height', 'height', 0), 'emission.r': ('Emit R', 'emission', 0),
            'emission.g': ('Emit G', 'emission', 1), 'emission.b': ('Emit B', 'emission', 2), 'opacity': ('Opacity', 'opacity', 0),
-           'ao': ('Ambient occlusion', 'ambient_occlusion', 0), 'user1': ('User 1', 'user1', 0), 'user2': ('User 2', 'user2', 0),
+           'ao': ('Ambient occlusion', 'ambient_occlusion', 0), 'flow.r': ('Flow X', 'flow', 0), 'flow.g': ('Flow Y', 'flow', 1), 'user1': ('User 1', 'user1', 0), 'user2': ('User 2', 'user2', 0),
            'user3': ('User 3', 'user3', 0), 'user4': ('User 4', 'user4', 0), 'white': ('White', None, 0), 'black': ('Black', None, 0)}
 INVERTED = {'smoothness', 'normal.g_dx'}
 TOKENS = ('{mesh}', '{set}', '{output}', '{udim}', '{material}', '{resolution}')

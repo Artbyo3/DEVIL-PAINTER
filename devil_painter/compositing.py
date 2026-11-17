@@ -1,5 +1,6 @@
+import math
 from .blending import NORMAL_DETAIL
-from .document import active_tile, children, geometry_attribute, linked_layer, set_channels, shown_layers, slot_value, uses_coordinates
+from .document import PROJECTORS, active_tile, children, geometry_attribute, linked_layer, set_channels, shown_layers, slot_value, uses_coordinates
 from .effects import EFFECT_FIELDS
 from .filters import FILTER, content_warp, filter_color, filter_value, warp_vector, wrap_sampling
 from .masks import generator_mask, id_selection, write_generator
@@ -10,6 +11,7 @@ from .tiles import numbers, variant
 SIGNATURE_KEY = 'devil_painter_signature'
 QUICK_TINT = (1.0, .08, .15, 1.0)
 QUICK_SHOW = .6
+PREVIEW_TOOLS = {'PAINT', 'FILL', ''}
 BUMP_DISTANCE = .05
 DISPLAY_GAMMA = 2.2
 TRIPLANAR_BLEND = .2
@@ -157,7 +159,7 @@ def effect_signature(effect):
 
 
 def layer_signature(layer):
-    return ':'.join((layer.uid, layer.kind, layer.parent, layer.projection, layer.generator, layer.folder_blend, str(layer.geo_mask),
+    return ':'.join((layer.uid, layer.kind, layer.parent, layer.projection, str(layer.tile_match), layer.generator, layer.folder_blend, str(layer.geo_mask),
                      layer.image.name if layer.image else '', layer.mask.name if layer.mask else '',
                      *(slot_signature(slot) for slot in layer.slots if slot.enabled), *(effect_signature(effect) for effect in layer.effects)))
 
@@ -167,7 +169,7 @@ def signature(data):
     maps = ','.join(item.name for item in data.maps if item.image is not None)
     layers = '|'.join(layer_signature(layer) for layer in shown_layers(resolved(data.layers)))
     stroke = stroke_link(data)
-    owner = f'{stroke[0]}:{",".join(stroke[2])}:{active_tile(data)}' if stroke else ''
+    owner = f'{stroke[0]}:{",".join(stroke[2])}:{active_tile(data)}:{data.stroke_tool}' if stroke else ''
     tiles = ','.join(str(number) for number in numbers(data))
     project = data.id_data.devil_painter
     shading = f'{data.visible}{data.shader}{project.normal_format}{project.normal_space}'
@@ -331,13 +333,47 @@ def layer_coverage(build, layer, x, stroke=None):
     return coverage, source, weight
 
 
+def projected(nodes, links, layer, coordinates, x):
+    projector = nodes.new('ShaderNodeMapping')
+    projector.name = layer.uid + '.projector'
+    projector.vector_type = 'TEXTURE'
+    projector.location = (x - 750, -400)
+    links.new(coordinates.outputs['Object'], projector.inputs['Vector'])
+    split = nodes.new('ShaderNodeSeparateXYZ')
+    links.new(projector.outputs['Vector'], split.inputs['Vector'])
+    px, py, pz = split.outputs['X'], split.outputs['Y'], split.outputs['Z']
+    if layer.projection == 'PLANAR':
+        u, v = px, py
+    else:
+        u = math_node(nodes, links, 'MULTIPLY', math_node(nodes, links, 'ARCTAN2', py, px), 1 / math.pi)
+        v = pz
+        if layer.projection == 'SPHERICAL':
+            flat = math_node(nodes, links, 'SQRT', math_node(nodes, links, 'ADD', math_node(nodes, links, 'MULTIPLY', px, px),
+                                                              math_node(nodes, links, 'MULTIPLY', py, py)), 0.0)
+            v = math_node(nodes, links, 'MULTIPLY', math_node(nodes, links, 'ARCTAN2', pz, flat), 2 / math.pi)
+    join = nodes.new('ShaderNodeCombineXYZ')
+    links.new(math_node(nodes, links, 'ADD', math_node(nodes, links, 'MULTIPLY', u, .5), .5), join.inputs['X'])
+    links.new(math_node(nodes, links, 'ADD', math_node(nodes, links, 'MULTIPLY', v, .5), .5), join.inputs['Y'])
+    return join.outputs['Vector']
+
+
+def per_tile(nodes, links, vector):
+    return vector_math(nodes, links, 'FRACTION', vector)
+
+
 def layer_coordinates(nodes, links, layer, x):
     coordinates = nodes.new('ShaderNodeTexCoord')
-    coordinates.location = (x - 600, -400)
+    coordinates.location = (x - 900, -400)
     mapping = nodes.new('ShaderNodeMapping')
     mapping.name = layer.uid + '.mapping'
     mapping.location = (x - 450, -400)
-    links.new(coordinates.outputs['Object' if layer.projection == 'TRIPLANAR' else 'UV'], mapping.inputs['Vector'])
+    if layer.projection in PROJECTORS:
+        source = projected(nodes, links, layer, coordinates, x)
+    elif layer.projection == 'TRIPLANAR':
+        source = coordinates.outputs['Object']
+    else:
+        source = per_tile(nodes, links, coordinates.outputs['UV']) if layer.tile_match else coordinates.outputs['UV']
+    links.new(source, mapping.inputs['Vector'])
     return mapping.outputs['Vector']
 
 
@@ -492,7 +528,10 @@ def compose_layer(build, channels, layer, results, x):
             continue
         name = f'{layer.uid}.{channel.key}'
         y = 300 - 250 * row
-        factor = math_node(nodes, links, 'MULTIPLY', coverage, 1.0, x - 100, y - 60, name + '.opacity')
+        reach = coverage
+        if layer.kind == 'PAINT' and channel.key != 'base_color' and slot.source == 'IMAGE' and slot.image is not None:
+            reach = math_node(nodes, links, 'MULTIPLY', coverage, sampling(build, layer, 'CONTENT')(slot.image)[1], x - 150, y - 60)
+        factor = math_node(nodes, links, 'MULTIPLY', reach, 1.0, x - 100, y - 60, name + '.opacity')
         detail = slot.blend == NORMAL_DETAIL
         node = channel_mix(nodes, links, name, results[channel.key], factor, 'MIX' if detail else slot.blend, x, y)
         content = painted if channel.key == 'base_color' and painted is not None else slot_content(build, layer, slot, vector, name, x, y)
@@ -670,6 +709,11 @@ def write_values(nodes, channels, layers, brush=None):
             continue
         if uses_coordinates(layer):
             nodes[layer.uid + '.mapping'].inputs['Scale'].default_value = (layer.tiling,) * 3
+            projector = nodes.get(layer.uid + '.projector')
+            if projector is not None:
+                projector.inputs['Location'].default_value = tuple(layer.proj_offset)
+                projector.inputs['Rotation'].default_value = tuple(layer.proj_rotation)
+                projector.inputs['Scale'].default_value = (layer.proj_size,) * 3
         for channel in channels:
             slot = layer.slots[channel.key]
             if not slot.enabled:
@@ -702,7 +746,8 @@ def stroke_link(data):
 
 
 def brush_values(data):
-    return data.brush_opacity, {slot.name: slot_value(slot) for slot in data.brush_slots}
+    shown = data.brush_opacity if data.stroke_tool in PREVIEW_TOOLS else 0.0
+    return shown, {slot.name: slot_value(slot) for slot in data.brush_slots}
 
 
 def solo_channel(data):

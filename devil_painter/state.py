@@ -48,6 +48,9 @@ class WorkspaceState:
     bake_keys: set = field(default_factory=lambda: {'ao', 'curvature', 'thickness', 'position', 'world_normal', 'id'})
     bake_found: object = None
     poly_mode: str = ''
+    gesture: list = None
+    gizmo: tuple = ()
+    clone_source: tuple = None
     poly_erase: bool = False
     bake_pending: str = ''
     bake_since: float = 0.0

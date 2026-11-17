@@ -7,12 +7,12 @@ from .blending import linear_to_srgb
 from .effects import EFFECT_LABEL, copy_effect, find_effect, mask_effects
 from .masks import GENERATOR, GENERATOR_FIELDS
 from .meshmaps import MESH_MAP
-from .blending import BLEND_MODES, CHANNEL
+from .blending import BLEND_MODES, CHANNEL, NORMAL_DETAIL
 from .procedural import PATTERN
-from .document import SLOT_FIELDS, geometry_attribute, active_layer, add_set_channels, add_slots, children, descendants, fill_slots, find_layer, layer_index, set_slot_value
+from .document import PROJECTIONS, PROJECTORS, SLOT_FIELDS, geometry_attribute, active_layer, add_set_channels, add_slots, children, descendants, fill_slots, find_layer, layer_index, set_slot_value
 
 KIND_NAMES = {'PAINT': 'Paint', 'FILL': 'Fill', 'FOLDER': 'Folder'}
-LAYER_FIELDS = ('kind', 'visible', 'opacity', 'projection', 'tiling', 'material', 'folder_blend', 'geo_mask', 'link_set', 'link_uid') + GENERATOR_FIELDS
+LAYER_FIELDS = ('kind', 'visible', 'opacity', 'projection', 'tiling', 'proj_offset', 'proj_rotation', 'proj_size', 'tile_match', 'material', 'folder_blend', 'geo_mask', 'link_set', 'link_uid') + GENERATOR_FIELDS
 ID_TOLERANCE = .15
 EFFECT_BLENDS = {'PAINT': 'MIX', 'FILL': 'MULTIPLY', 'COMPARE': 'MULTIPLY', 'ANCHOR': 'MULTIPLY', 'LEVELS': 'MIX', 'FILTER': 'MIX', 'ID_COLOR': 'MULTIPLY'}
 
@@ -548,6 +548,7 @@ def add_layer(context, obj, data, kind):
         add_slots(layer)
     if kind == 'PAINT':
         layer.image = image_for(obj, data, layer.uid, False)
+        layer.slots['normal'].blend = NORMAL_DETAIL
     return refresh(context, obj, data, f'Added {layer.name}.')
 
 
@@ -747,7 +748,18 @@ def set_tiling(context, obj, data, value):
 def set_projection(context, obj, data, projection):
     layer = active_layer(data)
     layer.projection = projection
-    return refresh(context, obj, data, f'{layer.name} projects {"tri-planar" if projection == "TRIPLANAR" else "by UV"}.')
+    if projection in PROJECTORS and layer.proj_size == 1.0 and not any(layer.proj_offset):
+        layer.proj_size = max(obj.dimensions) / 2 / max(max(obj.scale), 1e-6)
+    label = dict((key, label) for key, label, _ in PROJECTIONS)[projection]
+    return refresh(context, obj, data, f'{layer.name} projects {"by UV" if projection == "UV" else label.lower()}.')
+
+
+def set_projector(context, obj, data, values, commit):
+    layer = active_layer(data)
+    for field, value in values.items():
+        setattr(layer, field, value)
+    compositing.update_values(data)
+    return refresh(context, obj, data, f'{layer.name} projector moved.') if commit else ''
 
 
 def use_value(context, obj, data, key):

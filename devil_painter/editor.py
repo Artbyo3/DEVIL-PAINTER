@@ -7,24 +7,31 @@ import numpy
 import math
 import gpu
 from gpu_extras.batch import batch_for_shader
-from . import actions, brushes, compositing, exporting, library, meshmaps, painting, polyfill, projects, sets, shelf, shortcuts, smart, strokes, thumbnails
+from . import actions, brushes, compositing, exporting, library, meshmaps, painting, polyfill, projection, projects, sets, shelf, shortcuts, smart, strokes, thumbnails
 from .blending import BLEND_MODES, CHANNEL, FOLDER_BLENDS, linear_to_srgb, srgb_to_linear
 from .ui_system import ACCENT
 from .canvas import Rect
-from .document import BAKE_ID_LABELS, RESOLUTIONS, active_effect, active_layer, active_tile, find_layer, paint_target, set_channels, slot_value, texture_set
+from .document import (BAKE_ID_LABELS, PROJECTIONS, PROJECTORS, RESOLUTIONS, STROKE_METHODS, active_effect, active_layer, active_tile, find_layer,
+                       paint_target, set_channels, slot_value, texture_set, uses_coordinates)
 from .effects import MASK_BLENDS
 from .filters import FILTERS, GROUPS
 from .procedural import PATTERNS
-from .tiles import variant
+from .tiles import FIRST_TILE, variant
+from bpy_extras import view3d_utils
+from mathutils import Euler, Matrix, Vector
 from .draw import Renderer
 from .masks import BUILDER_SLIDERS, GENERATORS
 from .polyfill import POLY_NOUN
 from .meshmaps import MESH_MAPS
-from .minimal import MENU_HEADING, FX_RANGES, effect_menu, layer_rows, FOV_RANGE, RECENT_COLORS, SHADER_SLIDERS, BRUSH_SLIDERS, BRUSH_TOGGLES, GENERATOR_SLIDERS, MAX_BRUSH_SIZE, REPLACE_TARGET, EFFECT_TARGET, SCALE_RANGE, TILING_RANGE, from_slider, painter_layout
+from .minimal import MENU_HEADING, PROJECTOR_RANGE, NORMAL_SLIDERS, STENCIL_SLIDERS, FX_RANGES, effect_menu, layer_rows, FOV_RANGE, RECENT_COLORS, SHADER_SLIDERS, BRUSH_SLIDERS, BRUSH_TOGGLES, GENERATOR_SLIDERS, MAX_BRUSH_SIZE, REPLACE_TARGET, EFFECT_TARGET, SCALE_RANGE, TILING_RANGE, from_slider, painter_layout
 from .shell import MARGIN, clamp_column, clamp_split
 from .state import Popover, TextEdit, WorkspaceState
 
 TIMER_INTERVAL = .3
+GESTURE_TOOLS = {'ERASE', 'BLUR', 'SMEAR', 'CLONE'}
+STROKE_LABEL = {key: label for key, label, _ in STROKE_METHODS}
+NORMAL_KEYS = {key for key, _, _, _ in NORMAL_SLIDERS}
+DRAG_FIELDS = {key: (field, top) for key, _, field, top in (*NORMAL_SLIDERS, *STENCIL_SLIDERS)}
 DOUBLE_CLICK_SECONDS = .4
 SCROLL_STEP = 40
 POINTER_TOKENS = ('MOUSE', 'TRACKPAD', 'NDOF', 'PEN', 'ERASER')
@@ -37,7 +44,8 @@ SHADER_RANGES = {key: (field, top) for key, _, field, top in SHADER_SLIDERS}
 TOOL_ACTIONS = {'PAINT', 'ERASE', 'FILL', 'BLUR', 'SMEAR', 'CLONE'}
 EXPORT_MENU_PREFIXES = ('OUT_SRC.', 'OUT_FORMAT.', 'OUT_DEPTH.')
 EXPORT_EDITS = ('SET_TEMPLATE.', 'SET_EXPORT_DEPTH.', 'SET_EXPORT_SIZE.', 'SET_EXPORT_PADDING.', 'OUT_REMOVE.', 'SET_SRC.', 'SET_FORMAT.', 'SET_DEPTH.')
-PROJECTION_LABELS = {'UV': 'UV', 'TRIPLANAR': 'Tri-planar'}
+PROJECTION_LABELS = {key: label for key, label, _ in PROJECTIONS}
+CIRCLE_STEPS = 32
 BRUSH_RANGES = {key: (field, top, .01 if key == 'BRUSH_FLOW' else 1.0 if key == 'BRUSH_SPACING' else 0.0) for key, _, field, top, _ in BRUSH_SLIDERS}
 BRUSH_FLAGS = {key: field for key, _, field in BRUSH_TOGGLES}
 GENERATOR_RANGES = {**{key: (field, top) for key, _, field, top in GENERATOR_SLIDERS}, **{key: (field, 1.0) for key, _, field in BUILDER_SLIDERS}}
@@ -167,6 +175,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         name = obj.name if obj is not None and obj.type == 'MESH' else ''
         directory = (obj.devil_painter.export_directory or default_directory(obj)) if data is not None else ''
         viewport = (space.shading, space.lens, space.region_3d.view_perspective == 'ORTHO')
+        self.state.gizmo = self.gizmo_geometry(obj, data, space.region_3d)
         if data is not None and self.state.popover is not None and self.state.popover.kind == 'BAKE':
             self.state.bake_found = meshmaps.bake_sources(bpy.context, obj, data)
         return painter_layout(self.bounds, scale, self.state, data, name, painting.active_tool(self.scene), brush, directory, self.setup(obj, data),
@@ -387,6 +396,10 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         self.pointer = (event.mouse_x - self._region.x, event.mouse_y - self._region.y)
         press = event.value == 'PRESS'
         pointer_event = any(token in event.type for token in POINTER_TOKENS)
+        if self.state.gesture is not None:
+            return self.gesture_event(context, event)
+        if press and event.type == 'LEFTMOUSE' and not event.alt and self.state.popover is None and self.wants_gesture(context)                 and not (self.workspace.covers(*self.pointer) or self.workspace.hit(*self.pointer)):
+            return self.start_gesture(context, event)
         if press and event.ctrl and event.alt and event.type == 'P':
             self.cleanup()
             return {'FINISHED'}
@@ -467,6 +480,13 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             index = control.key.removeprefix('ITEM.')
             if item.user_index >= 0 and item.kind == 'MASK':
                 self.state.popover = Popover('MENU', control.rect, items=((f'DELETE_SMART_MASK.{item.user_index}', 'Delete smart mask', False),))
+            elif item.kind == 'BRUSH' and item.user_index >= 0:
+                self.state.popover = Popover('MENU', control.rect, items=((f'DELETE_BRUSH.{item.user_index}', 'Delete brush preset', False),))
+            elif item.kind == 'MATERIAL':
+                items = ((f'PAINT_MATERIAL.{index}', 'Paint with this material', False),)
+                if item.user_index >= 0:
+                    items += ((f'DELETE_MATERIAL.{item.user_index}', 'Delete material', False),)
+                self.state.popover = Popover('MENU', control.rect, items=items)
             elif item.user_index >= 0 and item.kind == 'SMART':
                 self.state.popover = Popover('MENU', control.rect, items=((f'DELETE_SMART.{item.user_index}', 'Delete smart material', False),))
             elif item.user_index >= 0:
@@ -474,7 +494,8 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             elif item.kind == 'TEXTURE':
                 obj, data = self.painted()
                 layer = active_layer(data) if data is not None else None
-                items = [(f'TEXTURE_FILL.{index}', 'New fill layer', False), (f'USE_ALPHA.{index}', 'Use as brush alpha', False)]
+                items = [(f'TEXTURE_FILL.{index}', 'New fill layer', False), (f'USE_ALPHA.{index}', 'Use as brush alpha', False),
+                         (f'USE_STENCIL.{index}', 'Use as stencil', False)]
                 if layer is not None and layer.kind == 'FILL':
                     items += [(f'ASSIGN_TEXTURE.{channel.key}.{index}', f'Use for {channel.label.lower()}', False) for channel in set_channels(data)]
                 if item.managed:
@@ -537,6 +558,148 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         self.state.view_2d = False
         return 'Closed the 2D view.'
 
+    def projector_matrix(self, obj, layer):
+        local = Matrix.Translation(layer.proj_offset) @ Euler(layer.proj_rotation).to_matrix().to_4x4() @ Matrix.Scale(layer.proj_size, 4)
+        return obj.matrix_world @ local
+
+    def gizmo_geometry(self, obj, data, view):
+        layer = active_layer(data) if data is not None else None
+        if layer is None or layer.kind != 'FILL' or layer.projection not in PROJECTORS or data.target != 'CONTENT' or not uses_coordinates(layer):
+            return ()
+        matrix = self.projector_matrix(obj, layer)
+        rings = [[(math.cos(angle), math.sin(angle), height) for angle in (step * math.tau / CIRCLE_STEPS for step in range(CIRCLE_STEPS + 1))]
+                 for height in ((0.0,) if layer.projection == 'SPHERICAL' else (-1.0, 1.0))]
+        if layer.projection == 'SPHERICAL':
+            rings += [[(math.cos(angle), 0.0, math.sin(angle)) for angle in (step * math.tau / CIRCLE_STEPS for step in range(CIRCLE_STEPS + 1))],
+                      [(0.0, math.cos(angle), math.sin(angle)) for angle in (step * math.tau / CIRCLE_STEPS for step in range(CIRCLE_STEPS + 1))]]
+        if layer.projection == 'PLANAR':
+            rings = [[(-1, -1, 0), (1, -1, 0), (1, 1, 0), (-1, 1, 0), (-1, -1, 0)], [(0, 0, 0), (0, 0, 1)]]
+        if layer.projection == 'CYLINDRICAL':
+            rings += [[(side, 0, -1), (side, 0, 1)] for side in (-1, 1)] + [[(0, side, -1), (0, side, 1)] for side in (-1, 1)]
+        def screen(point):
+            spot = view3d_utils.location_3d_to_region_2d(self._region, view, matrix @ Vector(point))
+            return None if spot is None else (spot.x, spot.y)
+        segments = []
+        for ring in rings:
+            spots = [screen(point) for point in ring]
+            segments += [point for first, second in zip(spots, spots[1:]) if first and second for point in (first, second)]
+        center, corner = screen((0, 0, 0)), screen((1, 1, 0) if layer.projection == 'PLANAR' else (1, 0, 0))
+        if center is None or corner is None:
+            return ()
+        return tuple(segments), center, corner
+
+    def drag_gizmo(self, context, key, release):
+        obj, data = self.painted()
+        layer = active_layer(data)
+        view = self._area.spaces.active.region_3d
+        matrix = self.projector_matrix(obj, layer)
+        center = matrix @ Vector((0.0, 0.0, 0.0))
+        point = view3d_utils.region_2d_to_location_3d(self._region, view, self.pointer, center)
+        local = obj.matrix_world.inverted() @ point
+        if key == 'GIZMO_MOVE':
+            values = dict(proj_offset=tuple(local))
+        else:
+            values = dict(proj_size=max(.01, (local - Vector(layer.proj_offset)).length / math.sqrt(2 if layer.projection == 'PLANAR' else 1)))
+        self.message = actions.set_projector(context, obj, data, values, release) or self.message
+
+    def wants_gesture(self, context):
+        obj, data = self.painted()
+        if data is None or obj.mode != 'TEXTURE_PAINT' or self.state.poly_mode or self.state.picking or self.state.geo_pick:
+            return False
+        tool = painting.active_tool(self.scene)
+        if data.brush_radial > 1 and tool in painting.BUFFER_TOOLS - {'FILL'}:
+            return True
+        buffered = painting.uses_stroke_buffer(context, data)
+        return buffered and (tool in GESTURE_TOOLS or (tool == 'PAINT' and 'flow' in data.brush_slots and data.brush_slots['flow'].enabled))
+
+    def start_gesture(self, context, event):
+        obj, data = self.painted()
+        if event.ctrl and painting.active_tool(self.scene) == 'CLONE':
+            spot = self.texture_point(obj, data, self.pointer)
+            self.state.clone_source = spot
+            return self.finish_message('Clone source set. Paint to copy from it.' if spot else 'Ctrl+click on the model to set the clone source.')
+        self.begin_stroke(context)
+        self.stroke_pending = False
+        self.state.gesture = [(self.pointer, max(event.pressure, .01))]
+        return {'RUNNING_MODAL'}
+
+    def finish_message(self, message):
+        self.message = message
+        self._area.tag_redraw()
+        return {'RUNNING_MODAL'}
+
+    def gesture_event(self, context, event):
+        if event.type in {'MOUSEMOVE', 'INBETWEEN_MOUSEMOVE'}:
+            self.state.gesture.append((self.pointer, max(event.pressure, .01)))
+        elif event.type == 'LEFTMOUSE' and event.value == 'RELEASE':
+            self.state.gesture.append((self.pointer, max(event.pressure, .01)))
+            points, self.state.gesture = self.state.gesture, None
+            return self.finish_message(self.run_gesture(context, points))
+        return {'RUNNING_MODAL'}
+
+    def texture_point(self, obj, data, pointer):
+        face, location = sets.hit_under(self._region, self._area.spaces.active.region_3d, obj, pointer)
+        if face < 0:
+            return None
+        uv = sets.uv_at(obj.data, obj.devil_painter.uv_map, sets.triangle_at(obj.data, face, location), location)
+        tile = FIRST_TILE + int(uv.x // 1) + 10 * int(uv.y // 1)
+        return tile, uv.x % 1 * data.resolution, uv.y % 1 * data.resolution
+
+    def gesture_path(self, data, points):
+        if data.brush_stroke == 'LINE' and len(points) > 1:
+            (start, pressure), (end, _) = points[0], points[-1]
+            count = max(2, int(math.dist(start, end) / 3))
+            points = [((start[0] + (end[0] - start[0]) * index / (count - 1), start[1] + (end[1] - start[1]) * index / (count - 1)), pressure)
+                      for index in range(count)]
+        if data.brush_smoothing > 0:
+            factor, smoothed, current = 1 - .9 * data.brush_smoothing, [], points[0][0]
+            for point, pressure in points:
+                current = (current[0] + (point[0] - current[0]) * factor, current[1] + (point[1] - current[1]) * factor)
+                smoothed.append((current, pressure))
+            points = smoothed
+        return points
+
+    def replay(self, context, obj, data, points):
+        size = painting.brush_value(self.scene, 'size')
+        elements = [dict(name='', location=(0.0, 0.0, 0.0), mouse=point, mouse_event=point, is_start=index == 0, pressure=pressure, size=size,
+                         time=index * .01, x_tilt=0.0, y_tilt=0.0) for index, (point, pressure) in enumerate(points)]
+        original = obj.matrix_world.copy()
+        axis = data.brush_radial_axis
+        try:
+            for turn in range(data.brush_radial):
+                obj.matrix_world = original @ Matrix.Rotation(math.tau * turn / data.brush_radial, 4, axis)
+                context.view_layer.update()
+                with context.temp_override(window=self._window, area=self._area, region=self._region):
+                    bpy.ops.paint.image_paint('EXEC_DEFAULT', False, stroke=elements, mode='NORMAL')
+        finally:
+            obj.matrix_world = original
+            context.view_layer.update()
+
+    def run_gesture(self, context, points):
+        obj, data = self.painted()
+        points = self.gesture_path(data, points)
+        buffered = painting.uses_stroke_buffer(context, data)
+        self.replay(context, obj, data, points)
+        if not buffered:
+            bpy.ops.ed.undo_push(message='Devil Painter: stroke')
+            strokes.record(None)
+            return ''
+        tile = active_tile(data)
+        path = [(spot[1], spot[2]) for spot in (self.texture_point(obj, data, point) for point, _ in points) if spot and spot[0] == tile]
+        size = painting.brush_value(self.scene, 'size')
+        first, edge = self.texture_point(obj, data, points[0][0]), self.texture_point(obj, data, (points[0][0][0] + size, points[0][0][1]))
+        radius = math.dist(first[1:], edge[1:]) if first and edge and first[0] == edge[0] else size
+        source = self.state.clone_source[1:] if self.state.clone_source and self.state.clone_source[0] == tile else None
+        if painting.active_tool(self.scene) == 'CLONE' and source is None:
+            strokes.merge(obj, data, None)
+            return 'Ctrl+click on the model to set the clone source first.'
+        entry = strokes.merge(obj, data, strokes.Gesture(path, radius, source))
+        if entry is None:
+            return ''
+        bpy.ops.ed.undo_push(message='Devil Painter: stroke')
+        strokes.record(entry)
+        return ''
+
     def begin_stroke(self, context):
         obj, data = self.painted()
         if data is None or obj.mode != 'TEXTURE_PAINT':
@@ -559,7 +722,9 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             return
         self.stroke_pending = False
         obj, data = self.painted()
-        if data is not None and strokes.merge(obj, data):
+        entry = strokes.merge(obj, data) if data is not None else None
+        if entry is not None:
+            strokes.record(entry.before)
             self._area.tag_redraw()
 
     def history_step(self, context, redo):
@@ -906,7 +1071,9 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         x = max(0.0, min(1.0, (self.pointer[0] - rect.x) / rect.w))
         y = max(0.0, min(1.0, (self.pointer[1] - rect.y) / rect.h))
         release = event.type == 'LEFTMOUSE' and event.value == 'RELEASE'
-        if event.type == 'MOUSEMOVE' or release:
+        if key.startswith('GIZMO_') and (event.type == 'MOUSEMOVE' or release):
+            self.drag_gizmo(context, key, release)
+        elif event.type == 'MOUSEMOVE' or release:
             self.apply_drag(context, key, x, y, release)
         if release:
             self.state.drag = None
@@ -951,6 +1118,20 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
                 space.shading.studiolight_intensity = x * 2
             else:
                 space.lens = FOV_RANGE[0] + x * (FOV_RANGE[1] - FOV_RANGE[0])
+        elif key == 'PROJ_SIZE' and data is not None:
+            actions.set_projector(context, obj, data, dict(proj_size=from_slider(x, PROJECTOR_RANGE)), release)
+        elif key == 'PROJ_SPIN' and data is not None:
+            rotation = active_layer(data).proj_rotation
+            actions.set_projector(context, obj, data, dict(proj_rotation=(rotation[0], rotation[1], math.radians(x * 360))), release)
+        elif key == 'RADIAL' and data is not None:
+            data.brush_radial = 1 + round(x * 15)
+        elif key in DRAG_FIELDS and data is not None:
+            field, top = DRAG_FIELDS[key]
+            setattr(data, field, x * top)
+            if key in NORMAL_KEYS:
+                brushes.normal_color(data)
+                compositing.update_values(data)
+            self.brush_changed(context, data)
         elif key == 'BAKE_SAMPLES' and data is not None:
             data.bake_samples = max(1, round(x * 128))
         elif key == 'BAKE_EXTRUSION' and data is not None:
@@ -1073,6 +1254,8 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.hide_regions()
         elif key.startswith('PANEL_'):
             self.state.collapsed ^= {key.removeprefix('PANEL_')}
+        elif control.kind == 'GIZMO':
+            self.state.drag = (key, control.rect)
         elif control.kind in {'SLIDER', 'SV', 'HUE', 'GRIP'}:
             self.state.drag = (key, control.rect)
             x = max(0.0, min(1.0, (self.pointer[0] - control.rect.x) / control.rect.w))
@@ -1141,6 +1324,50 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.message = actions.bake_mesh_maps(context, obj, data, [item.key for item in MESH_MAPS if item.key in self.state.bake_keys])
         elif key.startswith('MAP.'):
             self.message = actions.set_solo(context, obj, data, 'map:' + key.removeprefix('MAP.'))
+        elif key == 'BRUSH_STROKE':
+            self.state.popover = Popover('MENU', control.rect, items=tuple((f'SET_STROKE.{value}', label, data.brush_stroke == value)
+                                                                           for value, label, _ in STROKE_METHODS))
+        elif key.startswith('SET_STROKE.'):
+            data.brush_stroke = key.removeprefix('SET_STROKE.')
+            self.brush_changed(context, data)
+            self.message = f'{STROKE_LABEL[data.brush_stroke]} strokes.'
+        elif key == 'SAVE_BRUSH':
+            data.brush_preset = brushes.save_preset(data)
+            self.message = f'Saved {data.brush_preset} to the brush shelf.'
+        elif key.startswith('DELETE_BRUSH.'):
+            self.message = f'Deleted {brushes.remove_preset(int(key.removeprefix("DELETE_BRUSH.")))}.'
+        elif key == 'BRUSH_MATERIAL_CLEAR':
+            brushes.clear_material(data)
+            self.brush_changed(context, data)
+            self.message = 'The brush paints plain values again.'
+        elif key.startswith('PAINT_MATERIAL.'):
+            brushes.use_material(context, data, self.shelf_item('ITEM.' + key.removeprefix('PAINT_MATERIAL.')).payload)
+            self.brush_changed(context, data)
+            self.message = f'The brush paints {data.brush_material} in every channel.'
+        elif key in {'SYMMETRY', 'STENCIL_CARD'}:
+            kind = 'SYMMETRY' if key == 'SYMMETRY' else 'STENCIL'
+            self.state.popover = None if self.state.popover is not None and self.state.popover.kind == kind else Popover(kind, control.rect)
+        elif key.startswith('MIRROR.'):
+            index = 'XYZ'.index(key.removeprefix('MIRROR.'))
+            data.brush_mirror[index] = not data.brush_mirror[index]
+            self.brush_changed(context, data)
+        elif key.startswith('RADIAL_AXIS.'):
+            data.brush_radial_axis = key.removeprefix('RADIAL_AXIS.')
+        elif key.startswith('USE_STENCIL.'):
+            data.brush_stencil = bpy.data.images.load(str(self.shelf_item('ITEM.' + key.removeprefix('USE_STENCIL.')).payload), check_existing=True)
+            self.brush_changed(context, data)
+            self.message = 'Painting through the stencil. Open the stencil card to place or project it.'
+        elif key == 'STENCIL_CLEAR':
+            data.brush_stencil = None
+            self.brush_changed(context, data)
+        elif key == 'PROJECT':
+            self.state.popover = None
+            if data.brush_stencil is None:
+                self.message = 'Pick a stencil first.'
+            else:
+                painting.update_canvas(context, data)
+                self.message = projection.project(context, self._window, self._area, self._region, obj, data,
+                                                  painting.uses_stroke_buffer(context, data))
         elif key == 'BRUSH_CARD':
             self.state.popover = None if self.state.popover is not None and self.state.popover.kind == 'BRUSH' else Popover('BRUSH', control.rect)
         elif key in BRUSH_FLAGS:
@@ -1219,6 +1446,16 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             current = active_layer(data).projection
             self.state.popover = Popover('MENU', control.rect, items=tuple((f'SET_PROJECTION.{mode}', label, mode == current)
                                                                           for mode, label in PROJECTION_LABELS.items()))
+        elif key == 'TILE_MATCH':
+            layer = active_layer(data)
+            layer.tile_match = not layer.tile_match
+            self.message = actions.refresh(context, obj, data, f'{layer.name} repeats the same in every UV tile.' if layer.tile_match else f'{layer.name} runs across UV tiles.')
+        elif key == 'PROJ_ALIGN':
+            rotation = (obj.matrix_world.to_3x3().inverted() @ self._area.spaces.active.region_3d.view_rotation.to_matrix()).to_euler()
+            self.message = actions.set_projector(context, obj, data, dict(proj_rotation=tuple(rotation)), True)
+        elif key == 'PROJ_RESET':
+            self.message = actions.set_projector(context, obj, data, dict(proj_offset=(0.0, 0.0, 0.0), proj_rotation=(0.0, 0.0, 0.0),
+                                                                          proj_size=max(obj.dimensions) / 2 / max(max(obj.scale), 1e-6)), True)
         elif key.startswith('SET_PROJECTION.'):
             self.message = actions.set_projection(context, obj, data, key.removeprefix('SET_PROJECTION.'))
         elif key == 'COLOR_HEX':

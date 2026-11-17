@@ -467,6 +467,12 @@ class Renderer:
         y = rect.y + (rect.h - thumb_h) * (1 - control.value)
         self.round_rect(Rect(rect.x, y, rect.w, thumb_h), SURFACE_OUTLINE, radius=2)
 
+    def gizmo(self, control, hover, metrics):
+        if control.points:
+            self.lines(control.points, ACCENT, 2)
+        rect = control.rect
+        self.round_rect(rect, ACCENT_HOVER if hover else ACCENT, radius=rect.w / 2)
+
     def note(self, control, hover, metrics):
         rect = control.rect
         self.text(rect.x + 2 * self.s, rect.y + (rect.h - 10 * self.s) / 2, control.label, 10, TEXT_MUTED, max_width=rect.w)
@@ -476,4 +482,4 @@ DRAWERS = {'TOOL': Renderer.tool, 'ICON': Renderer.icon_button, 'CHIP': Renderer
            'SLIDER': Renderer.slider, 'SWATCH': Renderer.swatch, 'TOGGLE': Renderer.toggle, 'ROW': Renderer.row, 'NOTE': Renderer.note,
            'HEADER': Renderer.header, 'DROPDOWN': Renderer.dropdown, 'FIELD': Renderer.field, 'MENUITEM': Renderer.menu_item,
            'SV': Renderer.saturation_value, 'HUE': Renderer.hue, 'SCROLLBAR': Renderer.scrollbar, 'THUMB': Renderer.thumb,
-           'GRIP': Renderer.grip, 'TILE': Renderer.tile, 'SOURCE': Renderer.source}
+           'GRIP': Renderer.grip, 'TILE': Renderer.tile, 'SOURCE': Renderer.source, 'GIZMO': Renderer.gizmo}

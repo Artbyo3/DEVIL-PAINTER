@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 from . import thumbnails
-from .brushes import ALPHAS, PRESETS, alpha_path, preview_path
+from .brushes import ALPHAS, PRESETS, alpha_path, preview_path, user_presets
 from .library import BUILTIN_MATERIALS, is_managed, material, pattern, plain, scan, texture, user_materials
 from .masks import SMART_MASKS
 from .smart import BUILTIN_SMART, smart_masks, smart_materials
@@ -52,7 +52,8 @@ def items(tab):
         return ([Item(preset['name'], 'MASK', preset) for preset in SMART_MASKS]
                 + [Item(definition['name'], 'MASK', definition, index, definition['preview']) for index, definition in enumerate(smart_masks())])
     if tab == 'BRUSHES':
-        return [Item(preset['name'], 'BRUSH', preset, preview_file=str(preview_path(preset))) for preset in PRESETS]
+        return ([Item(preset['name'], 'BRUSH', preset, preview_file=str(preview_path(preset))) for preset in PRESETS]
+                + [Item(preset['name'], 'BRUSH', preset, index, str(preview_path(preset))) for index, preset in enumerate(user_presets())])
     if tab == 'ALPHAS':
         return [Item('No alpha', 'ALPHA', '')] + [Item(name, 'ALPHA', name, preview_file=str(alpha_path(name))) for name in ALPHAS]
     return [Item(entry.label, 'PATTERN', entry.key) for entry in PATTERNS]
