@@ -3,10 +3,13 @@ from dataclasses import dataclass
 import json
 import math
 import numpy
-from . import shelf, thumbnails
+from . import autosave, shelf, thumbnails
+from .post import POST_SLIDERS
+from .bridge import command as bridge_command
+from pathlib import Path
 from .blending import BLEND_MODES, CHANNEL, CHANNELS, FOLDER_BLENDS, linear_to_srgb
 from .canvas import Layout, Rect
-from .document import (BAKE_ID_LABELS, NORMAL_FORMATS, PROJECTORS, STROKE_METHODS, NORMAL_SPACES, PROJECTIONS, RESOLUTIONS, SHADERS, active_effect, active_layer, children, editing_mask, find_layer,
+from .document import (BAKE_ID_LABELS, DYNAMICS, NORMAL_FORMATS, PROJECTORS, STROKE_METHODS, TRANSPARENCY, NORMAL_SPACES, PROJECTIONS, RESOLUTIONS, SHADERS, active_effect, active_layer, children, editing_mask, find_layer,
                        linked_layer, set_channels, slot_value, uses_coordinates)
 from .effects import EFFECT_ICONS, EFFECT_KINDS, MASK_BLENDS, effect_label
 from .filters import FILTER, FILTERS
@@ -31,8 +34,10 @@ MENU_ROW = 26
 MENU_WIDTH = 196
 MENU_HEADING = 'HEADING.'
 STROKE_LABELS = {key: label for key, label, _ in STROKE_METHODS}
+DYNAMIC_LABELS = {key: label for key, label, _ in DYNAMICS}
 PROJECTOR_RANGE = (.05, 50.0)
 GIZMO_HANDLE = 9
+SAMPLE_TOP = 1024
 EXPOSURE_RANGE = (-5.0, 5.0)
 GAMMA_RANGE = (.2, 3.0)
 SHELF_TIPS = {'GENERATOR': 'Click to mask the selected layer with this generator', 'FILTER': 'Click to add this filter to the selected layer',
@@ -271,6 +276,23 @@ def quick_controls(layout, zone, y, h, data):
     return right - 6 * s
 
 
+def path_strip(layout, x, y, h, color, state):
+    s = layout.scale
+    layout.add('TOOL_NAME', Rect(x, y, 60 * s, h), 'NOTE', label='Path')
+    x += 62 * s
+    layout.add('BRUSH_COLOR', Rect(x, y, 30 * s, h), 'SWATCH', color=color, tip='Path color')
+    x += 36 * s
+    for mode, label, tip in (('RIBBON', 'Ribbon', 'Stroke the brush along a smooth curve through the points'),
+                             ('FILLED', 'Filled', 'Fill the shape the points enclose')):
+        layout.add('PATH.' + mode, Rect(x, y, 70 * s, h), 'CHIP', label=label, active=state.path_mode == mode, tip=tip)
+        x += 74 * s
+    layout.add('PATH_APPLY', Rect(x, y, 80 * s, h), 'CHIP', label='Apply', tip='Paint the path', shortcut='Enter')
+    x += 84 * s
+    layout.add('PATH_BACK', Rect(x, y, 90 * s, h), 'CHIP', label='Remove point', tip='Remove the last point', shortcut='Backspace')
+    x += 94 * s
+    layout.add('PATH_CLEAR', Rect(x, y, 60 * s, h), 'CHIP', label='Clear', tip='Start the path again')
+
+
 def poly_strip(layout, x, y, h, color, state):
     s = layout.scale
     layout.add('TOOL_NAME', Rect(x, y, 90 * s, h), 'NOTE', label='Polygon fill')
@@ -292,6 +314,9 @@ def tool_strip(layout, zone, tool, brush, data, state):
     right = quick_controls(layout, zone, y, h, data)
     if state.poly_mode:
         poly_strip(layout, x, y, h, color, state)
+        return
+    if state.path_mode:
+        path_strip(layout, x, y, h, color, state)
         return
     label = next((name for key, name, _, _ in TOOLS if key == tool), 'Brush')
     layout.add('TOOL_NAME', Rect(x, y, 60 * s, h), 'NOTE', label=label)
@@ -328,14 +353,14 @@ def tool_strip(layout, zone, tool, brush, data, state):
 def dock_layout(layout, zone, tool, state):
     s = layout.scale
     button, gap = 36 * s, 6 * s
-    groups = [[(key, label, shortcut, key) for key, label, _, shortcut in TOOLS], [('POLYFILL', 'Polygon fill', '', 'POLYGON')],
+    groups = [[(key, label, shortcut, key) for key, label, _, shortcut in TOOLS], [('POLYFILL', 'Polygon fill', '', 'POLYGON'), ('PATH', 'Path', '', 'RULER')],
               [('UNDO', 'Undo', 'Ctrl Z', 'UNDO'), ('REDO', 'Redo', 'Ctrl Shift Z', 'REDO')]]
     y = zone.top
     for group in groups:
         start = y
         for key, label, shortcut, icon in group:
             y -= button
-            active = bool(state.poly_mode) if key == 'POLYFILL' else key == tool and not state.poly_mode
+            active = bool(state.poly_mode) if key == 'POLYFILL' else bool(state.path_mode) if key == 'PATH' else key == tool and not (state.poly_mode or state.path_mode)
             layout.add(key, Rect(zone.x, y, zone.w, button), 'TOOL', icon=icon, label=label, active=active, tip=label, shortcut=shortcut)
         layout.tool_groups.append(Rect(zone.x, y, zone.w, start - y))
         y -= gap
@@ -682,6 +707,13 @@ def projection_section(flow, data, layer, w):
              tip='Map textures and patterns by UV or from three sides without seams')
     flow.add('TILING', Rect(x + half + 4 * s, y, half, h), 'SLIDER', label='Tiling', value=to_slider(layer.tiling, TILING_RANGE),
              text=f'{layer.tiling:.2f}x')
+    if layer.projection == 'PLANAR':
+        x, y, h = flow.field()
+        flow.add('PROJ_BEND', Rect(x, y, half, h), 'SLIDER', label='Bend', value=layer.proj_bend, text=f'{layer.proj_bend:.2f}',
+                 tip='Wrap the projection around a curved surface')
+        flow.add('PROJ_SNAP', Rect(x + half + 4 * s, y, half, h), 'CHIP', label='Snap to surface', tip='Place the projector on the surface under it')
+        x, y, h = flow.field()
+        flow.add('PROJ_UNWARP', Rect(x, y, w, h), 'CHIP', label='Reset warp', tip='Square the corner handles again')
     if layer.projection in PROJECTORS:
         x, y, h = flow.field()
         flow.add('PROJ_SIZE', Rect(x, y, half, h), 'SLIDER', label='Size', value=to_slider(layer.proj_size, PROJECTOR_RANGE), text=f'{layer.proj_size:.2f}',
@@ -793,7 +825,7 @@ def projection_lines(data):
     layer = active_layer(data)
     if not (layer.kind == 'FILL' and uses_coordinates(layer)):
         return 0
-    return 3 if layer.projection in PROJECTORS else 2 if layer.projection == 'UV' else 1
+    return 5 if layer.projection == 'PLANAR' else 3 if layer.projection in PROJECTORS else 2 if layer.projection == 'UV' else 1
 
 
 def material_lines(data):
@@ -1110,7 +1142,7 @@ def painting_normal(data):
 def brush_popover(layout, state, bounds, data):
     s = layout.scale
     channels = list(set_channels(data))
-    lines = len(BRUSH_SLIDERS) + len(BRUSH_TOGGLES) + len(channels) + 3 + int(painting_normal(data)) + int(bool(data.brush_material))
+    lines = len(BRUSH_SLIDERS) + len(BRUSH_TOGGLES) + len(channels) + 4 + int(painting_normal(data)) + int(bool(data.brush_material))
     card = place_popover(bounds, state.popover.anchor, 300 * s, (lines * LINE_HEIGHT + 20) * s, s)
     x, w = card.x + 12 * s, card.w - 24 * s
     y = card.top - 10 * s
@@ -1124,6 +1156,9 @@ def brush_popover(layout, state, bounds, data):
     layout.add('BRUSH_STROKE', Rect(x, y + 2 * s, half, 24 * s), 'DROPDOWN', label='Stroke', text=STROKE_LABELS[data.brush_stroke],
                tip='Space dabs evenly, draw straight lines, dots, airbrush, or anchored stamps')
     layout.add('SAVE_BRUSH', Rect(x + half + 4 * s, y + 2 * s, half, 24 * s), 'CHIP', label='Save as preset', tip='Add these settings to the brush shelf')
+    y -= LINE_HEIGHT * s
+    layout.add('BRUSH_DYNAMICS', Rect(x, y + 2 * s, w, 24 * s), 'DROPDOWN', label='Dynamics', text=DYNAMIC_LABELS[data.brush_dynamics],
+               tip='Drips that run down the surface, splatter around the stroke, or a width that follows the speed')
     for key, label, field in BRUSH_TOGGLES:
         y -= LINE_HEIGHT * s
         layout.add(key, Rect(x, y + 2 * s, w, 24 * s), 'TOGGLE', label=label, active=getattr(data, field))
@@ -1179,7 +1214,7 @@ def symmetry_popover(layout, state, bounds, data):
 
 def stencil_popover(layout, state, bounds, data):
     s = layout.scale
-    lines = 2 + (len(STENCIL_SLIDERS) if data.brush_stencil is not None else 0)
+    lines = 4 + (len(STENCIL_SLIDERS) if data.brush_stencil is not None else 0)
     card = place_popover(bounds, state.popover.anchor, 300 * s, (lines * LINE_HEIGHT + 56) * s, s)
     x, w = card.x + 12 * s, card.w - 24 * s
     y = card.top - 10 * s - LINE_HEIGHT * s
@@ -1195,7 +1230,14 @@ def stencil_popover(layout, state, bounds, data):
             text = f'{value:.0f}°' if key == 'STENCIL_ANGLE' else f'{value:.2f}'
             layout.add(key, Rect(x, y + 2 * s, w, 24 * s), 'SLIDER', label=label, value=value / top, text=text)
     y -= LINE_HEIGHT * s
-    layout.add('STENCIL_TIP', Rect(x, y + 2 * s, w, 24 * s), 'NOTE', label='Paint through it, or project it in one click')
+    editing = state.text is not None and state.text.key == 'STENCIL_TEXT'
+    layout.add('STENCIL_TEXT', Rect(x, y + 2 * s, w, 24 * s), 'FIELD', text=state.text.text if editing else 'Type text and press Enter',
+               caret=state.text.cursor if editing else -1, tip='Turn text into a stencil')
+    y -= LINE_HEIGHT * s
+    layout.add('STENCIL_FONT', Rect(x, y + 2 * s, w, 24 * s), 'DROPDOWN', label='Font', text=Path(data.stencil_font).stem if data.stencil_font else 'Blender',
+               tip='Blender\'s font or one of the system fonts')
+    y -= LINE_HEIGHT * s
+    layout.add('STENCIL_TIP', Rect(x, y + 2 * s, w, 24 * s), 'NOTE', label='Paint through it, or project it in one click. SVGs are in Textures')
     layout.add('STENCIL_PROJECT', Rect(x, card.y + 12 * s, w, 28 * s), 'PRIMARY', icon='PLAY', label='Project through the view',
                tip='Project the stencil image and the brush channels onto the model as seen from here')
     return card
@@ -1203,7 +1245,7 @@ def stencil_popover(layout, state, bounds, data):
 
 def bake_popover(layout, state, bounds, data):
     s, sources = layout.scale, state.bake_found
-    card = place_popover(bounds, state.popover.anchor, 340 * s, ((len(MESH_MAPS) + 9) * LINE_HEIGHT + 24) * s, s)
+    card = place_popover(bounds, state.popover.anchor, 340 * s, ((len(MESH_MAPS) + 10) * LINE_HEIGHT + 24) * s, s)
     x, w = card.x + 14 * s, card.w - 28 * s
     y = card.top - 34 * s
     layout.add('BAKE_TITLE', Rect(x, y, w, 22 * s), 'NOTE', label='Bake mesh maps')
@@ -1237,6 +1279,15 @@ def bake_popover(layout, state, bounds, data):
     y -= LINE_HEIGHT * s
     layout.add('BAKE_EXTRUSION', Rect(x, y, w, 24 * s), 'SLIDER', label='Ray distance', value=data.bake_extrusion / .5,
                text=f'{data.bake_extrusion * 100:.1f}%', tip='How far above and below this mesh to search for the high-poly, as a share of its size')
+    y -= LINE_HEIGHT * s
+    quarter = (w - 12 * s) / 4
+    for index, (kind, label, tip) in enumerate((('CAGE', 'Paint cage', 'Paint how far rays reach per pixel'),
+                                                ('SKEW', 'Paint skew', 'Paint where rays go straight down the face'))):
+        image = data.cage_map if kind == 'CAGE' else data.skew_map
+        left = x + index * 2 * (quarter + 4 * s)
+        layout.add('BAKE_PAINT.' + kind, Rect(left, y, quarter, 24 * s), 'TOGGLE', label=label, active=data.bake_paint == kind, tip=tip)
+        layout.add('BAKE_UNPAINT.' + kind, Rect(left + quarter + 4 * s, y, quarter, 24 * s), 'CHIP', label='Clear' if image is not None else 'Unused',
+                   tip=f'Remove the painted {kind.lower()} map')
     y -= LINE_HEIGHT * s
     layout.add('BAKE_AUTO', Rect(x, y, w, 24 * s), 'TOGGLE', label='Rebake automatically', active=data.bake_auto,
                tip='Rebake the baked maps when these settings, the high-poly, the cage, or this mesh change')
@@ -1282,7 +1333,7 @@ def padding_label(padding):
 def project_popover(layout, state, bounds, data):
     s = layout.scale
     project = data.id_data.devil_painter
-    card = place_popover(bounds, state.popover.anchor, 420 * s, (12 * LINE_HEIGHT + 30) * s, s)
+    card = place_popover(bounds, state.popover.anchor, 420 * s, (15 * LINE_HEIGHT + 30) * s, s)
     x, w = card.x + 14 * s, card.w - 28 * s
     y = card.top - 34 * s
     layout.add('PROJECT_TITLE', Rect(x, y, w, 22 * s), 'NOTE', label='Project · ' + project.template)
@@ -1308,6 +1359,19 @@ def project_popover(layout, state, bounds, data):
         value = getattr(data, field)
         layout.add(key, Rect(x, y, w, 24 * s), 'SLIDER', label=label, value=value / top, text=f'{value:.2f}')
     y -= LINE_HEIGHT * s
+    chip_row(layout, 'TRANSP', [(key, label) for key, label, _ in TRANSPARENCY], data.transparency, x, y, w - 126 * s, s,
+             'Order independent transparency never sorts badly; blended is smoother for thin glass')
+    layout.add('TRANSP_OVERLAP', Rect(x + w - 120 * s, y, 120 * s, 24 * s), 'TOGGLE', label='Overlap', active=data.transparency_overlap,
+               tip='Let blended surfaces of this set show through each other')
+    y -= LINE_HEIGHT * s
+    minutes = autosave.minutes()
+    layout.add('AUTOSAVE', Rect(x, y, 120 * s, 24 * s), 'TOGGLE', label='Autosave', active=bool(minutes),
+               tip='Save a copy of the file with every painted image packed, in the background')
+    layout.add('AUTOSAVE_MINUTES', Rect(x + 126 * s, y, w - 126 * s, 24 * s), 'SLIDER', label='Every',
+               value=(max(minutes, 1) - autosave.MINUTE_RANGE[0]) / (autosave.MINUTE_RANGE[1] - autosave.MINUTE_RANGE[0]), text=f'{max(minutes, 1)} min')
+    y -= LINE_HEIGHT * s
+    layout.add('AUTOSAVE_INFO', Rect(x, y, w, 24 * s), 'NOTE', label=autosave.status())
+    y -= LINE_HEIGHT * s
     half = (w - 4 * s) / 2
     layout.add('REIMPORT', Rect(x, y, half, 24 * s), 'CHIP', label='Reimport from file', tip='Swap in an updated mesh file and keep the layers')
     layout.add('REIMPORT_OBJECT', Rect(x + half + 4 * s, y, half, 24 * s), 'DROPDOWN', label='From object', text='Pick',
@@ -1317,9 +1381,10 @@ def project_popover(layout, state, bounds, data):
     return card
 
 
-def viewport_popover(layout, state, bounds, shading, lens, ortho, view):
+def viewport_popover(layout, state, bounds, shading, lens, ortho, view, project, cycles):
     s = layout.scale
-    card = place_popover(bounds, state.popover.anchor, 360 * s, (11 * LINE_HEIGHT + 30) * s, s)
+    lines = 13 + (len(POST_SLIDERS) if project.post_enabled else 0)
+    card = place_popover(bounds, state.popover.anchor, 360 * s, (lines * LINE_HEIGHT + 30) * s, s)
     x, w = card.x + 14 * s, card.w - 28 * s
     y = card.top - 34 * s
     layout.add('VIEWPORT_TITLE', Rect(x, y, w, 22 * s), 'NOTE', label='Viewport')
@@ -1352,6 +1417,20 @@ def viewport_popover(layout, state, bounds, shading, lens, ortho, view):
     y -= LINE_HEIGHT * s
     layout.add('CM_GAMMA', Rect(x, y, w, 24 * s), 'SLIDER', label='Gamma', value=(view.gamma - GAMMA_RANGE[0]) / (GAMMA_RANGE[1] - GAMMA_RANGE[0]),
                text=f'{view.gamma:.2f}')
+    y -= LINE_HEIGHT * s
+    half = (w - 4 * s) / 2
+    layout.add('PATH_TRACED', Rect(x, y, half, 24 * s), 'TOGGLE', label='Path traced', active=shading.type == 'RENDERED',
+               tip='Preview the final look with Cycles; painting keeps working')
+    layout.add('PREVIEW_SAMPLES', Rect(x + half + 4 * s, y, half, 24 * s), 'SLIDER', label='Samples', value=cycles.preview_samples / SAMPLE_TOP,
+               text=str(cycles.preview_samples), tip='Samples the path-traced preview converges to')
+    y -= LINE_HEIGHT * s
+    layout.add('POST', Rect(x, y, w, 24 * s), 'TOGGLE', label='Post effects', active=project.post_enabled,
+               tip='Bloom, vignette, color fringe, saturation, and contrast in the viewport only')
+    if project.post_enabled:
+        for key, label, field, top in POST_SLIDERS:
+            y -= LINE_HEIGHT * s
+            value = getattr(project, field)
+            layout.add(key, Rect(x, y, w, 24 * s), 'SLIDER', label=label, value=value / top, text=f'{value:.2f}')
     return card
 
 
@@ -1392,7 +1471,7 @@ def export_popover(layout, state, bounds, data, directory):
     project = data.id_data.devil_painter
     template = find_template(project.export_template)
     editable = is_custom(template['name'])
-    lines = len(template['outputs']) + len(project.sets) + 7 + (1 if editable else 0)
+    lines = len(template['outputs']) + len(project.sets) + 8 + (1 if editable else 0)
     card = place_popover(bounds, state.popover.anchor, EXPORT_WIDTH * s, (lines * LINE_HEIGHT + 40) * s, s)
     x, w = card.x + 14 * s, card.w - 28 * s
     y = card.top - 34 * s
@@ -1432,14 +1511,34 @@ def export_popover(layout, state, bounds, data, directory):
     layout.add('EXPORT_DIR', Rect(x, y, w - 76 * s, 24 * s), 'FIELD', text=state.text.text if editing else directory,
                caret=state.text.cursor if editing else -1, tip='Folder for the textures')
     layout.add('BROWSE', Rect(x + w - 70 * s, y, 70 * s, 24 * s), 'CHIP', label='Browse', tip='Pick a folder')
+    y -= LINE_HEIGHT * s
+    editing = state.text is not None and state.text.key == 'BRIDGE_COMMAND'
+    bridge_text = bridge_command()
+    layout.add('BRIDGE_COMMAND', Rect(x, y, w - 196 * s, 24 * s), 'FIELD',
+               text=state.text.text if editing else bridge_text or 'Optional app to send to, with {files} or {folder}',
+               caret=state.text.cursor if editing else -1, tip='Command of another app; {files} becomes the exported files, {folder} the folder')
+    layout.add('SEND', Rect(x + w - 190 * s, y, 92 * s, 24 * s), 'CHIP', label='Export & send', tip='Export, then open the textures in that app')
+    layout.add('OPEN_FOLDER', Rect(x + w - 94 * s, y, 94 * s, 24 * s), 'CHIP', label='Open folder', tip='Show the export folder')
     layout.add('EXPORT_RUN', Rect(x, card.y + 12 * s, w, 28 * s), 'PRIMARY', icon='SAVE', label='Export', tip='Bake and write the textures now')
     return card
 
 
+def path_layout(layout, points, closed):
+    s = layout.scale
+    handle = GIZMO_HANDLE * s * .7
+    loop = points + points[:1] if closed and len(points) > 2 else points
+    segments = tuple(spot for first, second in zip(loop, loop[1:]) for spot in (first, second))
+    for index, (x, y) in enumerate(points):
+        layout.add(f'PATH_POINT.{index}', Rect(x - handle, y - handle, handle * 2, handle * 2), 'GIZMO', points=segments if index == 0 else (),
+                   tip='Drag to move this point')
+
+
 def gizmo_layout(layout, gizmo):
     s = layout.scale
-    lines, center, corner = gizmo
+    lines, center, corner, pins = gizmo
     handle = GIZMO_HANDLE * s
+    for index, (x, y) in enumerate(pins):
+        layout.add(f'GIZMO_PIN.{index}', Rect(x - handle * .7, y - handle * .7, handle * 1.4, handle * 1.4), 'GIZMO', tip='Drag to warp this corner')
     layout.add('GIZMO_MOVE', Rect(center[0] - handle, center[1] - handle, handle * 2, handle * 2), 'GIZMO', points=lines,
                tip='Drag to move the projection')
     layout.add('GIZMO_SIZE', Rect(corner[0] - handle, corner[1] - handle, handle * 2, handle * 2), 'GIZMO', tip='Drag to resize the projection')
@@ -1449,6 +1548,8 @@ def painter_layout(bounds, scale, state, data, obj_name, tool, brush, directory,
     layout = Layout(scale, MinimalMetrics.resolve(), zones(bounds, scale, state.column_width, state.shelf_open))
     if data is not None and state.gizmo:
         gizmo_layout(layout, state.gizmo)
+    if data is not None and state.path_mode and state.path_points:
+        path_layout(layout, state.path_points, state.path_mode == 'FILLED')
     if data is None:
         start_layout(layout, state, bounds, obj_name, setup)
     else:

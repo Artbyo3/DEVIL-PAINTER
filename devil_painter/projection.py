@@ -1,3 +1,4 @@
+from array import array
 import math
 import bpy
 import numpy
@@ -25,12 +26,14 @@ def flattened(matrix):
     return [value for row in matrix.transposed() for value in row]
 
 
-def project(context, window, area, region, obj, data, buffered):
+def project(context, window, area, region, obj, data, buffered, pixels=None, label=''):
     shot = bpy.data.images.new(SHOT_NAME, region.width, region.height, alpha=True)
     try:
-        shot.pixels.foreach_set(view_pixels(data, region.width, region.height).ravel())
-        view = area.spaces.active.region_3d
-        shot['win_mat'], shot['view_mat'] = flattened(view.window_matrix), flattened(view.view_matrix)
+        shot.pixels.foreach_set((view_pixels(data, region.width, region.height) if pixels is None else pixels).ravel())
+        space = area.spaces.active
+        view = space.region_3d
+        ortho = 1.0 if view.view_perspective == 'ORTHO' else 0.0
+        shot['view_data'] = array('f', flattened(view.window_matrix) + flattened(view.view_matrix) + [space.clip_start, space.clip_end, ortho])
         with context.temp_override(window=window, area=area, region=region):
             bpy.ops.paint.project_image('EXEC_DEFAULT', False, image=shot.name)
     finally:
@@ -38,4 +41,4 @@ def project(context, window, area, region, obj, data, buffered):
     entry = strokes.merge(obj, data, None, 'PAINT') if buffered else None
     bpy.ops.ed.undo_push(message='Devil Painter: projection')
     strokes.record(entry)
-    return f'Projected {data.brush_stencil.name} through the view.'
+    return f'Projected {label or data.brush_stencil.name} through the view.'

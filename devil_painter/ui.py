@@ -1,6 +1,6 @@
 import bpy
 from bpy.app.handlers import persistent
-from . import actions, document, operators, strokes, thumbnails, tiles
+from . import actions, autosave, document, operators, strokes, thumbnails, tiles
 from .editor import DEVIL_PAINTER_OT_editor, close_active
 
 
@@ -42,6 +42,7 @@ def register():
     bpy.app.handlers.load_pre.append(on_load)
     bpy.app.handlers.save_pre.append(on_save)
     bpy.types.VIEW3D_MT_view.append(launch_menu)
+    autosave.register()
     config = bpy.context.window_manager.keyconfigs.addon
     if config:
         keymap = config.keymaps.new(name='3D View', space_type='VIEW_3D')
@@ -51,6 +52,7 @@ def register():
 
 def unregister():
     close_active()
+    autosave.unregister()
     for handlers, handler in ((bpy.app.handlers.load_pre, on_load), (bpy.app.handlers.save_pre, on_save)):
         if handler in handlers:
             handlers.remove(handler)

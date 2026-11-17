@@ -13,6 +13,8 @@ SLOT_FIELDS = ('enabled', 'source', 'color', 'value', 'color_b', 'value_b', 'ble
 LAYER_KINDS = (('PAINT', 'Paint', ''), ('FILL', 'Fill', ''), ('FOLDER', 'Folder', ''), ('INSTANCE', 'Instance', ''))
 BAKE_IDS = (('ISLAND', 'UV islands', ''), ('MATERIAL', 'Materials', ''), ('OBJECT', 'Objects', ''), ('VERTEX', 'Vertex colors', ''))
 BAKE_ID_LABELS = {key: label for key, label, _ in BAKE_IDS}
+TRANSPARENCY = (('AUTO', 'Automatic', ''), ('DITHERED', 'Order independent', ''), ('BLENDED', 'Blended', ''))
+DYNAMICS = (('NONE', 'None', ''), ('DRIPS', 'Drips', ''), ('SPLATTER', 'Splatter', ''), ('SPEED', 'Speed', ''))
 STROKE_METHODS = (('SPACE', 'Space', ''), ('LINE', 'Line', ''), ('DOTS', 'Dots', ''), ('AIRBRUSH', 'Airbrush', ''), ('ANCHORED', 'Anchored', ''))
 NORMAL_FORMATS = (('OPENGL', 'OpenGL', ''), ('DIRECTX', 'DirectX', ''))
 NORMAL_SPACES = (('TANGENT', 'Tangent', ''), ('OBJECT', 'Object', ''))
@@ -112,6 +114,8 @@ class DEVIL_PAINTER_PG_layer(bpy.types.PropertyGroup):
     proj_rotation: bpy.props.FloatVectorProperty(size=3, default=(0.0, 0.0, 0.0), subtype='EULER')
     proj_size: bpy.props.FloatProperty(default=1.0, min=.01, max=1000.0)
     tile_match: bpy.props.BoolProperty(default=False)
+    proj_warp: bpy.props.FloatVectorProperty(size=8, default=(0.0,) * 8)
+    proj_bend: bpy.props.FloatProperty(default=0.0, min=0.0, max=1.0)
     slots: bpy.props.CollectionProperty(type=DEVIL_PAINTER_PG_slot)
     image: bpy.props.PointerProperty(type=bpy.types.Image)
     mask: bpy.props.PointerProperty(type=bpy.types.Image)
@@ -129,6 +133,8 @@ class DEVIL_PAINTER_PG_texture_set(bpy.types.PropertyGroup):
     export: bpy.props.BoolProperty(default=True)
     visible: bpy.props.BoolProperty(default=True)
     shader: bpy.props.EnumProperty(items=SHADERS)
+    transparency: bpy.props.EnumProperty(items=TRANSPARENCY)
+    transparency_overlap: bpy.props.BoolProperty(default=True)
     bump_strength: bpy.props.FloatProperty(default=1.0, min=0.0, max=1.0)
     normal_strength: bpy.props.FloatProperty(default=1.0, min=0.0, max=2.0)
     emission_strength: bpy.props.FloatProperty(default=1.0, min=0.0, max=20.0)
@@ -165,6 +171,8 @@ class DEVIL_PAINTER_PG_texture_set(bpy.types.PropertyGroup):
     brush_normal_tilt: bpy.props.FloatProperty(default=30.0, min=0.0, max=89.0)
     brush_normal_angle: bpy.props.FloatProperty(default=0.0, min=0.0, max=360.0)
     brush_stencil: bpy.props.PointerProperty(type=bpy.types.Image)
+    brush_dynamics: bpy.props.EnumProperty(items=DYNAMICS)
+    stencil_font: bpy.props.StringProperty()
     stencil_scale: bpy.props.FloatProperty(default=.5, min=.05, max=4.0)
     stencil_angle: bpy.props.FloatProperty(default=0.0, min=0.0, max=360.0)
     stencil_x: bpy.props.FloatProperty(default=.5, min=0.0, max=1.0)
@@ -179,6 +187,9 @@ class DEVIL_PAINTER_PG_texture_set(bpy.types.PropertyGroup):
     bake_id: bpy.props.EnumProperty(items=BAKE_IDS)
     bake_auto: bpy.props.BoolProperty(default=False)
     bake_signature: bpy.props.StringProperty()
+    cage_map: bpy.props.PointerProperty(type=bpy.types.Image)
+    skew_map: bpy.props.PointerProperty(type=bpy.types.Image)
+    bake_paint: bpy.props.StringProperty()
 
 
 class DEVIL_PAINTER_PG_project(bpy.types.PropertyGroup):
@@ -200,6 +211,12 @@ class DEVIL_PAINTER_PG_project(bpy.types.PropertyGroup):
     physical_size: bpy.props.FloatProperty(default=1.0, min=.01, max=100.0)
     mask_backup: bpy.props.BoolProperty(default=False)
     mask_backup_set: bpy.props.BoolProperty(default=False)
+    post_enabled: bpy.props.BoolProperty(default=False)
+    post_bloom: bpy.props.FloatProperty(default=.3, min=0.0, max=1.0)
+    post_vignette: bpy.props.FloatProperty(default=.3, min=0.0, max=1.0)
+    post_aberration: bpy.props.FloatProperty(default=0.0, min=0.0, max=1.0)
+    post_saturation: bpy.props.FloatProperty(default=1.0, min=0.0, max=2.0)
+    post_contrast: bpy.props.FloatProperty(default=1.0, min=0.0, max=2.0)
 
 
 CLASSES = (DEVIL_PAINTER_PG_slot, DEVIL_PAINTER_PG_channel, DEVIL_PAINTER_PG_map, DEVIL_PAINTER_PG_tile, DEVIL_PAINTER_PG_tile_image,
@@ -322,6 +339,8 @@ def active_effect(data):
 def paint_target(data):
     if data.quick_mask is not None:
         return data.quick_mask
+    if data.bake_paint:
+        return data.cage_map if data.bake_paint == 'CAGE' else data.skew_map
     layer = active_layer(data)
     if layer is None or layer.kind == 'INSTANCE':
         return None

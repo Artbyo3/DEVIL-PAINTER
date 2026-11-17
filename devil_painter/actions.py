@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 import bpy
 import numpy
-from . import baking, brushes, compositing, exporting, library, meshmaps, painting, projects, sets, smart, strokes, tiles
+from . import baking, bridge, brushes, compositing, exporting, library, meshmaps, painting, projects, sets, smart, strokes, tiles
 from .blending import linear_to_srgb
 from .effects import EFFECT_LABEL, copy_effect, find_effect, mask_effects
 from .masks import GENERATOR, GENERATOR_FIELDS
@@ -811,6 +811,27 @@ def pick_id_color(context, obj, data, effect_uid, face, location):
     return refresh(context, obj, data, f'{layer.name} keeps the picked ID color.')
 
 
+def paint_bake_map(context, obj, data, kind):
+    field = 'cage_map' if kind == 'CAGE' else 'skew_map'
+    if getattr(data, field) is None:
+        setattr(data, field, tiles.create(data, f'DP {obj.name} {data.name} {kind.lower()} map', meshmaps.BAKE_PAINT_FILL[kind], True))
+    data.bake_paint = '' if data.bake_paint == kind else kind
+    painting.update_canvas(context, data)
+    label = 'cage reach (white reaches the full ray distance, black reaches nothing)' if kind == 'CAGE' else 'skew (white bakes straight down the face)'
+    return refresh(context, obj, data, f'Painting the {label}.' if data.bake_paint else 'Back to painting layers.')
+
+
+def clear_bake_map(context, obj, data, kind):
+    field = 'cage_map' if kind == 'CAGE' else 'skew_map'
+    image = getattr(data, field)
+    if image is not None:
+        bpy.data.images.remove(image)
+    if data.bake_paint == kind:
+        data.bake_paint = ''
+    painting.update_canvas(context, data)
+    return refresh(context, obj, data, f'Removed the painted {kind.lower()} map.')
+
+
 def bake_mesh_maps(context, obj, data, keys):
     project = obj.devil_painter
     failure = ''
@@ -932,14 +953,25 @@ def set_target(context, obj, data, target):
     return 'Painting edits the mask.' if target == 'MASK' else 'Painting edits the layer.'
 
 
-def export(context, obj, project, directory):
+def export_files(context, obj, project, directory):
     wanted = [index for index, data in enumerate(project.sets) if data.export]
     if not wanted:
-        return 'Pick at least one texture set to export.'
+        return [], 'Pick at least one texture set to export.'
     template = exporting.find_template(project.export_template)
     written = exporting.export(context, obj, project, template, wanted, directory, project.export_pattern, project.export_depth,
                                project.export_size, project.export_padding)
     painting.enter_paint_mode(context, obj)
     sets.mask_faces(obj, project)
     painting.update_canvas(context, project.sets[project.active_set])
-    return f'Exported {len(written)} textures to {directory}.'
+    return written, f'Exported {len(written)} textures to {directory}.'
+
+
+def export(context, obj, project, directory):
+    return export_files(context, obj, project, directory)[1]
+
+
+def send_to_app(context, obj, project, directory):
+    written, message = export_files(context, obj, project, directory)
+    if not written:
+        return message
+    return bridge.send(written, directory)

@@ -16,6 +16,7 @@ CHANNEL_WORDS = {'base_color': {'basecolor', 'albedo', 'diffuse', 'diff', 'color
 DIRECTX_WORDS = {'dx', 'normaldx'}
 SETTINGS_FILE = 'library.json'
 BLEND_SUFFIX = '.blend'
+VECTOR_SUFFIX = '.svg'
 BLEND_INPUTS = (('base_color', 'Base Color'), ('roughness', 'Roughness'), ('metallic', 'Metallic'), ('normal', 'Normal'),
                 ('emission', 'Emission Color'), ('opacity', 'Alpha'))
 _cache = {}
@@ -167,6 +168,14 @@ def scan():
     return _cache['scan'][1:3]
 
 
+def vector_files():
+    found = []
+    for root in [managed_folder(), *library_roots()]:
+        if root.is_dir():
+            found += [path for path in sorted(root.rglob('*' + VECTOR_SUFFIX)) if path.is_file()]
+    return list(dict.fromkeys(found))[:MAX_FILES]
+
+
 def scanned_blends():
     scan()
     return _cache['scan'][3]
@@ -181,7 +190,7 @@ def import_textures(paths):
     imported = 0
     for source in paths:
         source = Path(source)
-        if source.suffix.lower() not in IMAGE_SUFFIXES | {BLEND_SUFFIX} or not source.is_file():
+        if source.suffix.lower() not in IMAGE_SUFFIXES | {BLEND_SUFFIX, VECTOR_SUFFIX} or not source.is_file():
             continue
         target, number = folder / source.name, 1
         while target.exists():

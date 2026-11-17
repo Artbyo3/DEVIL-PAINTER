@@ -11,6 +11,7 @@ from .tiles import numbers, variant
 SIGNATURE_KEY = 'devil_painter_signature'
 QUICK_TINT = (1.0, .08, .15, 1.0)
 QUICK_SHOW = .6
+PIN_CORNERS = ((0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0))
 PREVIEW_TOOLS = {'PAINT', 'FILL', ''}
 BUMP_DISTANCE = .05
 DISPLAY_GAMMA = 2.2
@@ -159,7 +160,8 @@ def effect_signature(effect):
 
 
 def layer_signature(layer):
-    return ':'.join((layer.uid, layer.kind, layer.parent, layer.projection, str(layer.tile_match), layer.generator, layer.folder_blend, str(layer.geo_mask),
+    return ':'.join((layer.uid, layer.kind, layer.parent, layer.projection, str(layer.tile_match), f'{layer.proj_bend:.3f}',
+                     ','.join(f'{value:.3f}' for value in layer.proj_warp), layer.generator, layer.folder_blend, str(layer.geo_mask),
                      layer.image.name if layer.image else '', layer.mask.name if layer.mask else '',
                      *(slot_signature(slot) for slot in layer.slots if slot.enabled), *(effect_signature(effect) for effect in layer.effects)))
 
@@ -174,7 +176,7 @@ def signature(data):
     project = data.id_data.devil_painter
     shading = f'{data.visible}{data.shader}{project.normal_format}{project.normal_space}'
     quick = data.quick_mask.name if data.quick_mask is not None else ''
-    return f'{channels};{data.solo};{layers};{owner};{maps};{tiles};{project.uv_map};{shading};{quick}'
+    return f'{channels};{data.solo};{layers};{owner};{maps};{tiles};{project.uv_map};{shading};{quick};{data.bake_paint}'
 
 
 def stroke_over(build, image, alpha, color, x):
@@ -344,6 +346,9 @@ def projected(nodes, links, layer, coordinates, x):
     px, py, pz = split.outputs['X'], split.outputs['Y'], split.outputs['Z']
     if layer.projection == 'PLANAR':
         u, v = px, py
+        if layer.proj_bend > 0:
+            radius = 1.0 / (layer.proj_bend * math.pi / 2)
+            u = math_node(nodes, links, 'MULTIPLY', math_node(nodes, links, 'ARCTAN2', px, math_node(nodes, links, 'ADD', pz, radius)), radius)
     else:
         u = math_node(nodes, links, 'MULTIPLY', math_node(nodes, links, 'ARCTAN2', py, px), 1 / math.pi)
         v = pz
@@ -351,10 +356,29 @@ def projected(nodes, links, layer, coordinates, x):
             flat = math_node(nodes, links, 'SQRT', math_node(nodes, links, 'ADD', math_node(nodes, links, 'MULTIPLY', px, px),
                                                               math_node(nodes, links, 'MULTIPLY', py, py)), 0.0)
             v = math_node(nodes, links, 'MULTIPLY', math_node(nodes, links, 'ARCTAN2', pz, flat), 2 / math.pi)
+    u = math_node(nodes, links, 'ADD', math_node(nodes, links, 'MULTIPLY', u, .5), .5)
+    v = math_node(nodes, links, 'ADD', math_node(nodes, links, 'MULTIPLY', v, .5), .5)
+    if layer.projection == 'PLANAR' and any(layer.proj_warp):
+        u, v = corner_pin(nodes, links, u, v, layer.proj_warp)
     join = nodes.new('ShaderNodeCombineXYZ')
-    links.new(math_node(nodes, links, 'ADD', math_node(nodes, links, 'MULTIPLY', u, .5), .5), join.inputs['X'])
-    links.new(math_node(nodes, links, 'ADD', math_node(nodes, links, 'MULTIPLY', v, .5), .5), join.inputs['Y'])
+    links.new(u, join.inputs['X'])
+    links.new(v, join.inputs['Y'])
     return join.outputs['Vector']
+
+
+def corner_pin(nodes, links, u, v, warp):
+    iu, iv = math_node(nodes, links, 'SUBTRACT', 1.0, u), math_node(nodes, links, 'SUBTRACT', 1.0, v)
+    weights = (math_node(nodes, links, 'MULTIPLY', iu, iv), math_node(nodes, links, 'MULTIPLY', u, iv),
+               math_node(nodes, links, 'MULTIPLY', u, v), math_node(nodes, links, 'MULTIPLY', iu, v))
+    axes = []
+    for axis in range(2):
+        total = None
+        for index, weight in enumerate(weights):
+            corner = PIN_CORNERS[index][axis] + warp[index * 2 + axis]
+            term = math_node(nodes, links, 'MULTIPLY', weight, float(corner))
+            total = term if total is None else math_node(nodes, links, 'ADD', total, term)
+        axes.append(total)
+    return axes
 
 
 def per_tile(nodes, links, vector):
@@ -782,8 +806,9 @@ def rebuild(data, solo=None, raw=False):
     build = set_build(data, material.node_tree, raw)
     channels = set_channels(data)
     output = build_tree(build, channels, resolved(data.layers) if data.visible else [], solo or solo_channel(data), raw)
-    material.surface_render_method = 'BLENDED' if any(channel.key == 'opacity' for channel in channels) else 'DITHERED'
-    if not raw and solo is None and viewed_map(data) is not None:
+    if not raw and solo is None and data.bake_paint:
+        show_map(build, output, data.cage_map if data.bake_paint == 'CAGE' else data.skew_map)
+    elif not raw and solo is None and viewed_map(data) is not None:
         show_map(build, output, viewed_map(data))
     material[SIGNATURE_KEY] = '' if raw else signature(data)
 
@@ -811,6 +836,14 @@ def sync(data):
     if data.material.get(SIGNATURE_KEY) != signature(data):
         rebuild(data)
     update_values(data)
+    material = data.material
+    method = data.transparency
+    if method == 'AUTO':
+        method = 'BLENDED' if any(channel.key == 'opacity' for channel in set_channels(data)) else 'DITHERED'
+    if material.surface_render_method != method:
+        material.surface_render_method = method
+    if material.use_transparency_overlap != data.transparency_overlap:
+        material.use_transparency_overlap = data.transparency_overlap
 
 
 def assign_image_colorspace(image, channel):

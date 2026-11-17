@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import bpy
 import numpy
 from mathutils import Vector
-from .baking import bake_pass, emission_tree
+from .baking import bake_pass, emission_tree, read_pixels
 from .sets import uv_island_labels
 from .signals import map_signal
 from .tiles import create, variant
@@ -18,6 +18,8 @@ COPY_SUFFIX = re.compile(r'\.\d+$')
 HIGH_WORDS = ('high', 'hp', 'hi')
 BORDER_SHARE = 1 / 32
 GOLDEN_RATIO = .618033988749895
+FULL_REACH = .999
+BAKE_PAINT_FILL = {'CAGE': (1.0, 1.0, 1.0, 1.0), 'SKEW': (0.0, 0.0, 0.0, 1.0)}
 ISLAND_ATTRIBUTE = 'dp_uv_islands'
 
 
@@ -229,19 +231,149 @@ def height_pixels(high, low, normal, span, distance):
     return result
 
 
-def bake_height(context, obj, project, wanted, sources, samples, distance):
-    origin, span = bounds((obj, *sources.high))
+def emitting(build):
     def shade(item, material, tree):
         if tree is not None:
-            position_shader(tree, origin, span)
-        return 'position'
+            build(tree)
+        return 'shade'
+    return shade
 
-    with source_shading(sources.high, shade):
-        high = bake_pass(context, obj, project, wanted, lambda data: emission_tree(data.material.node_tree, (0.0, 0.0, 0.0, 1.0)),
-                         'EMIT', samples, sources.high, **sources.reach(distance))
+
+def positions(context, obj, project, wanted, sources, samples, distance):
+    origin, span = bounds((obj, *sources.high))
+    black = lambda data: emission_tree(data.material.node_tree, (0.0, 0.0, 0.0, 1.0))
+    with source_shading(sources.high, emitting(lambda tree: position_shader(tree, origin, span))):
+        high = bake_pass(context, obj, project, wanted, black, 'EMIT', samples, sources.high, **sources.reach(distance))
     low = bake_pass(context, obj, project, wanted, lambda data: position_shader(data.material.node_tree, origin, span), 'EMIT', samples)
     normal = bake_pass(context, obj, project, wanted, lambda data: world_normal_shader(data.material.node_tree), 'EMIT', samples)
-    return {key: height_pixels(high[key], low[key], normal[key], span, distance) for key in low}
+    return high, low, normal, span
+
+
+def painted_values(project, key, attribute, shape):
+    data = project.sets[key[0]]
+    image = getattr(data, attribute)
+    if image is None:
+        return None
+    pixels = read_pixels(variant(data, image, key[1]))
+    return pixels[..., 0] if pixels.shape[:2] == shape else None
+
+
+def uses_map(project, wanted, attribute):
+    return any(getattr(project.sets[index], attribute) is not None for index in wanted)
+
+
+def reach_masks(project, high, low, span, distance):
+    masks = {}
+    for key, pixels in high.items():
+        cage = painted_values(project, key, 'cage_map', pixels.shape[:2])
+        hit = pixels[..., 3] >= .5
+        if cage is None:
+            masks[key] = hit
+            continue
+        gap = numpy.linalg.norm((pixels[..., :3] - low[key][..., :3]) * span, axis=-1)
+        masks[key] = hit & ((cage >= FULL_REACH) | (gap <= cage * distance))
+    return masks
+
+
+def bake_height(context, obj, project, wanted, sources, samples, distance):
+    high, low, normal, span = positions(context, obj, project, wanted, sources, samples, distance)
+    masks = reach_masks(project, high, low, span, distance)
+    results = {}
+    for key in low:
+        pixels = height_pixels(high[key], low[key], normal[key], span, distance)
+        pixels[~masks[key], :3] = .5
+        results[key] = pixels
+    return results
+
+
+@contextmanager
+def flat_shading(obj):
+    mesh = obj.data
+    saved = None
+    if 'sharp_face' in mesh.attributes:
+        saved = numpy.zeros(len(mesh.polygons), dtype=bool)
+        mesh.attributes['sharp_face'].data.foreach_get('value', saved)
+    mesh.shade_flat()
+    try:
+        yield
+    finally:
+        if saved is None:
+            mesh.attributes.remove(mesh.attributes['sharp_face'])
+        else:
+            mesh.attributes['sharp_face'].data.foreach_set('value', saved)
+        mesh.update()
+
+
+def tangent_shader(tree, uv):
+    emission_tree(tree, (0.0, 0.0, 0.0, 1.0))
+    tangent = tree.nodes.new('ShaderNodeTangent')
+    tangent.direction_type, tangent.uv_map = 'UV_MAP', uv
+    encoded = tree.nodes.new('ShaderNodeVectorMath')
+    encoded.operation = 'MULTIPLY_ADD'
+    tree.links.new(tangent.outputs['Tangent'], encoded.inputs[0])
+    encoded.inputs[1].default_value = encoded.inputs[2].default_value = (.5, .5, .5)
+    tree.links.new(encoded.outputs['Vector'], emission_input(tree))
+
+
+def decoded(pixels):
+    vectors = pixels[..., :3] * 2.0 - 1.0
+    return vectors / numpy.maximum(numpy.linalg.norm(vectors, axis=-1, keepdims=True), 1e-6)
+
+
+def skewed_normals(context, obj, project, wanted, sources, samples, distance):
+    black = lambda data: emission_tree(data.material.node_tree, (0.0, 0.0, 0.0, 1.0))
+
+    def high_normals():
+        with source_shading(sources.high, emitting(world_normal_shader)):
+            return bake_pass(context, obj, project, wanted, black, 'EMIT', samples, sources.high, **sources.reach(distance))
+    smooth = high_normals()
+    with flat_shading(obj):
+        flat = high_normals()
+    uv = project.uv_map if project.uv_map in obj.data.uv_layers else obj.data.uv_layers.active.name
+    origin, span = bounds((obj, *sources.high))
+    tangent = bake_pass(context, obj, project, wanted, lambda data: tangent_shader(data.material.node_tree, uv), 'EMIT', samples)
+    normal = bake_pass(context, obj, project, wanted, lambda data: world_normal_shader(data.material.node_tree), 'EMIT', samples)
+    place = bake_pass(context, obj, project, wanted, lambda data: position_shader(data.material.node_tree, origin, span), 'EMIT', samples)
+    results = {}
+    for key, pixels in smooth.items():
+        skew = painted_values(project, key, 'skew_map', pixels.shape[:2])
+        share = (skew if skew is not None else numpy.zeros(pixels.shape[:2], dtype=numpy.float32))[..., None]
+        seen = decoded(pixels) * (1 - share) + decoded(flat[key]) * share
+        seen /= numpy.maximum(numpy.linalg.norm(seen, axis=-1, keepdims=True), 1e-6)
+        base = decoded(normal[key])
+        side = decoded(tangent[key])
+        side = side - base * (side * base).sum(axis=-1, keepdims=True)
+        side /= numpy.maximum(numpy.linalg.norm(side, axis=-1, keepdims=True), 1e-6)
+        up = numpy.cross(base, side)
+        along = numpy.gradient(place[key][..., :3], axis=0)
+        up *= numpy.where((up * along).sum(axis=-1, keepdims=True) < 0, -1.0, 1.0)
+        result = numpy.ones(pixels.shape, dtype=numpy.float32)
+        result[..., 0] = (seen * side).sum(axis=-1) * .5 + .5
+        result[..., 1] = (seen * up).sum(axis=-1) * .5 + .5
+        result[..., 2] = (seen * base).sum(axis=-1) * .5 + .5
+        result[pixels[..., 3] < .5, :3] = FLAT_NORMAL[:3]
+        result[..., 3] = normal[key][..., 3]
+        results[key] = result
+    return results
+
+
+def bake_normal(context, obj, project, wanted, sources, samples, distance):
+    if uses_map(project, wanted, 'skew_map'):
+        results = skewed_normals(context, obj, project, wanted, sources, samples, distance)
+    else:
+        results = bake_pass(context, obj, project, wanted, lambda item: emission_tree(item.material.node_tree, FLAT_NORMAL), 'NORMAL', samples,
+                            sources.high, normal_space='TANGENT', **sources.reach(distance))
+    return trimmed(context, obj, project, wanted, sources, samples, distance, results, FLAT_NORMAL)
+
+
+def trimmed(context, obj, project, wanted, sources, samples, distance, results, fallback):
+    if not uses_map(project, wanted, 'cage_map'):
+        return results
+    high, low, _, span = positions(context, obj, project, wanted, sources, samples, distance)
+    masks = reach_masks(project, high, low, span, distance)
+    for key, pixels in results.items():
+        pixels[~masks[key], :3] = fallback[:3]
+    return results
 
 
 def shifted(mask, dy, dx):
@@ -275,14 +407,14 @@ def bake_key(context, obj, project, wanted, key, data, sources, size):
         return bake_height(context, obj, project, wanted, sources, samples, distance)
     if key == 'normal':
         if sources.high:
-            return bake_pass(context, obj, project, wanted, lambda item: emission_tree(item.material.node_tree, FLAT_NORMAL), 'NORMAL', samples,
-                             sources.high, normal_space='TANGENT', **sources.reach(distance))
+            return bake_normal(context, obj, project, wanted, sources, samples, distance)
         return bake_pass(context, obj, project, wanted, lambda item: rounded_shader(item.material.node_tree, EDGE_ROUNDING * size), 'NORMAL',
                          samples, normal_space='TANGENT')
     if key == 'id':
         if sources.high:
             with island_colors(sources.high if data.bake_id == 'ISLAND' else ()), source_shading(sources.high, id_source_shade(data.bake_id)):
-                return bake_pass(context, obj, project, wanted, black, 'EMIT', samples, sources.high, **sources.reach(distance))
+                results = bake_pass(context, obj, project, wanted, black, 'EMIT', samples, sources.high, **sources.reach(distance))
+            return trimmed(context, obj, project, wanted, sources, samples, distance, results, (0.0, 0.0, 0.0))
         with island_colors((obj,) if data.bake_id == 'ISLAND' else ()):
             return bake_pass(context, obj, project, wanted, lambda item: id_shader(item.material.node_tree, data.bake_id, item.name, obj.name),
                              'EMIT', samples)

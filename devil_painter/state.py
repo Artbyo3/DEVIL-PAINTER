@@ -53,6 +53,8 @@ class WorkspaceState:
     shelf_query: str = ''
     shelf_scope: str = 'ALL'
     ghost: tuple = ()
+    path_mode: str = ''
+    path_points: list = field(default_factory=list)
     clone_source: tuple = None
     poly_erase: bool = False
     bake_pending: str = ''
