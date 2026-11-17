@@ -264,8 +264,14 @@ def renderer():
 
 
 def dispatch():
+    process = _state['process']
+    alive = process is not None and process.poll() is None
     for key, (path, definition) in _queue.items():
         if key in _jobs and _jobs[key][1] == path:
+            try:
+                os.utime(_jobs[key][0])
+            except OSError:
+                pass
             continue
         if key in _jobs:
             _jobs[key][0].unlink(missing_ok=True)
@@ -276,9 +282,11 @@ def dispatch():
         _jobs[key] = (job, path)
     _queue.clear()
     for key, (job, path) in list(_jobs.items()):
+        taken = job.with_suffix('.taken')
         if path.is_file():
             del _jobs[key]
-        elif not job.exists():
+        elif not job.exists() and not (alive and taken.exists()):
+            taken.unlink(missing_ok=True)
             _failed.add(path)
             del _jobs[key]
     if _jobs:
@@ -309,10 +317,12 @@ def serve(folder):
         if job is None:
             time.sleep(JOB_POLL)
             continue
+        taken = job.with_suffix('.taken')
         try:
-            entry = json.loads(job.read_text(encoding='utf-8'))
-            job.unlink()
+            os.replace(job, taken)
+            entry = json.loads(taken.read_text(encoding='utf-8'))
         except (OSError, ValueError):
+            taken.unlink(missing_ok=True)
             continue
         target = Path(entry['path'])
         partial = target.with_name(target.stem + '.partial.png')
@@ -321,6 +331,7 @@ def serve(folder):
             os.replace(partial, target)
         except Exception:
             partial.unlink(missing_ok=True)
+        taken.unlink(missing_ok=True)
 
 
 def release():
