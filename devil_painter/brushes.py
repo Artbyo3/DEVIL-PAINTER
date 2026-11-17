@@ -1,4 +1,5 @@
 import hashlib
+from pathlib import Path
 import json
 import math
 import bpy
@@ -256,7 +257,8 @@ def clear_material(data):
 
 
 def load_alpha(name):
-    return bpy.data.images.load(str(alpha_path(name)), check_existing=True)
+    path = Path(name) if Path(name).suffix else alpha_path(name)
+    return bpy.data.images.load(str(path), check_existing=True)
 
 
 def apply_preset(context, data, preset):

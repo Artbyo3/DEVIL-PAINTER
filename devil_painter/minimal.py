@@ -3,7 +3,7 @@ from dataclasses import dataclass
 import json
 import math
 import numpy
-from . import autosave, shelf, thumbnails
+from . import autosave, packs, shelf, thumbnails
 from .post import POST_SLIDERS
 from .bridge import command as bridge_command
 from pathlib import Path
@@ -984,6 +984,14 @@ def shelf_query(state):
     return state.text.text if state.text is not None and state.text.key == 'SHELF_SEARCH' else state.shelf_query
 
 
+def packs_row(layout, zone, viewport):
+    s = layout.scale
+    y = viewport.top - 26 * s
+    layout.add('PACKS_REFRESH', Rect(zone.x + 8 * s, y, 130 * s, 22 * s), 'CHIP', label='Check for packs',
+               tip='Read the list of free packs from the Devil Painter asset library')
+    layout.add('PACKS_INFO', Rect(zone.x + 146 * s, y, zone.w - 160 * s, 22 * s), 'NOTE', label=packs.message() or 'Free CC0 packs. Click one to download it.')
+
+
 def search_row(layout, state, zone, row):
     s = layout.scale
     x = zone.x + 8 * s
@@ -1051,6 +1059,11 @@ def shelf_layout(layout, state, zone):
     viewport = Rect(zone.x, zone.y + 4 * s, zone.w, max(0.0, search.y - 6 * s - zone.y - 4 * s))
     query = shelf_query(state)
     entries = shelf.visible(state.shelf_tab, query, state.shelf_scope)
+    if state.shelf_tab == 'PACKS':
+        packs_row(layout, zone, viewport)
+        viewport = Rect(viewport.x, viewport.y, viewport.w, max(0.0, viewport.h - 28 * s))
+    if not entries and state.shelf_tab == 'PACKS':
+        return
     if not entries:
         if query or state.shelf_scope != 'ALL':
             empty = f'Nothing in {dict(shelf.TABS)[state.shelf_tab].lower()} matches this search.'
@@ -1082,6 +1095,10 @@ def shelf_layout(layout, state, zone):
             tip = f'Click to use for {CHANNEL[state.armed].label.lower()}'
         else:
             tip = 'Click to add as a fill layer'
+        if item.kind == 'PACK':
+            tip = f'{item.payload.get("description", "")} {packs.status(item.payload)}. Click to download. Right-click to remove'
+            layout.add(f'ITEM.{index}', rect, 'TILE', label=f'{item.label} · {packs.status(item.payload)}', preview=None, clip=viewport, tip=tip)
+            continue
         if item.kind in SHELF_TIPS:
             tip = SHELF_TIPS[item.kind]
         tip += '. Drag onto the layers to place it'

@@ -15,6 +15,7 @@ CHANNEL_WORDS = {'base_color': {'basecolor', 'albedo', 'diffuse', 'diff', 'color
                  'height': {'height', 'displacement', 'disp', 'bump'}, 'emission': {'emission', 'emissive'}, 'opacity': {'opacity', 'alpha'}}
 DIRECTX_WORDS = {'dx', 'normaldx'}
 SETTINGS_FILE = 'library.json'
+PACK_MARKER = '.installed'
 BLEND_SUFFIX = '.blend'
 VECTOR_SUFFIX = '.svg'
 BLEND_INPUTS = (('base_color', 'Base Color'), ('roughness', 'Roughness'), ('metallic', 'Metallic'), ('normal', 'Normal'),
@@ -235,8 +236,26 @@ def remove_library(index):
     return folder
 
 
+def packs_folder():
+    folder = library_root() / 'packs'
+    folder.mkdir(exist_ok=True)
+    return folder
+
+
+def installed_packs():
+    return [folder for folder in sorted(packs_folder().iterdir()) if folder.is_dir() and (folder / PACK_MARKER).is_file()]
+
+
+def pack_texture_roots():
+    return [folder / 'Textures' if (folder / 'Textures').is_dir() else folder for folder in installed_packs()]
+
+
+def pack_alphas():
+    return [path for folder in installed_packs() for path in sorted((folder / 'Alphas').glob('*')) if path.suffix.lower() in IMAGE_SUFFIXES]
+
+
 def library_roots():
-    return [Path(folder) for folder in dict.fromkeys([texture_folder(), *libraries()]) if folder]
+    return [Path(folder) for folder in dict.fromkeys([texture_folder(), *libraries()]) if folder] + pack_texture_roots()
 
 
 def blend_files(roots):

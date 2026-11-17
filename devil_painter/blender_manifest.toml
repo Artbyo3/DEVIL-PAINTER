@@ -13,6 +13,7 @@ blender_version_min = "5.2.0"
 
 [permissions]
 files = "Save and load texture layers, presets, and library assets"
+network = "Download optional free texture packs from the Devil Painter asset library, only when you click Download"
 
 [build]
 paths_exclude_pattern = [

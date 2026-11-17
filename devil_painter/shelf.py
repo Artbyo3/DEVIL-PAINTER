@@ -2,18 +2,19 @@ from dataclasses import dataclass
 from pathlib import Path
 import bpy
 import numpy
-from . import thumbnails
+from . import packs, thumbnails
 from .brushes import ALPHAS, PRESETS, alpha_path, preview_path, user_presets
 from .filters import FILTER, FILTERS
 from .library import (BUILTIN_MATERIALS, blend_definition, blend_materials, is_managed, library_root, material, pattern, plain, save_settings, scan,
-                      scanned_blends, settings, texture, user_materials, vector_files)
+                      pack_alphas, scanned_blends, settings, texture, user_materials, vector_files)
 from .vectors import preview_file
 from .masks import GENERATOR, GENERATORS, SMART_MASKS
 from .smart import BUILTIN_SMART, smart_masks, smart_materials, write_pixels
 from .procedural import PATTERN, PATTERNS
 
 TABS = (('MATERIALS', 'Materials'), ('SMART', 'Smart'), ('TEXTURES', 'Textures'), ('PATTERNS', 'Patterns'), ('MASKS', 'Masks'),
-        ('GENERATORS', 'Generators'), ('FILTERS', 'Filters'), ('BRUSHES', 'Brushes'), ('ALPHAS', 'Alphas'), ('ENVIRONMENTS', 'Lighting'))
+        ('GENERATORS', 'Generators'), ('FILTERS', 'Filters'), ('BRUSHES', 'Brushes'), ('ALPHAS', 'Alphas'), ('ENVIRONMENTS', 'Lighting'),
+        ('PACKS', 'Packs'))
 SCOPES = (('ALL', 'All'), ('BUILTIN', 'Built-in'), ('MINE', 'Mine'))
 FILTER_BASE = 'filter_base.png'
 FILTER_BASE_SIZE = 64
@@ -107,7 +108,10 @@ def items(tab):
         return ([Item(preset['name'], 'BRUSH', preset, preview_file=str(preview_path(preset))) for preset in PRESETS]
                 + [Item(preset['name'], 'BRUSH', preset, index, str(preview_path(preset)), mine=True) for index, preset in enumerate(user_presets())])
     if tab == 'ALPHAS':
-        return [Item('No alpha', 'ALPHA', '')] + [Item(name, 'ALPHA', name, preview_file=str(alpha_path(name))) for name in ALPHAS]
+        return ([Item('No alpha', 'ALPHA', '')] + [Item(name, 'ALPHA', name, preview_file=str(alpha_path(name))) for name in ALPHAS]
+                + [Item(path.stem, 'ALPHA', str(path), preview_file=str(path), mine=True) for path in pack_alphas()])
+    if tab == 'PACKS':
+        return [Item(entry['name'], 'PACK', entry, mine=True) for entry in packs.catalog()]
     return [Item(entry.label, 'PATTERN', entry.key) for entry in PATTERNS]
 
 
@@ -146,6 +150,8 @@ def thumbnail(item):
         return thumbnails.material_texture(pattern_definition(item.payload))
     if item.kind == 'MASK':
         return thumbnails.material_texture(mask_definition(item.payload))
+    if item.kind == 'PACK':
+        return None
     if item.kind == 'GENERATOR':
         return thumbnails.material_texture(generator_definition(item.payload))
     if item.kind == 'FILTER':

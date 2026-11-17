@@ -7,7 +7,7 @@ import numpy
 import math
 import gpu
 from gpu_extras.batch import batch_for_shader
-from . import actions, autosave, bridge, brushes, compositing, dynamics, exporting, library, meshmaps, painting, polyfill, post, projection, vectors, projects, sets, shelf, shortcuts, smart, strokes, thumbnails
+from . import actions, autosave, bridge, brushes, compositing, dynamics, packs, exporting, library, meshmaps, painting, polyfill, post, projection, vectors, projects, sets, shelf, shortcuts, smart, strokes, thumbnails
 from .blending import BLEND_MODES, CHANNEL, FOLDER_BLENDS, linear_to_srgb, srgb_to_linear
 from .ui_system import ACCENT
 from .canvas import Rect
@@ -404,6 +404,11 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.finish_stroke(context)
         if event.type == 'TIMER':
             self.auto_bake(context)
+            for note in packs.poll():
+                self.message = note
+                self._area.tag_redraw()
+            if packs.busy():
+                self._area.tag_redraw()
             if thumbnails.waiting():
                 thumbnails.render_next()
                 self._area.tag_redraw()
@@ -511,6 +516,8 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             index = control.key.removeprefix('ITEM.')
             if item.user_index >= 0 and item.kind == 'MASK':
                 self.state.popover = Popover('MENU', control.rect, items=((f'DELETE_SMART_MASK.{item.user_index}', 'Delete smart mask', False),))
+            elif item.kind == 'PACK':
+                self.state.popover = Popover('MENU', control.rect, items=((f'REMOVE_PACK.{index}', 'Remove pack', False),))
             elif item.kind == 'BRUSH' and item.user_index >= 0:
                 self.state.popover = Popover('MENU', control.rect, items=((f'DELETE_BRUSH.{item.user_index}', 'Delete brush preset', False),))
             elif item.kind == 'MATERIAL':
@@ -1598,6 +1605,10 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.state.scroll['SHELF'] = 0.0
         elif key.startswith('DELETE_SEARCH.'):
             self.message = f'Deleted the saved search {shelf.remove_search(int(key.removeprefix("DELETE_SEARCH.")))}.'
+        elif key == 'PACKS_REFRESH':
+            self.message = packs.refresh()
+        elif key.startswith('REMOVE_PACK.'):
+            self.message = packs.remove(self.shelf_item('ITEM.' + key.removeprefix('REMOVE_PACK.')).payload)
         elif key == 'LIBRARIES':
             self.state.popover = None if self.state.popover is not None and self.state.popover.kind == 'LIBRARIES' else Popover('LIBRARIES', control.rect)
         elif key == 'LIBRARY_NEW':
@@ -1893,6 +1904,10 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             target = 'MASK' if editing_mask(data) and not FILTER[item.payload].color_only else 'CONTENT'
             actions.add_effect(context, obj, data, 'FILTER', target)
             return actions.edit_effect(context, obj, data, 'filter', item.payload, True)
+        if item.kind == 'PACK':
+            if packs.installed(item.payload):
+                return f'{item.label} is installed. Its textures are in the Textures tab and its alphas in Alphas.'
+            return packs.download(item.payload)
         if item.kind == 'VECTOR':
             data.brush_stencil = vectors.svg_stencil(item.payload)
             self.brush_changed(context, data)
