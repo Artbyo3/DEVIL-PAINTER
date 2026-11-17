@@ -15,7 +15,7 @@
         <div class="md-header__topic">
           <span class="md-ellipsis">
             <a href="{% if page.url == '' %}{{ config.site_url }}{% else %}{{ config.extra.homepage | d(nav.homepage.url, true) | url }}{% endif %}" class="dp-title-lockup" title="{{ config.site_name | e }}">
-              <img src="{{ 'assets/logo-placeholder.svg' | url }}" alt="Devil Painter logo placeholder" class="dp-title-logo"><span class="dp-title-text">Devil Painter</span>
+              <img src="{{ 'assets/logo.svg' | url }}" alt="Devil Painter logo" class="dp-title-logo"><span class="dp-title-text">Devil Painter</span>
             </a>
           </span>
         </div>

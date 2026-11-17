@@ -5,12 +5,8 @@ hide:
 ---
 
 <div class="dp-landing-container">
-  <!-- Overview media placeholder -->
   <div class="dp-video-slot">
-    <div class="dp-overview-placeholder">
-      <span class="dp-overview-placeholder__badge">Preview Placeholder</span>
-      <span class="dp-overview-placeholder__hint">Overview media will be placed here.</span>
-    </div>
+    <img src="assets/logo-hero.svg" alt="Devil Painter animated logo" class="dp-overview-img" />
   </div>
 
   <main class="dp-landing-content">

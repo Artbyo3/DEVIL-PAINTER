@@ -1,3 +1,7 @@
+<p align="center">
+  <img alt="Devil Painter logo" src="docs-site/docs/assets/readme-logo.svg" width="144">
+</p>
+
 # Devil Painter
 
 A layer-based texture painting add-on for Blender.
