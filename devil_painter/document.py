@@ -8,6 +8,9 @@ SOURCES = (('VALUE', 'Value', ''), ('IMAGE', 'Texture', ''), ('PATTERN', 'Patter
 PROJECTIONS = (('UV', 'UV', ''), ('TRIPLANAR', 'Tri-planar', ''))
 SLOT_FIELDS = ('enabled', 'source', 'color', 'value', 'color_b', 'value_b', 'blend', 'opacity', 'pattern', 'scale', 'detail', 'contrast')
 LAYER_KINDS = (('PAINT', 'Paint', ''), ('FILL', 'Fill', ''), ('FOLDER', 'Folder', ''))
+NORMAL_FORMATS = (('OPENGL', 'OpenGL', ''), ('DIRECTX', 'DirectX', ''))
+NORMAL_SPACES = (('TANGENT', 'Tangent', ''), ('OBJECT', 'Object', ''))
+SHADERS = (('PRINCIPLED', 'Principled PBR', ''), ('UNLIT', 'Unlit', ''))
 
 
 class DEVIL_PAINTER_PG_slot(bpy.types.PropertyGroup):
@@ -73,6 +76,11 @@ class DEVIL_PAINTER_PG_texture_set(bpy.types.PropertyGroup):
     tiles: bpy.props.CollectionProperty(type=DEVIL_PAINTER_PG_tile)
     tile_images: bpy.props.CollectionProperty(type=DEVIL_PAINTER_PG_tile_image)
     export: bpy.props.BoolProperty(default=True)
+    visible: bpy.props.BoolProperty(default=True)
+    shader: bpy.props.EnumProperty(items=SHADERS)
+    bump_strength: bpy.props.FloatProperty(default=1.0, min=0.0, max=1.0)
+    normal_strength: bpy.props.FloatProperty(default=1.0, min=0.0, max=2.0)
+    emission_strength: bpy.props.FloatProperty(default=1.0, min=0.0, max=20.0)
     resolution: bpy.props.IntProperty(default=2048, min=64, max=8192)
     channels: bpy.props.CollectionProperty(type=DEVIL_PAINTER_PG_channel)
     layers: bpy.props.CollectionProperty(type=DEVIL_PAINTER_PG_layer)
@@ -110,6 +118,15 @@ class DEVIL_PAINTER_PG_project(bpy.types.PropertyGroup):
     export_template: bpy.props.StringProperty(default='Standard PBR')
     export_depth: bpy.props.StringProperty(default='TEMPLATE')
     export_pattern: bpy.props.StringProperty(default='{mesh}_{set}_{output}')
+    export_size: bpy.props.IntProperty(default=0, min=0, max=8192)
+    export_padding: bpy.props.IntProperty(default=16, min=-1, max=256)
+    template: bpy.props.StringProperty(default='PBR Metal Rough')
+    normal_format: bpy.props.EnumProperty(items=NORMAL_FORMATS)
+    normal_space: bpy.props.EnumProperty(items=NORMAL_SPACES)
+    use_physical: bpy.props.BoolProperty(default=False)
+    physical_size: bpy.props.FloatProperty(default=1.0, min=.01, max=100.0)
+    mask_backup: bpy.props.BoolProperty(default=False)
+    mask_backup_set: bpy.props.BoolProperty(default=False)
 
 
 CLASSES = (DEVIL_PAINTER_PG_slot, DEVIL_PAINTER_PG_channel, DEVIL_PAINTER_PG_map, DEVIL_PAINTER_PG_tile, DEVIL_PAINTER_PG_tile_image,
@@ -135,14 +152,15 @@ def active_tile(data):
 
 
 def set_channels(data):
-    return [channel for channel in CHANNELS if data.channels[channel.key].enabled]
+    return [channel for channel in CHANNELS if channel.key in data.channels and data.channels[channel.key].enabled]
 
 
 def add_set_channels(data):
     for channel in CHANNELS:
-        item = data.channels.add()
-        item.name = channel.key
-        item.enabled = channel.on_new_sets
+        if channel.key not in data.channels:
+            item = data.channels.add()
+            item.name = channel.key
+            item.enabled = channel.on_new_sets
 
 
 def add_slots(layer):
@@ -151,6 +169,8 @@ def add_slots(layer):
 
 def fill_slots(slots):
     for channel in CHANNELS:
+        if channel.key in slots:
+            continue
         slot = slots.add()
         slot.name = channel.key
         slot.enabled = channel.on_new_layers

@@ -13,7 +13,11 @@ class ColorTests(unittest.TestCase):
 class ChannelTests(unittest.TestCase):
     def test_registry_covers_the_standard_pbr_channels(self):
         self.assertEqual([channel.key for channel in CHANNELS],
-                         ['base_color', 'roughness', 'metallic', 'normal', 'height', 'emission', 'opacity'])
+                         ['base_color', 'roughness', 'metallic', 'normal', 'height', 'emission', 'opacity', 'ambient_occlusion',
+                          'user1', 'user2', 'user3', 'user4'])
+
+    def test_user_channels_are_export_only(self):
+        self.assertEqual({channel.key for channel in CHANNELS if not channel.in_shader}, {'user1', 'user2', 'user3', 'user4'})
 
     def test_color_channels_are_three_wide_and_values_one_wide(self):
         self.assertEqual({channel.key for channel in CHANNELS if channel.width == 3}, {'base_color', 'normal', 'emission'})

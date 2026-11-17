@@ -4,15 +4,19 @@ import traceback
 from pathlib import Path
 import bpy
 import numpy
-from . import actions, brushes, compositing, exporting, library, painting, sets, shelf, smart, strokes, thumbnails
-from .blending import BLEND_MODES, CHANNEL, CHANNELS, linear_to_srgb, srgb_to_linear
+import math
+import gpu
+from gpu_extras.batch import batch_for_shader
+from . import actions, brushes, compositing, exporting, library, painting, projects, sets, shelf, shortcuts, smart, strokes, thumbnails
+from .blending import BLEND_MODES, CHANNEL, linear_to_srgb, srgb_to_linear
+from .ui_system import ACCENT
 from .canvas import Rect
 from .document import RESOLUTIONS, active_layer, active_tile, paint_target, set_channels, slot_value, texture_set
 from .tiles import variant
 from .draw import Renderer
 from .masks import GENERATORS
 from .meshmaps import MESH_MAPS
-from .minimal import BRUSH_SLIDERS, BRUSH_TOGGLES, GENERATOR_SLIDERS, MAX_BRUSH_SIZE, REPLACE_TARGET, SCALE_RANGE, TILING_RANGE, from_slider, painter_layout
+from .minimal import FOV_RANGE, RECENT_COLORS, SHADER_SLIDERS, BRUSH_SLIDERS, BRUSH_TOGGLES, GENERATOR_SLIDERS, MAX_BRUSH_SIZE, REPLACE_TARGET, SCALE_RANGE, TILING_RANGE, from_slider, painter_layout
 from .shell import MARGIN, clamp_column, clamp_split
 from .state import Popover, TextEdit, WorkspaceState
 
@@ -23,9 +27,12 @@ POINTER_TOKENS = ('MOUSE', 'TRACKPAD', 'NDOF', 'PEN', 'ERASER')
 HIDDEN_REGIONS = ('show_region_header', 'show_region_tool_header', 'show_region_toolbar', 'show_region_asset_shelf', 'show_gizmo_navigate')
 FLAT_REGIONS = ('show_region_header', 'show_region_tool_header', 'show_region_toolbar', 'show_region_ui', 'show_region_asset_shelf')
 MOVES = {'MOVE_UP': 1, 'MOVE_DOWN': -1}
-EXPORT_MENUS = {'EXPORT_TEMPLATE', 'EXPORT_DEPTH'}
+EXPORT_MENUS = {'EXPORT_TEMPLATE', 'EXPORT_DEPTH', 'EXPORT_SIZE', 'EXPORT_PADDING'}
+HIGHLIGHT_ALPHA = .35
+SHADER_RANGES = {key: (field, top) for key, _, field, top in SHADER_SLIDERS}
+TOOL_ACTIONS = {'PAINT', 'ERASE', 'FILL', 'BLUR', 'SMEAR', 'CLONE'}
 EXPORT_MENU_PREFIXES = ('OUT_SRC.', 'OUT_FORMAT.', 'OUT_DEPTH.')
-EXPORT_EDITS = ('SET_TEMPLATE.', 'SET_EXPORT_DEPTH.', 'OUT_REMOVE.', 'SET_SRC.', 'SET_FORMAT.', 'SET_DEPTH.')
+EXPORT_EDITS = ('SET_TEMPLATE.', 'SET_EXPORT_DEPTH.', 'SET_EXPORT_SIZE.', 'SET_EXPORT_PADDING.', 'OUT_REMOVE.', 'SET_SRC.', 'SET_FORMAT.', 'SET_DEPTH.')
 PROJECTION_LABELS = {'UV': 'UV', 'TRIPLANAR': 'Tri-planar'}
 BRUSH_RANGES = {key: (field, top, .01 if key == 'BRUSH_FLOW' else 1.0 if key == 'BRUSH_SPACING' else 0.0) for key, _, field, top, _ in BRUSH_SLIDERS}
 BRUSH_FLAGS = {key: field for key, _, field in BRUSH_TOGGLES}
@@ -86,6 +93,9 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         self.flat_area = None
         self.saved_mask = None
         self.setup_cache = None
+        self.highlight = None
+        self.highlight_cache = (None, None)
+        self._view_handle = None
         if data is not None:
             for item in obj.devil_painter.sets:
                 actions.prepare(obj, item)
@@ -98,6 +108,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         self.workspace = self.make_layout()
         try:
             self._handle = bpy.types.SpaceView3D.draw_handler_add(self.draw_overlay, (), 'WINDOW', 'POST_PIXEL')
+            self._view_handle = bpy.types.SpaceView3D.draw_handler_add(self.draw_highlight, (), 'WINDOW', 'POST_VIEW')
             self._timer = context.window_manager.event_timer_add(TIMER_INTERVAL, window=context.window)
             context.window_manager.modal_handler_add(self)
         except Exception:
@@ -147,18 +158,141 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         brush = (painting.brush_value(self.scene, 'size'), (*painting.brush_value(self.scene, 'color'), 1.0))
         name = obj.name if obj is not None and obj.type == 'MESH' else ''
         directory = (obj.devil_painter.export_directory or default_directory(obj)) if data is not None else ''
-        return painter_layout(self.bounds, scale, self.state, data, name, painting.active_tool(self.scene), brush, directory, self.setup(obj, data))
+        viewport = (space.shading, space.lens, space.region_3d.view_perspective == 'ORTHO')
+        return painter_layout(self.bounds, scale, self.state, data, name, painting.active_tool(self.scene), brush, directory, self.setup(obj, data),
+                              viewport)
 
     def setup(self, obj, data):
         if data is not None or obj is None or obj.type != 'MESH':
-            return [], False
-        key = (obj.name, len(obj.data.polygons), len(obj.material_slots), self.state.setup_udim)
+            return [], False, True
+        key = (obj.name, len(obj.data.polygons), len(obj.material_slots), self.state.setup_udim, len(obj.data.uv_layers))
         if self.setup_cache is None or self.setup_cache[0] != key:
             found = sets.has_udim(obj)
-            self.setup_cache = (key, (sets.detect(obj, found and self.state.setup_udim), found))
+            self.setup_cache = (key, (sets.detect(obj, found and self.state.setup_udim), found, bool(obj.data.uv_layers)))
         return self.setup_cache[1]
 
+    def highlight_batch(self, obj, slot):
+        mesh = obj.data
+        key = (obj.name, slot, len(mesh.polygons), tuple(obj.matrix_world.col[3]))
+        if self.highlight_cache[0] != key:
+            mesh.calc_loop_triangles()
+            count = len(mesh.loop_triangles)
+            vertices = numpy.empty(count * 3, dtype=numpy.int32)
+            materials = numpy.empty(count, dtype=numpy.int32)
+            mesh.loop_triangles.foreach_get('vertices', vertices)
+            mesh.loop_triangles.foreach_get('material_index', materials)
+            coordinates = numpy.empty(len(mesh.vertices) * 3, dtype=numpy.float32)
+            mesh.vertices.foreach_get('co', coordinates)
+            coordinates = coordinates.reshape(-1, 3)
+            matrix = numpy.array(obj.matrix_world, dtype=numpy.float32)
+            world = coordinates @ matrix[:3, :3].T + matrix[:3, 3]
+            chosen = vertices.reshape(-1, 3)[materials == slot].ravel()
+            shader = gpu.shader.from_builtin('UNIFORM_COLOR')
+            self.highlight_cache = (key, (shader, batch_for_shader(shader, 'TRIS', {'pos': world[chosen].tolist()}), int((materials == slot).sum())))
+        return self.highlight_cache[1]
+
+    def draw_highlight(self):
+        if self._closed or self.highlight is None or bpy.context.area != self._area:
+            return
+        obj, data = self.painted()
+        if data is None:
+            return
+        project = obj.devil_painter
+        if self.highlight >= len(project.sets):
+            return
+        shader, batch, _ = self.highlight_batch(obj, project.sets[self.highlight].slot)
+        gpu.state.blend_set('ALPHA')
+        gpu.state.depth_test_set('LESS_EQUAL')
+        shader.bind()
+        shader.uniform_float('color', (*ACCENT[:3], HIGHLIGHT_ALPHA))
+        batch.draw(shader)
+        gpu.state.depth_test_set('NONE')
+        gpu.state.blend_set('NONE')
+
+    def update_highlight(self, event, control):
+        obj, data = self.painted()
+        if data is None:
+            wanted = None
+        elif control is not None and control.key.startswith('SET.'):
+            wanted = int(control.key.removeprefix('SET.'))
+        elif event.ctrl and event.alt:
+            wanted = obj.devil_painter.active_set
+        else:
+            wanted = None
+        if wanted != self.highlight:
+            self.highlight = wanted
+            self._area.tag_redraw()
+
+    def pick_color(self, context):
+        target = self.state.picking
+        self.state.picking = ''
+        obj, data = self.painted()
+        previous = tuple(painting.brush_value(self.scene, 'color'))
+        bpy.ops.paint.sample_color(location=(int(self.pointer[0]), int(self.pointer[1])), merged=True, palette=False)
+        picked = tuple(painting.brush_value(self.scene, 'color'))
+        self.remember_color(picked)
+        if target == 'BRUSH':
+            return 'Picked the brush color from the model.'
+        painting.set_brush_value(self.scene, 'color', previous)
+        channel, _, second = target.removeprefix('brush:').partition(':')
+        value = tuple(float(part) for part in (srgb_to_linear(numpy.array(picked)) if CHANNEL[channel].srgb else picked))
+        if target.startswith('brush:'):
+            data.brush_slots[channel].color = value
+            compositing.update_values(data)
+            return f'Picked the brush {CHANNEL[channel].label.lower()} from the model.'
+        actions.set_channel_value(context, obj, data, channel, value, second=bool(second))
+        return actions.commit_value(context, obj, data, CHANNEL[channel].label)
+
+    def remember_color(self, display):
+        color = tuple(round(float(part), 4) for part in display[:3])
+        recent = [item for item in self.state.recent_colors if item != color]
+        self.state.recent_colors[:] = [color] + recent[:RECENT_COLORS - 1]
+
+    def run_shortcut(self, context, action):
+        obj, data = self.painted()
+        if action in TOOL_ACTIONS:
+            painting.activate_tool(context, action)
+            painting.update_canvas(context, data)
+            brushes.sync(context, data)
+            return action.title() + ' tool.'
+        if action in {'SIZE_DOWN', 'SIZE_UP'}:
+            size = painting.brush_value(self.scene, 'size')
+            factor = shortcuts.SIZE_STEP if action == 'SIZE_UP' else 1 / shortcuts.SIZE_STEP
+            painting.set_brush_value(self.scene, 'size', max(1, min(MAX_BRUSH_SIZE, round(size * factor) + (1 if action == 'SIZE_UP' else -1))))
+            return f'Brush size {painting.brush_value(self.scene, "size")} px.'
+        if action == 'VIEW2D':
+            return self.close_flat(context) if self.flat_space() is not None else self.open_flat(context)
+        self.state.shelf_open = not self.state.shelf_open
+        return 'Shelf shown.' if self.state.shelf_open else 'Shelf hidden.'
+
+    def key_event(self, context, event):
+        obj, data = self.painted()
+        if data is None or event.ctrl or event.alt or event.oskey:
+            return None
+        if self.state.binding:
+            action, self.state.binding = self.state.binding, ''
+            if event.type == 'ESC':
+                shortcuts.bind(action, '')
+                self.message = 'Shortcut cleared.'
+            elif event.type in shortcuts.BINDABLE and not event.shift:
+                shortcuts.bind(action, event.type)
+                self.message = f'{action.title()} now uses {shortcuts.key_label(event.type)}.'
+            return {'RUNNING_MODAL'}
+        action = shortcuts.action_for(event.type) if not event.shift else None
+        if action is None:
+            return None
+        self.message = self.run_shortcut(context, action)
+        self._area.tag_redraw()
+        return {'RUNNING_MODAL'}
+
+    def restore_mask_snapshot(self, obj):
+        if self.saved_mask is not None and len(self.saved_mask[1][1]) != len(obj.data.polygons):
+            self.saved_mask = (obj.name, (False, numpy.zeros(len(obj.data.polygons), dtype=bool)))
+
     def remember_mask(self, obj):
+        project = obj.devil_painter
+        if not project.mask_backup_set:
+            project.mask_backup, project.mask_backup_set = obj.data.use_paint_mask, True
         if self.saved_mask is None:
             self.saved_mask = (obj.name, sets.remember_mask(obj.data))
 
@@ -167,7 +301,10 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             return
         obj = bpy.data.objects.get(self.saved_mask[0])
         if obj is not None and obj.type == 'MESH':
-            sets.restore_mask(obj.data, self.saved_mask[1])
+            project = obj.devil_painter
+            flag = project.mask_backup if project.mask_backup_set else self.saved_mask[1][0]
+            sets.restore_mask(obj.data, (flag, self.saved_mask[1][1]))
+            project.mask_backup_set = False
         self.saved_mask = None
 
     def draw_overlay(self):
@@ -255,9 +392,18 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
                 self.state.scroll[key] = self.state.scroll.get(key, 0.0) + step
                 self._area.tag_redraw()
             return {'RUNNING_MODAL'}
+        self.update_highlight(event, control)
         if press and event.type == 'Z' and event.ctrl:
             self.history_step(context, redo=event.shift)
             return {'PASS_THROUGH'}
+        if press and not pointer_event and (self.state.popover is None or self.state.popover.kind == 'SHORTCUTS'):
+            result = self.key_event(context, event)
+            if result is not None:
+                return result
+        if not over and press and event.type == 'LEFTMOUSE' and self.state.picking:
+            self.message = self.pick_color(context)
+            self._area.tag_redraw()
+            return {'RUNNING_MODAL'}
         if not over or not pointer_event:
             if press and event.type == 'LEFTMOUSE' and not event.alt:
                 self.begin_stroke(context)
@@ -386,6 +532,8 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         if layer.parent:
             items.append(('MOVE_OUT', 'Move out of folder', False))
         items.append(('SAVE_SMART', 'Save as smart material', False))
+        project = data.id_data.devil_painter
+        items += [(f'MOVE_TO_SET.{index}', 'Move to ' + item.name, False) for index, item in enumerate(project.sets) if index != project.active_set]
         items += [('MOVE_UP', 'Move up', False), ('MOVE_DOWN', 'Move down', False), ('DELETE', 'Delete', False)]
         self.state.popover = Popover('MENU', anchor, items=tuple(items))
 
@@ -489,6 +637,24 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             actions.set_generator_value(context, obj, data, field, max(.5, x * top) if key == 'GEN_SCALE' else x * top)
             if release:
                 self.message = actions.commit_value(context, obj, data, 'Generator')
+        elif key in SHADER_RANGES and data is not None:
+            field, top = SHADER_RANGES[key]
+            actions.set_set_value(context, obj, data, field, x * top, False)
+            if release:
+                self.message = actions.set_set_value(context, obj, data, field, x * top, True)
+        elif key == 'PHYS_SIZE' and data is not None:
+            obj.devil_painter.physical_size = max(.01, x * 10)
+            compositing.update_values(data)
+            if release:
+                self.message = actions.set_project_value(context, obj, obj.devil_painter, 'physical_size', max(.01, x * 10))
+        elif key in {'ENV_ROTATION', 'ENV_STRENGTH', 'CAMERA_FOV'}:
+            space = self._area.spaces.active
+            if key == 'ENV_ROTATION':
+                space.shading.studiolight_rotate_z = x * 2 * math.pi - math.pi
+            elif key == 'ENV_STRENGTH':
+                space.shading.studiolight_intensity = x * 2
+            else:
+                space.lens = FOV_RANGE[0] + x * (FOV_RANGE[1] - FOV_RANGE[0])
         elif key == 'BAKE_SAMPLES' and data is not None:
             data.bake_samples = max(1, round(x * 128))
         elif key.startswith('BRUSHVAL.') and data is not None:
@@ -547,6 +713,8 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             actions.set_channel_value(context, obj, data, channel, tuple(float(part) for part in value), second=bool(second))
             if commit:
                 self.message = actions.commit_value(context, obj, data, CHANNEL[channel].label)
+        if commit:
+            self.remember_color(display)
 
     def open_color(self, control, target):
         obj, data = self.painted()
@@ -577,11 +745,12 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         elif key == 'SETUP_UDIM':
             self.state.setup_udim = not self.state.setup_udim
         elif key == 'START':
-            rows, found = self.setup(obj, data)
+            rows, found, _ = self.setup(obj, data)
             resolutions = [self.state.setup_resolutions.get(index, 2048) for index in range(max(1, len(rows)))]
             if obj is not None and obj.type == 'MESH':
                 self.remember_mask(obj)
-            self.message = actions.start(context, obj, resolutions, found and self.state.setup_udim)
+            self.message = actions.start(context, obj, resolutions, found and self.state.setup_udim, self.state.setup_template,
+                                         self.state.setup_normal_format, self.state.setup_normal_space, self.state.setup_unwrap)
             self.hide_regions()
         elif key.startswith('PANEL_'):
             self.state.collapsed ^= {key.removeprefix('PANEL_')}
@@ -745,11 +914,72 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         elif key.startswith('SET_BLEND.'):
             _, channel, mode = key.split('.')
             self.message = actions.set_blend(context, obj, data, channel, mode)
-        elif key == 'CHANNELS':
-            self.state.popover = Popover('MENU', control.rect, items=tuple((f'SET_CHANNEL.{channel.key}', channel.label, data.channels[channel.key].enabled)
-                                                                          for channel in CHANNELS if channel.key != 'base_color'))
-        elif key.startswith('SET_CHANNEL.'):
-            self.message = actions.toggle_set_channel(context, obj, data, key.removeprefix('SET_CHANNEL.'))
+        elif key in {'CHANNELS', 'PROJECT', 'VIEWPORT', 'OPEN_SHORTCUTS'}:
+            kind = 'SHORTCUTS' if key == 'OPEN_SHORTCUTS' else key
+            same = self.state.popover is not None and self.state.popover.kind == kind
+            self.state.popover = None if same else Popover(kind, control.rect)
+        elif key.startswith('CHANSET.'):
+            channel = key.removeprefix('CHANSET.')
+            self.message = actions.set_channel_enabled(context, obj, obj.devil_painter, channel, not data.channels[channel].enabled, self.state.channels_all)
+        elif key == 'CHANNELS_ALL':
+            self.state.channels_all = not self.state.channels_all
+        elif key.startswith(('PNF.', 'PNS.')):
+            field = 'normal_format' if key.startswith('PNF.') else 'normal_space'
+            self.message = actions.set_project_value(context, obj, obj.devil_painter, field, key.split('.', 1)[1])
+        elif key == 'PHYS_USE':
+            self.message = actions.set_project_value(context, obj, obj.devil_painter, 'use_physical', not obj.devil_painter.use_physical)
+        elif key.startswith('SHADER.'):
+            self.message = actions.set_set_value(context, obj, data, 'shader', key.removeprefix('SHADER.'), True)
+        elif key == 'REIMPORT':
+            bpy.ops.devil_painter.reimport_mesh('INVOKE_DEFAULT')
+        elif key == 'REIMPORT_OBJECT':
+            meshes = [item.name for item in context.view_layer.objects if item.type == 'MESH' and item != obj]
+            self.state.popover = Popover('MENU', control.rect, items=tuple((f'REIMPORT_FROM.{name}', name, False) for name in meshes)
+                                         or (('NO_MESH', 'No other mesh in the scene', False),))
+        elif key.startswith('REIMPORT_FROM.'):
+            source = bpy.data.objects[key.removeprefix('REIMPORT_FROM.')]
+            self.message = actions.reimport_mesh(context, obj, obj.devil_painter, source.data.copy())
+            self.restore_mask_snapshot(obj)
+        elif key == 'ENV':
+            lights = [light.name for light in context.preferences.studio_lights if light.type == 'WORLD']
+            current = self._area.spaces.active.shading.studio_light
+            self.state.popover = Popover('MENU', control.rect, items=tuple((f'SET_ENV.{index}', name.rsplit('.', 1)[0], name == current)
+                                                                          for index, name in enumerate(lights)))
+        elif key.startswith('SET_ENV.'):
+            lights = [light.name for light in context.preferences.studio_lights if light.type == 'WORLD']
+            self._area.spaces.active.shading.studio_light = lights[int(key.removeprefix('SET_ENV.'))]
+            self.message = 'Environment changed.'
+        elif key == 'ENV_BACKGROUND':
+            shading = self._area.spaces.active.shading
+            shading.studiolight_background_alpha = 0.0 if shading.studiolight_background_alpha > .5 else 1.0
+        elif key == 'CAMERA_ORTHO':
+            view = self._area.spaces.active.region_3d
+            view.view_perspective = 'PERSP' if view.view_perspective == 'ORTHO' else 'ORTHO'
+        elif key.startswith('SETEYE.'):
+            self.message = actions.toggle_set_visible(context, obj, obj.devil_painter, int(key.removeprefix('SETEYE.')))
+        elif key.startswith('MOVE_TO_SET.'):
+            self.message = actions.move_to_set(context, obj, obj.devil_painter, int(key.removeprefix('MOVE_TO_SET.')))
+            self.restore_mask_snapshot(obj)
+        elif key == 'COLOR_PICK':
+            self.state.picking = self.state.popover.target
+            self.state.popover = None
+            self.message = 'Click the model to pick a color.'
+        elif key.startswith('RECENT.'):
+            red, green, blue = self.state.recent_colors[int(key.removeprefix('RECENT.'))]
+            self.state.hsv = colorsys.rgb_to_hsv(red, green, blue)
+            self.apply_color(context, commit=True)
+        elif key.startswith('BIND.'):
+            self.state.binding = key.removeprefix('BIND.')
+            self.message = 'Press the new key, or Esc to clear it.'
+        elif key == 'SETUP_TEMPLATE':
+            self.state.popover = Popover('MENU', control.rect, items=tuple((f'SET_SETUP_TEMPLATE.{index}', item['name'], item['name'] == self.state.setup_template)
+                                                                          for index, item in enumerate(projects.PROJECT_TEMPLATES)))
+        elif key.startswith('SET_SETUP_TEMPLATE.'):
+            template = projects.PROJECT_TEMPLATES[int(key.removeprefix('SET_SETUP_TEMPLATE.'))]
+            self.state.setup_template, self.state.setup_normal_format = template['name'], template['normal_format']
+        elif key.startswith(('SETUP_NF.', 'SETUP_NS.', 'SETUP_UNWRAP.')):
+            prefix, value = key.split('.', 1)
+            setattr(self.state, {'SETUP_NF': 'setup_normal_format', 'SETUP_NS': 'setup_normal_space', 'SETUP_UNWRAP': 'setup_unwrap'}[prefix], value)
         elif key == 'VIEW':
             items = [('SOLO.', 'Material', not data.solo)] + [(f'SOLO.{channel.key}', channel.label, data.solo == channel.key)
                                                              for channel in set_channels(data)]
@@ -844,6 +1074,11 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         elif key == 'EXPORT_DEPTH':
             items = tuple((f'SET_EXPORT_DEPTH.{depth}', 'From template' if depth == 'TEMPLATE' else depth + '-bit', depth == project.export_depth)
                           for depth in exporting.DEPTHS)
+        elif key == 'EXPORT_SIZE':
+            items = tuple((f'SET_EXPORT_SIZE.{size}', f'{size} px' if size else 'Texture set size', size == project.export_size) for size in exporting.SIZES)
+        elif key == 'EXPORT_PADDING':
+            items = tuple((f'SET_EXPORT_PADDING.{padding}', 'Infinite' if padding < 0 else f'{padding} px', padding == project.export_padding)
+                          for padding in exporting.PADDINGS)
         elif key.startswith('OUT_SRC.'):
             _, index, slot = key.split('.')
             items = tuple((f'SET_SRC.{index}.{slot}.{source}', label, False) for source, (label, _, _) in exporting.SOURCES.items())
@@ -866,6 +1101,12 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         if key.startswith('SET_EXPORT_DEPTH.'):
             project.export_depth = key.removeprefix('SET_EXPORT_DEPTH.')
             return 'Bit depth set.'
+        if key.startswith('SET_EXPORT_SIZE.'):
+            project.export_size = int(key.removeprefix('SET_EXPORT_SIZE.'))
+            return 'Export size set.'
+        if key.startswith('SET_EXPORT_PADDING.'):
+            project.export_padding = int(key.removeprefix('SET_EXPORT_PADDING.'))
+            return 'Padding set.'
         if key == 'TEMPLATE_DUPLICATE':
             project.export_template = exporting.duplicate_template(name)
             return f'Created the editable {project.export_template} template.'
@@ -902,6 +1143,9 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.saved_mask = None
         if self._handle is not None:
             bpy.types.SpaceView3D.draw_handler_remove(self._handle, 'WINDOW')
+        if self._view_handle is not None:
+            bpy.types.SpaceView3D.draw_handler_remove(self._view_handle, 'WINDOW')
+            self._view_handle = None
             self._handle = None
         if self._timer is not None:
             bpy.context.window_manager.event_timer_remove(self._timer)

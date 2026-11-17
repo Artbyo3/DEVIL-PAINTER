@@ -1,6 +1,6 @@
 import json
 import bpy
-from . import brushes, compositing, exporting, library, meshmaps, painting, sets, smart, strokes, tiles
+from . import brushes, compositing, exporting, library, meshmaps, painting, projects, sets, smart, strokes, tiles
 from .masks import GENERATOR, GENERATOR_FIELDS
 from .meshmaps import MESH_MAP
 from .blending import BLEND_MODES, CHANNEL
@@ -29,27 +29,28 @@ def refresh(context, obj, data, message):
 
 
 def prepare(obj, data):
-    if not data.brush_slots:
-        fill_slots(data.brush_slots)
+    fill_slots(data.brush_slots)
+    add_set_channels(data)
+    for layer in data.layers:
+        if layer.kind != 'FOLDER':
+            fill_slots(layer.slots)
     strokes.ensure_buffer(obj, data)
 
 
-def start(context, obj, resolutions, use_udim):
+def start(context, obj, resolutions, use_udim, template_name, normal_format, normal_space, unwrap_mode):
     if obj is None or obj.type != 'MESH':
         raise ValueError('Select a mesh object to paint.')
     unwrapped = ''
     if not has_uvs(obj):
         obj.data.uv_layers.new(name='UVMap')
-        context.view_layer.objects.active = obj
-        bpy.ops.object.mode_set(mode='EDIT')
-        bpy.ops.mesh.select_all(action='SELECT')
-        bpy.ops.uv.smart_project()
-        bpy.ops.object.mode_set(mode='OBJECT')
-        unwrapped = ' It had no UVs, so it was unwrapped automatically.'
+        projects.unwrap(context, obj, unwrap_mode)
+        unwrapped = f' It had no UVs, so it was unwrapped ({dict(projects.UNWRAP_MODES)[unwrap_mode]}).'
+    template = projects.find_template(template_name)
     project = obj.devil_painter
     project.sets.clear()
     project.uv_map = sets.uv_name(obj)
     project.active_set, project.active_tile = 0, tiles.FIRST_TILE
+    project.template, project.normal_format, project.normal_space = template['name'], normal_format, normal_space
     layout = sets.detect(obj, use_udim)
     if not obj.material_slots:
         obj.data.materials.append(None)
@@ -59,8 +60,8 @@ def start(context, obj, resolutions, use_udim):
         data.resolution = resolutions[index] if index < len(resolutions) else resolutions[-1]
         for number in found:
             data.tiles.add().number = number
-        add_set_channels(data)
         prepare(obj, data)
+        projects.apply_template(project, data, template)
         data.material = bpy.data.materials.new(f'Devil Painter {obj.name} {name}')
         obj.material_slots[index].material = data.material
     project.enabled = True
@@ -90,6 +91,119 @@ def activate(context, obj, project, index, tile):
     brushes.sync(context, data)
     count = len(tiles.numbers(data))
     return f'Painting {data.name}' + (f', tile {project.active_tile}.' if count > 1 else '.')
+
+
+def toggle_set_visible(context, obj, project, index):
+    data = project.sets[index]
+    data.visible = not data.visible
+    data.export = data.visible
+    compositing.sync(data)
+    bpy.ops.ed.undo_push(message='Devil Painter: texture set visibility')
+    strokes.record(None)
+    return f'{data.name} {"enabled" if data.visible else "disabled"}.'
+
+
+def set_channel_enabled(context, obj, project, key, enabled, every_set):
+    targets = list(project.sets) if every_set else [project.sets[project.active_set]]
+    for data in targets:
+        data.channels[key].enabled = enabled
+        if not enabled and data.solo == key:
+            data.solo = ''
+        strokes.ensure_canvases(obj, data)
+        compositing.sync(data)
+    data = project.sets[project.active_set]
+    scope = 'every texture set' if every_set else data.name
+    return refresh(context, obj, data, f'{CHANNEL[key].label} {"added to" if enabled else "removed from"} {scope}.')
+
+
+def set_project_value(context, obj, project, field, value):
+    setattr(project, field, value)
+    for data in project.sets:
+        compositing.sync(data)
+    return refresh(context, obj, project.sets[project.active_set], 'Project settings updated.')
+
+
+def set_set_value(context, obj, data, field, value, commit):
+    setattr(data, field, value)
+    if commit:
+        return refresh(context, obj, data, f'{data.name} shader settings updated.')
+    compositing.sync(data)
+    return ''
+
+
+def carry(obj, source, target, key, name):
+    created = None
+    for number in tiles.numbers(target):
+        origin = tiles.variant(source, key, number) if number in tiles.numbers(source) else None
+        image = origin.copy() if origin is not None else tiles.blank(name, target.resolution, (0.0, 0.0, 0.0, 0.0), key.colorspace_settings.is_data)
+        image.name = name if created is None else f'{name} {number}'
+        if tuple(image.size) != (target.resolution, target.resolution):
+            image.scale(target.resolution, target.resolution)
+        image.pack()
+        if created is None:
+            created = image
+        else:
+            tiles.register(target, created, number, image)
+    return created
+
+
+def transfer(obj, source, target, layer, parent):
+    target.serial += 1
+    uid = f'L{target.serial}'
+    values = {key: getattr(layer, key) for key in LAYER_FIELDS}
+    copy = target.layers.add()
+    for key, value in values.items():
+        setattr(copy, key, value)
+    copy.uid, copy.parent, copy.name = uid, parent, layer.name
+    base = f'DP {obj.name} {target.name} {uid}'
+    for slot in layer.slots:
+        item = copy.slots.add()
+        item.name = slot.name
+        for key in SLOT_FIELDS + ('image',):
+            setattr(item, key, getattr(slot, key))
+        if layer.kind == 'PAINT' and slot.source == 'IMAGE' and slot.image is not None:
+            item.image = carry(obj, source, target, slot.image, f'{base} {slot.name}')
+    if layer.image is not None:
+        copy.image = carry(obj, source, target, layer.image, base)
+    if layer.mask is not None:
+        copy.mask = carry(obj, source, target, layer.mask, base + ' mask')
+    for child in children(source.layers, layer.uid):
+        transfer(obj, source, target, child, uid)
+    return uid
+
+
+def move_to_set(context, obj, project, index):
+    source = project.sets[project.active_set]
+    target = project.sets[index]
+    layer = active_layer(source)
+    name = layer.name
+    uid = transfer(obj, source, target, layer, '')
+    doomed = {layer.uid, *descendants(source.layers, layer.uid)}
+    for position in range(len(source.layers) - 1, -1, -1):
+        if source.layers[position].uid in doomed:
+            remove_images(source, source.layers[position])
+            source.layers.remove(position)
+    source.active_uid = source.layers[-1].uid if source.layers else ''
+    compositing.sync(source)
+    target.active_uid = uid
+    prepare(obj, target)
+    message = activate(context, obj, project, index, project.active_tile)
+    return refresh(context, obj, target, f'Moved {name} to {target.name}. {message}')
+
+
+def reimport_mesh(context, obj, project, mesh):
+    mode = obj.mode
+    if mode != 'OBJECT':
+        bpy.ops.object.mode_set(mode='OBJECT')
+    kept = projects.swap_mesh(obj, project, mesh)
+    for data in project.sets:
+        prepare(obj, data)
+        strokes.ensure_canvases(obj, data)
+        data.material[compositing.SIGNATURE_KEY] = ''
+        compositing.sync(data)
+    painting.enter_paint_mode(context, obj)
+    sets.mask_faces(obj, project)
+    return refresh(context, obj, project.sets[project.active_set], f'Reimported the mesh. {kept} texture sets kept their layers.')
 
 
 def set_resolution(context, obj, data, size):
@@ -351,14 +465,6 @@ def commit_value(context, obj, data, label):
     return refresh(context, obj, data, f'{label} of {active_layer(data).name} set.')
 
 
-def toggle_set_channel(context, obj, data, key):
-    item = data.channels[key]
-    item.enabled = not item.enabled
-    if not item.enabled and data.solo == key:
-        data.solo = ''
-    return refresh(context, obj, data, f'{CHANNEL[key].label} {"added to" if item.enabled else "removed from"} the texture set.')
-
-
 def set_solo(context, obj, data, key):
     data.solo = key
     if key.startswith('map:'):
@@ -424,7 +530,8 @@ def export(context, obj, project, directory):
     if not wanted:
         return 'Pick at least one texture set to export.'
     template = exporting.find_template(project.export_template)
-    written = exporting.export(context, obj, project, template, wanted, directory, project.export_pattern, project.export_depth)
+    written = exporting.export(context, obj, project, template, wanted, directory, project.export_pattern, project.export_depth,
+                               project.export_size, project.export_padding)
     painting.enter_paint_mode(context, obj)
     sets.mask_faces(obj, project)
     painting.update_canvas(context, project.sets[project.active_set])

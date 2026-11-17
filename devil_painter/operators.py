@@ -1,6 +1,6 @@
 from pathlib import Path
 import bpy
-from . import library
+from . import actions, library, projects
 from .document import project_of, texture_set
 
 
@@ -59,4 +59,27 @@ class DEVIL_PAINTER_OT_import_textures(bpy.types.Operator):
         return {'FINISHED'}
 
 
-CLASSES = (DEVIL_PAINTER_OT_choose_export_folder, DEVIL_PAINTER_OT_choose_texture_folder, DEVIL_PAINTER_OT_import_textures)
+class DEVIL_PAINTER_OT_reimport_mesh(bpy.types.Operator):
+    bl_idname = 'devil_painter.reimport_mesh'
+    bl_label = 'Reimport Mesh'
+    bl_description = 'Swap the painted mesh for an updated file and keep the layers mapped by texture set'
+    filepath: bpy.props.StringProperty(subtype='FILE_PATH')
+    filter_glob: bpy.props.StringProperty(default='*.obj;*.fbx;*.gltf;*.glb;*.ply;*.stl', options={'HIDDEN'})
+
+    @classmethod
+    def poll(cls, context):
+        return texture_set(context.view_layer.objects.active) is not None
+
+    def invoke(self, context, event):
+        context.window_manager.fileselect_add(self)
+        return {'RUNNING_MODAL'}
+
+    def execute(self, context):
+        obj = context.view_layer.objects.active
+        mesh = projects.imported_mesh(self.filepath)
+        self.report({'INFO'}, actions.reimport_mesh(context, obj, obj.devil_painter, mesh))
+        return {'FINISHED'}
+
+
+CLASSES = (DEVIL_PAINTER_OT_choose_export_folder, DEVIL_PAINTER_OT_choose_texture_folder, DEVIL_PAINTER_OT_import_textures,
+           DEVIL_PAINTER_OT_reimport_mesh)

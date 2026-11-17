@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(ROOT))
 import devil_painter
-from devil_painter import editor, library, painting, shelf, smart, thumbnails
+from devil_painter import editor, library, painting, shelf, shortcuts, smart, thumbnails
 from devil_painter.compositing import SIGNATURE_KEY, socket
 from devil_painter.document import texture_set
 from devil_painter.ui_system import SURFACE_FLOATING
@@ -230,6 +230,9 @@ def journey():
     press(window, 'LEFTMOUSE', region.x + rect.x + rect.w * .5, region.y + rect.y + rect.h / 2)
     yield 0.3
     check(brush.use_smooth_stroke and data.brush_preset == 'Custom', 'smoothing turns on the stroke stabilizer')
+    click(window, region, 'BRUSH_PRESSURE_SIZE')
+    yield 0.3
+    check(data.brush_pressure_size and bpy.context.scene.tool_settings.image_paint.brush.use_pressure_size, 'pen pressure can drive the brush size')
     press(window, 'ESC', *middle)
     yield 0.3
     click(window, region, 'SHELF_TAB.BRUSHES')
@@ -334,6 +337,25 @@ def journey():
     yield 0.4
     check(editor._active.state.popover is None, 'clicking outside closes the color picker')
 
+    color_target = fill.slots['base_color']
+    click(window, region, 'SWATCH.base_color')
+    yield 0.4
+    check(has('RECENT.0') and has('COLOR_PICK'), 'the color card keeps recent swatches and offers an eyedropper')
+    click(window, region, 'COLOR_PICK')
+    yield 0.3
+    check(editor._active.state.picking == 'base_color' and editor._active.state.popover is None, 'the eyedropper waits for a click on the model')
+    before_pick = tuple(color_target.color)
+    press(window, 'LEFTMOUSE', region.x + region.width * .45, region.y + region.height * .45)
+    yield 0.6
+    check(not editor._active.state.picking and tuple(color_target.color) != before_pick, 'clicking the model picks its color into the fill')
+    click(window, region, 'SWATCH.base_color')
+    yield 0.4
+    click(window, region, 'RECENT.1')
+    yield 0.4
+    check(abs(color_target.color[2] - 1.0) < .02 and color_target.color[0] < .05, 'a recent swatch brings back the earlier blue')
+    press(window, 'ESC', *middle)
+    yield 0.3
+
     click(window, region, 'BLEND.base_color')
     yield 0.4
     click(window, region, 'SET_BLEND.base_color.MULTIPLY')
@@ -344,10 +366,14 @@ def journey():
 
     click(window, region, 'CHANNELS')
     yield 0.4
-    check(has('SET_CHANNEL.emission') and not control('SET_CHANNEL.emission').active, 'the Channels menu lists the channels the set can add')
-    click(window, region, 'SET_CHANNEL.emission')
+    check(has('CHANSET.emission') and not control('CHANSET.emission').active and has('CHANSET.user1') and has('CHANNELS_ALL'),
+          'the Channels card lists every channel, export-only user channels, and an all-sets switch')
+    click(window, region, 'CHANSET.emission')
     yield 0.5
-    check(data.channels['emission'].enabled and has('SWATCH.emission'), 'adding emission to the texture set shows its row in Properties')
+    check(data.channels['emission'].enabled and has('SWATCH.emission') and has('CHANSET.opacity'),
+          'adding emission to the texture set shows its row in Properties and keeps the card open')
+    press(window, 'ESC', *middle)
+    yield 0.3
     press(window, 'Z', *middle, ctrl=True)
     yield 0.8
     cube = bpy.data.objects['Cube']
@@ -772,6 +798,8 @@ def journey():
     check(data.bake_source == high and len(covered) and numpy.median(covered[:, 2]) > .8 and covered[:, 0].std() > .01,
           'the normal map bakes the high-poly surface in tangent space')
     check(cube.mode == 'TEXTURE_PAINT' and bpy.context.view_layer.objects.active == cube, 'baking keeps the painted mesh active')
+    normal_map = next(node for node in data.material.node_tree.nodes if node.type == 'NORMAL_MAP')
+    check(normal_map.inputs['Color'].links[0].from_node.type == 'VECT_MATH', 'the baked high-poly normal blends with the painted normal channel')
     bpy.data.objects.remove(high)
 
     click(window, region, f'ITEM.{shelf_index("Steel")}')
@@ -970,6 +998,106 @@ def journey():
     click(window, region, 'VIEW2D')
     yield 0.5
     check(len(window.screen.areas) == area_count + 1, 'the 2D view opens again')
+
+    press(window, 'E', *middle)
+    yield 0.4
+    check(control('ERASE').active, 'the E shortcut picks the eraser')
+    click(window, region, 'PROJECT')
+    yield 0.4
+    click(window, region, 'OPEN_SHORTCUTS')
+    yield 0.4
+    click(window, region, 'BIND.FILL')
+    yield 0.3
+    press(window, 'K', *middle)
+    yield 0.3
+    check(shortcuts.bindings()['FILL'] == 'K' and control('BIND.FILL').label == 'K', 'a shortcut can be rebound by pressing the new key')
+    press(window, 'ESC', *middle)
+    yield 0.3
+    press(window, 'K', *middle)
+    yield 0.4
+    check(control('FILL').active, 'the rebound key picks the fill tool')
+    click(window, region, 'PAINT')
+    yield 0.3
+
+    click(window, region, 'VIEWPORT')
+    yield 0.4
+    shading = area.spaces.active.shading
+    light = shading.studio_light
+    click(window, region, 'ENV')
+    yield 0.3
+    names = [item.name for item in bpy.context.preferences.studio_lights if item.type == 'WORLD']
+    click(window, region, f'SET_ENV.{next(index for index, name in enumerate(names) if name != light)}')
+    yield 0.4
+    check(shading.studio_light != light, 'the environment menu swaps the HDRI')
+    click(window, region, 'VIEWPORT')
+    yield 0.4
+    for key, fraction in (('ENV_ROTATION', .75), ('ENV_STRENGTH', .25), ('CAMERA_FOV', .5)):
+        rect = control(key).rect
+        press(window, 'LEFTMOUSE', region.x + rect.x + rect.w * fraction, region.y + rect.y + rect.h / 2)
+        yield 0.2
+    check(abs(shading.studiolight_rotate_z - 1.5708) < .1 and abs(shading.studiolight_intensity - .5) < .05 and abs(area.spaces.active.lens - 80) < 3,
+          'the viewport card rotates and dims the environment and sets the lens')
+    click(window, region, 'CAMERA_ORTHO')
+    yield 0.3
+    check(area.spaces.active.region_3d.view_perspective == 'ORTHO', 'the viewport card switches to orthographic')
+    click(window, region, 'CAMERA_ORTHO')
+    yield 0.3
+    press(window, 'ESC', *middle)
+    yield 0.3
+
+    data = texture_set(bpy.data.objects['Cube'])
+    if not editor._active.state.shelf_open:
+        click(window, region, 'SHELF_TOGGLE')
+        yield 0.3
+    click(window, region, 'SHELF_TAB.MATERIALS')
+    yield 0.3
+    wood = f'ITEM.{shelf_index("Wood")}'
+    yield from reveal(window, region, wood, 'SHELF')
+    click(window, region, wood)
+    yield 0.8
+    click(window, region, 'PROJECT')
+    yield 0.4
+    click(window, region, 'SHADER.UNLIT')
+    yield 0.5
+    output = next(node for node in data.material.node_tree.nodes if node.type == 'OUTPUT_MATERIAL')
+    check(data.shader == 'UNLIT' and output.inputs['Surface'].links[0].from_node.type == 'EMISSION', 'the project card switches the viewport shader')
+    click(window, region, 'SHADER.PRINCIPLED')
+    yield 0.5
+    rect = control('NORMAL_STRENGTH').rect
+    press(window, 'LEFTMOUSE', region.x + rect.x + rect.w * .25, region.y + rect.y + rect.h / 2)
+    yield 0.4
+    nodes = data.material.node_tree.nodes
+    check(abs(nodes['shader.normal_map'].inputs['Strength'].default_value - .5) < .05, 'shader settings drive the normal strength')
+    click(window, region, 'PNF.DIRECTX')
+    yield 0.5
+    normal_map = data.material.node_tree.nodes['shader.normal_map']
+    check(cube.devil_painter.normal_format == 'DIRECTX' and normal_map.inputs['Color'].links[0].from_node.type == 'COMBINE_COLOR',
+          'a DirectX project flips the green channel into the shader')
+    click(window, region, 'PNF.OPENGL')
+    yield 0.4
+    click(window, region, 'PHYS_USE')
+    yield 0.5
+    triplanar = next(layer for layer in data.layers if layer.name == 'Wood')
+    scale = data.material.node_tree.nodes[triplanar.uid + '.mapping'].inputs['Scale'].default_value
+    check(cube.devil_painter.use_physical and abs(scale[0] - triplanar.tiling * cube.scale[0] / cube.devil_painter.physical_size) < 1e-4,
+          'real-world scale sizes tri-planar fills in meters')
+    press(window, 'ESC', *middle)
+    yield 0.3
+
+    click(window, region, 'CHANNELS')
+    yield 0.4
+    for key in ('ambient_occlusion', 'opacity', 'user1'):
+        click(window, region, 'CHANSET.' + key)
+        yield 0.4
+    press(window, 'ESC', *middle)
+    yield 0.3
+    nodes = data.material.node_tree.nodes
+    shader = nodes['shader.bsdf']
+    base_link = shader.inputs['Base Color'].links[0].from_node
+    check(base_link.type == 'MIX' and base_link.blend_type == 'MULTIPLY', 'the ambient occlusion channel darkens the base color in the preview')
+    check(data.material.surface_render_method == 'BLENDED' and shader.inputs['Alpha'].is_linked, 'the opacity channel makes the material transparent')
+    check(data.channels['user1'].enabled and not any('user1' in link.from_node.name for link in shader.inputs['Base Color'].links),
+          'user channels stay out of the shader')
 
     click(window, region, 'CLOSE')
     yield 0.5

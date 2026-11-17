@@ -11,12 +11,16 @@ from .library import save_settings, settings
 FORMATS = {'PNG': ('png', ('8', '16')), 'TARGA': ('tga', ('8',)), 'TIFF': ('tif', ('8', '16')), 'OPEN_EXR': ('exr', ('16', '32'))}
 FORMAT_LABELS = {'PNG': 'PNG', 'TARGA': 'TGA', 'TIFF': 'TIFF', 'OPEN_EXR': 'EXR'}
 DEPTHS = ('TEMPLATE', '8', '16', '32')
+SIZES = (0, 512, 1024, 2048, 4096)
+PADDINGS = (0, 4, 16, 64, -1)
+INFINITE_PADDING = -1
 SOURCES = {'base_color.r': ('Base R', 'base_color', 0), 'base_color.g': ('Base G', 'base_color', 1), 'base_color.b': ('Base B', 'base_color', 2),
            'roughness': ('Roughness', 'roughness', 0), 'smoothness': ('Smoothness', 'roughness', 0), 'metallic': ('Metallic', 'metallic', 0),
            'normal.r': ('Normal X', 'normal', 0), 'normal.g': ('Normal Y', 'normal', 1), 'normal.g_dx': ('Normal Y DirectX', 'normal', 1),
            'normal.b': ('Normal Z', 'normal', 2), 'height': ('Height', 'height', 0), 'emission.r': ('Emit R', 'emission', 0),
            'emission.g': ('Emit G', 'emission', 1), 'emission.b': ('Emit B', 'emission', 2), 'opacity': ('Opacity', 'opacity', 0),
-           'ao': ('Ambient occlusion', None, 0), 'white': ('White', None, 0), 'black': ('Black', None, 0)}
+           'ao': ('Ambient occlusion', 'ambient_occlusion', 0), 'user1': ('User 1', 'user1', 0), 'user2': ('User 2', 'user2', 0),
+           'user3': ('User 3', 'user3', 0), 'user4': ('User 4', 'user4', 0), 'white': ('White', None, 0), 'black': ('Black', None, 0)}
 INVERTED = {'smoothness', 'normal.g_dx'}
 TOKENS = ('{mesh}', '{set}', '{output}', '{udim}', '{material}', '{resolution}')
 BASE = ['base_color.r', 'base_color.g', 'base_color.b']
@@ -41,6 +45,9 @@ BUILTIN_TEMPLATES = (
                                      output('Normal', NORMAL_GL), output('Emission', EMISSION, srgb=True)]),
     dict(name='Unity URP', outputs=[output('BaseMap', BASE + ['opacity'], srgb=True), output('MetallicSmoothness', ['metallic', 'black', 'black', 'smoothness']),
                                     output('Normal', NORMAL_GL), output('Occlusion', ['ao']), output('Emission', EMISSION, srgb=True)]),
+    dict(name='USD Preview Surface', outputs=[output('diffuseColor', BASE, srgb=True), output('roughness', ['roughness']), output('metallic', ['metallic']),
+                                              output('normal', NORMAL_GL), output('occlusion', ['ao']), output('emissiveColor', EMISSION, srgb=True),
+                                              output('opacity', ['opacity'])]),
     dict(name='Linear EXR', outputs=[output('BaseColor', BASE, 'OPEN_EXR', '32'), output('Roughness', ['roughness'], 'OPEN_EXR', '32'),
                                      output('Metallic', ['metallic'], 'OPEN_EXR', '32'), output('Normal', NORMAL_GL, 'OPEN_EXR', '32'),
                                      output('Height', ['height'], 'OPEN_EXR', '32'), output('Emission', EMISSION, 'OPEN_EXR', '32')]),
@@ -138,9 +145,10 @@ def file_name(pattern, tokens, multi_tile):
 
 def source_available(data, key, ao):
     channel = SOURCES[key][1]
+    present = channel in {item.key for item in set_channels(data)}
     if key == 'ao':
-        return ao is not None
-    return channel is None or channel in {item.key for item in set_channels(data)}
+        return ao is not None or present
+    return channel is None or present
 
 
 def needed_channels(template):
@@ -157,22 +165,25 @@ def ao_pixels(data, number, size):
     return pixels[..., 0]
 
 
-def plane(key, baked, ao, size, srgb, linear_file):
+def plane(key, baked, ao, size, srgb, linear_file, present, normal_format):
     _, channel, component = SOURCES[key]
     if key == 'white':
         return numpy.ones((size, size), dtype=numpy.float32)
     if key == 'black':
         return numpy.zeros((size, size), dtype=numpy.float32)
-    if key == 'ao':
+    if key == 'ao' and channel not in present:
         return ao if ao is not None else numpy.ones((size, size), dtype=numpy.float32)
+    if channel not in present:
+        return numpy.full((size, size), CHANNEL[channel].default[component], dtype=numpy.float32)
     values = baked[channel][..., component]
     if srgb and CHANNEL[channel].srgb and not linear_file:
         values = linear_to_srgb(values)
     values = numpy.clip(values, 0, 1)
-    return 1 - values if key in INVERTED else values
+    inverted = (key in INVERTED) != (channel == 'normal' and component == 1 and normal_format == 'DIRECTX')
+    return 1 - values if inverted else values
 
 
-def write(path, planes, file_format, depth):
+def write(path, planes, file_format, depth, target):
     size = planes[0].shape[0]
     pixels = numpy.ones((size, size, 4), dtype=numpy.float32)
     if len(planes) == 1:
@@ -189,6 +200,8 @@ def write(path, planes, file_format, depth):
     try:
         image.colorspace_settings.name = 'Non-Color'
         image.pixels.foreach_set(pixels.ravel())
+        if target and target != size:
+            image.scale(target, target)
         image_settings = scene.render.image_settings
         image_settings.file_format = file_format
         image_settings.color_mode = mode if file_format != 'OPEN_EXR' or mode != 'BW' else 'RGB'
@@ -201,20 +214,23 @@ def write(path, planes, file_format, depth):
         bpy.data.scenes.remove(scene)
 
 
-def export(context, obj, project, template, wanted, directory, pattern, override):
-    channels = needed_channels(template)
+def export(context, obj, project, template, wanted, directory, pattern, override, size=0, padding=baking.BAKE_MARGIN):
+    present_anywhere = {item.key for index in wanted for item in set_channels(project.sets[index])}
+    channels = needed_channels(template) & present_anywhere
     baked = {}
     for key in channels:
-        for (index, number), values in baking.bake_channel(context, obj, project, wanted, CHANNEL[key]).items():
+        margin = max(project.sets[index].resolution for index in wanted) if padding == INFINITE_PADDING else padding
+        for (index, number), values in baking.bake_channel(context, obj, project, wanted, CHANNEL[key], margin).items():
             baked.setdefault((index, number), {})[key] = values
     written = []
     folder = Path(directory)
     for index in wanted:
         data = project.sets[index]
         set_tiles = tiles.numbers(data)
+        present = {item.key for item in set_channels(data)}
         for number in set_tiles:
-            size = data.resolution
-            ao = ao_pixels(data, number, size)
+            resolution = data.resolution
+            ao = ao_pixels(data, number, resolution)
             for item in template['outputs']:
                 varying = [key for key in item['sources'] if key not in {'white', 'black'}]
                 if varying and not any(source_available(data, key, ao) for key in varying):
@@ -222,10 +238,11 @@ def export(context, obj, project, template, wanted, directory, pattern, override
                 file_format = item['format']
                 depth = effective_depth(file_format, item['depth'], override)
                 linear_file = file_format == 'OPEN_EXR'
-                planes = [plane(key, baked.get((index, number), {}), ao, size, item['srgb'], linear_file) for key in item['sources']]
+                planes = [plane(key, baked.get((index, number), {}), ao, resolution, item['srgb'], linear_file, present, project.normal_format)
+                          for key in item['sources']]
                 tokens = dict(mesh=bpy.path.clean_name(obj.name), set=bpy.path.clean_name(data.name), output=item['name'], udim=number,
-                              material=bpy.path.clean_name(data.material.name), resolution=size)
+                              material=bpy.path.clean_name(data.material.name), resolution=size or resolution)
                 path = folder / (file_name(pattern, tokens, len(set_tiles) > 1) + '.' + FORMATS[file_format][0])
-                write(path, planes, file_format, depth)
+                write(path, planes, file_format, depth, size)
                 written.append(path)
     return written

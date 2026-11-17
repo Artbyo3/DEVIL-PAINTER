@@ -4,11 +4,13 @@ import json
 import math
 import numpy
 from . import shelf, thumbnails
-from .blending import BLEND_MODES, CHANNEL, linear_to_srgb
+from .blending import BLEND_MODES, CHANNEL, CHANNELS, linear_to_srgb
 from .canvas import Layout, Rect
-from .document import PROJECTIONS, RESOLUTIONS, active_layer, children, editing_mask, set_channels, slot_value, uses_coordinates
+from .document import NORMAL_FORMATS, NORMAL_SPACES, PROJECTIONS, RESOLUTIONS, SHADERS, active_layer, children, editing_mask, set_channels, slot_value, uses_coordinates
 from .library import capture, texture_folder
 from .exporting import FORMAT_LABELS, SOURCES, TOKENS, find_template, is_custom
+from .projects import UNWRAP_MODES
+from .shortcuts import ACTIONS, bindings, key_label
 from .masks import GENERATOR
 from .sets import tile_label
 from .tiles import numbers
@@ -22,6 +24,8 @@ HEADER = 30
 ROW_HEIGHT = 42
 LINE_HEIGHT = 28
 THUMBNAIL = 32
+RECENT_COLORS = 8
+FOV_RANGE = (10.0, 150.0)
 MAP_TILE = 56
 MAPS_SHARE = .3
 SETS_SHARE = .25
@@ -128,20 +132,42 @@ def panel(layout, state, spec, x, top, width, view):
 
 
 SETUP_ROW = 30
+SHADER_SLIDERS = (('BUMP_STRENGTH', 'Height strength', 'bump_strength', 1.0), ('NORMAL_STRENGTH', 'Normal strength', 'normal_strength', 2.0),
+                  ('EMIT_STRENGTH', 'Emission strength', 'emission_strength', 20.0))
+
+
+def chip_row(layout, prefix, options, chosen, x, y, w, s, tip):
+    width = (w - 4 * s * (len(options) - 1)) / len(options)
+    for index, (key, label) in enumerate(options):
+        layout.add(f'{prefix}.{key}', Rect(x + index * (width + 4 * s), y, width, 24 * s), 'CHIP', label=label, active=key == chosen, tip=tip)
 
 
 def start_layout(layout, state, bounds, obj_name, setup):
     s = layout.scale
-    rows, udim_found = setup
-    w, h = 460 * s, (196 + SETUP_ROW * max(1, len(rows))) * s
+    rows, udim_found, has_uv = setup
+    extra = 3 + (1 if not has_uv else 0)
+    w, h = 480 * s, (196 + SETUP_ROW * (max(1, len(rows)) + extra)) * s
     card = Rect(bounds.x + (bounds.w - w) / 2, bounds.y + (bounds.h - h) / 2, w, h)
     layout.cards.append((card, 'New Devil Painter project'))
     layout.add('CLOSE', Rect(card.x + card.w - 32 * s, card.y + card.h - 32 * s, 24 * s, 24 * s), 'ICON', icon='CLOSE',
                tip='Close', shortcut='Ctrl Alt P')
     x, w = card.x + 14 * s, card.w - 28 * s
     layout.add('TARGET', Rect(x, card.top - 64 * s, w, 22 * s), 'NOTE', label=obj_name or 'Select a mesh object to paint.')
-    layout.add('SETUP_HINT', Rect(x, card.top - 90 * s, w, 20 * s), 'NOTE', label='One texture set per material slot')
-    y = card.top - 92 * s
+    y = card.top - 64 * s - SETUP_ROW * s
+    layout.add('SETUP_TEMPLATE', Rect(x, y, w, 24 * s), 'DROPDOWN', label='Template', text=state.setup_template,
+               tip='Channels, shader, normal format, and export template to start from')
+    y -= SETUP_ROW * s
+    layout.add('SETUP_NF_LABEL', Rect(x, y, 100 * s, 24 * s), 'NOTE', label='Normal map')
+    chip_row(layout, 'SETUP_NF', [(key, label) for key, label, _ in NORMAL_FORMATS], state.setup_normal_format, x + 104 * s, y, 150 * s, s,
+             'Green channel convention of normal maps')
+    chip_row(layout, 'SETUP_NS', [(key, label) for key, label, _ in NORMAL_SPACES], state.setup_normal_space, x + 266 * s, y, w - 266 * s, s,
+             'Tangent mode of the normal channel')
+    if not has_uv:
+        y -= SETUP_ROW * s
+        layout.add('SETUP_UNWRAP_LABEL', Rect(x, y, 100 * s, 24 * s), 'NOTE', label='Unwrap')
+        chip_row(layout, 'SETUP_UNWRAP', UNWRAP_MODES, state.setup_unwrap, x + 104 * s, y, w - 104 * s, s, 'The mesh has no UVs; pick how to unwrap it')
+    y -= SETUP_ROW * s
+    layout.add('SETUP_HINT', Rect(x, y, w, 20 * s), 'NOTE', label='One texture set per material slot')
     for index, (name, found) in enumerate(rows):
         y -= SETUP_ROW * s
         chosen = state.setup_resolutions.get(index, 2048)
@@ -178,9 +204,13 @@ def workspace_bar(layout, zone, data, obj_name, view_2d):
     channels = Rect(view.x - 6 * s - menu_w, y, menu_w, h)
     bake = Rect(channels.x - 6 * s - 110 * s, y, 110 * s, h)
     layout.add('BAKE', bake, 'CHIP', label='Bake maps', tip='Bake ambient occlusion, curvature, thickness, position, world normal, and ID maps')
-    flat = Rect(bake.x - 6 * s - 90 * s, y, 90 * s, h)
+    flat = Rect(bake.x - 6 * s - 80 * s, y, 80 * s, h)
     layout.add('VIEW2D', flat, 'CHIP', label='2D view', active=view_2d, tip='Show the selected canvas flat in UV space next to the model and paint on it')
-    bake = flat
+    viewport = Rect(flat.x - 6 * s - 84 * s, y, 84 * s, h)
+    layout.add('VIEWPORT', viewport, 'CHIP', label='Viewport', tip='Environment lighting, rotation, field of view, and projection')
+    project = Rect(viewport.x - 6 * s - 76 * s, y, 76 * s, h)
+    layout.add('PROJECT', project, 'CHIP', label='Project', tip='Normal format, tangent mode, physical size, shader, mesh reimport, and shortcuts')
+    bake = project
     layout.add('CHANNELS', channels, 'DROPDOWN', label='Channels', text=str(len(set_channels(data))),
                tip=channel_names(data) + '. Choose which channels this texture set paints and exports')
     count = len(numbers(data))
@@ -559,6 +589,8 @@ def fill_sets(layout, state, data, flow):
                  color=(.2, .2, .2, 1.0), tip='Paint this texture set. Clicking its faces in the viewport selects it too')
         flow.add(f'SETRES.{index}', Rect(row.x + row.w - 112 * s, row.y + 9 * s, 50 * s, row.h - 18 * s), 'DROPDOWN',
                  text=f'{item.resolution // 1024}K', tip='Change the resolution of this texture set')
+        flow.add(f'SETEYE.{index}', Rect(row.x + 4 * s, row.y + 8 * s, 22 * s, row.h - 16 * s), 'ICON',
+                 icon='HIDE_OFF' if item.visible else 'HIDE_ON', tip='Disable this texture set' if item.visible else 'Enable this texture set')
     tile_numbers = numbers(data)
     if len(tile_numbers) > 1:
         x, y, h = flow.field()
@@ -676,7 +708,7 @@ def place_popover(bounds, anchor, w, h, s):
 
 def color_popover(layout, state, bounds):
     s = layout.scale
-    card = place_popover(bounds, state.popover.anchor, 232 * s, 252 * s, s)
+    card = place_popover(bounds, state.popover.anchor, 232 * s, 282 * s, s)
     hue, saturation, value = state.hsv
     x = card.x + 12 * s
     layout.add('COLOR_SV', Rect(x, card.y + 74 * s, card.w - 24 * s, 166 * s), 'SV', value=saturation, second=value,
@@ -686,8 +718,14 @@ def color_popover(layout, state, bounds):
     editing = state.text is not None and state.text.key == 'COLOR_HEX'
     red, green, blue = colorsys.hsv_to_rgb(*state.hsv)
     hex_text = '#%02X%02X%02X' % tuple(round(channel * 255) for channel in (red, green, blue))
-    layout.add('COLOR_HEX', Rect(x + 48 * s, card.y + 16 * s, card.w - 72 * s, 24 * s), 'FIELD',
+    layout.add('COLOR_HEX', Rect(x + 48 * s, card.y + 16 * s, card.w - 104 * s, 24 * s), 'FIELD',
                text=state.text.text if editing else hex_text, caret=state.text.cursor if editing else -1, tip='Type a hex color')
+    layout.add('COLOR_PICK', Rect(card.x + card.w - 46 * s, card.y + 16 * s, 24 * s, 24 * s), 'ICON', icon='EYEDROPPER',
+               tip='Pick a color from the model')
+    swatch = (card.w - 24 * s - 4 * s * (RECENT_COLORS - 1)) / RECENT_COLORS
+    for index, color in enumerate(state.recent_colors[:RECENT_COLORS]):
+        layout.add(f'RECENT.{index}', Rect(x + index * (swatch + 4 * s), card.top - 34 * s, swatch, 20 * s), 'SWATCH', color=(*color, 1.0),
+                   tip='Recent color')
     return card
 
 
@@ -777,6 +815,110 @@ def output_row(layout, x, y, w, index, item, editable, s):
         layout.add(f'OUT_INFO.{index}', Rect(tail, y, w - (tail - x), h), 'NOTE', label=f'{FORMAT_LABELS[item["format"]]} {item["depth"]}')
 
 
+def size_label(size):
+    return f'{size} px' if size else 'Set size'
+
+
+def padding_label(padding):
+    return 'Infinite' if padding < 0 else f'{padding} px'
+
+
+def project_popover(layout, state, bounds, data):
+    s = layout.scale
+    project = data.id_data.devil_painter
+    card = place_popover(bounds, state.popover.anchor, 420 * s, (12 * LINE_HEIGHT + 30) * s, s)
+    x, w = card.x + 14 * s, card.w - 28 * s
+    y = card.top - 34 * s
+    layout.add('PROJECT_TITLE', Rect(x, y, w, 22 * s), 'NOTE', label='Project · ' + project.template)
+    y -= LINE_HEIGHT * s
+    layout.add('PNF_LABEL', Rect(x, y, 110 * s, 24 * s), 'NOTE', label='Normal map')
+    chip_row(layout, 'PNF', [(key, label) for key, label, _ in NORMAL_FORMATS], project.normal_format, x + 114 * s, y, w - 114 * s, s,
+             'Green channel convention used by the normal channel and exports')
+    y -= LINE_HEIGHT * s
+    layout.add('PNS_LABEL', Rect(x, y, 110 * s, 24 * s), 'NOTE', label='Tangent mode')
+    chip_row(layout, 'PNS', [(key, label) for key, label, _ in NORMAL_SPACES], project.normal_space, x + 114 * s, y, w - 114 * s, s,
+             'Space the normal channel is painted in')
+    y -= LINE_HEIGHT * s
+    layout.add('PHYS_USE', Rect(x, y, 200 * s, 24 * s), 'TOGGLE', label='Real-world scale', active=project.use_physical,
+               tip='Tri-planar fills keep their size in meters whatever the object scale')
+    layout.add('PHYS_SIZE', Rect(x + 206 * s, y, w - 206 * s, 24 * s), 'SLIDER', label='Tile', value=project.physical_size / 10,
+               text=f'{project.physical_size:.2f} m', tip='Meters covered by one repeat of a tri-planar fill')
+    y -= LINE_HEIGHT * s
+    layout.add('SHADER_LABEL', Rect(x, y, w, 22 * s), 'NOTE', label='Shader · ' + data.name)
+    y -= LINE_HEIGHT * s
+    chip_row(layout, 'SHADER', [(key, label) for key, label, _ in SHADERS], data.shader, x, y, w, s, 'Viewport shader of this texture set')
+    for key, label, field, top in SHADER_SLIDERS:
+        y -= LINE_HEIGHT * s
+        value = getattr(data, field)
+        layout.add(key, Rect(x, y, w, 24 * s), 'SLIDER', label=label, value=value / top, text=f'{value:.2f}')
+    y -= LINE_HEIGHT * s
+    half = (w - 4 * s) / 2
+    layout.add('REIMPORT', Rect(x, y, half, 24 * s), 'CHIP', label='Reimport from file', tip='Swap in an updated mesh file and keep the layers')
+    layout.add('REIMPORT_OBJECT', Rect(x + half + 4 * s, y, half, 24 * s), 'DROPDOWN', label='From object', text='Pick',
+               tip='Swap in the mesh of another object in the scene and keep the layers')
+    y -= LINE_HEIGHT * s
+    layout.add('OPEN_SHORTCUTS', Rect(x, y, w, 24 * s), 'CHIP', label='Shortcuts', tip='Change the Devil Painter keys')
+    return card
+
+
+def viewport_popover(layout, state, bounds, shading, lens, ortho):
+    s = layout.scale
+    card = place_popover(bounds, state.popover.anchor, 360 * s, (7 * LINE_HEIGHT + 30) * s, s)
+    x, w = card.x + 14 * s, card.w - 28 * s
+    y = card.top - 34 * s
+    layout.add('VIEWPORT_TITLE', Rect(x, y, w, 22 * s), 'NOTE', label='Viewport')
+    y -= LINE_HEIGHT * s
+    layout.add('ENV', Rect(x, y, w, 24 * s), 'DROPDOWN', label='Environment', text=shading.studio_light.rsplit('.', 1)[0],
+               tip='HDRI that lights the material preview')
+    y -= LINE_HEIGHT * s
+    rotation = (shading.studiolight_rotate_z + math.pi) / (2 * math.pi)
+    layout.add('ENV_ROTATION', Rect(x, y, w, 24 * s), 'SLIDER', label='Rotation', value=rotation, text=f'{math.degrees(shading.studiolight_rotate_z):.0f}°')
+    y -= LINE_HEIGHT * s
+    layout.add('ENV_STRENGTH', Rect(x, y, w, 24 * s), 'SLIDER', label='Strength', value=shading.studiolight_intensity / 2,
+               text=f'{shading.studiolight_intensity:.2f}')
+    y -= LINE_HEIGHT * s
+    layout.add('ENV_BACKGROUND', Rect(x, y, w, 24 * s), 'TOGGLE', label='Show the environment as background', active=shading.studiolight_background_alpha > .5)
+    y -= LINE_HEIGHT * s
+    low, high = FOV_RANGE
+    layout.add('CAMERA_FOV', Rect(x, y, w, 24 * s), 'SLIDER', label='Lens', value=(lens - low) / (high - low), text=f'{lens:.0f} mm',
+               tip='Field of view of the viewport camera')
+    y -= LINE_HEIGHT * s
+    layout.add('CAMERA_ORTHO', Rect(x, y, w, 24 * s), 'TOGGLE', label='Orthographic', active=ortho, tip='Switch between perspective and orthographic')
+    return card
+
+
+def channels_popover(layout, state, bounds, data):
+    s = layout.scale
+    choices = [channel for channel in CHANNELS if channel.key != 'base_color']
+    card = place_popover(bounds, state.popover.anchor, 300 * s, ((len(choices) + 2) * LINE_HEIGHT + 30) * s, s)
+    x, w = card.x + 14 * s, card.w - 28 * s
+    y = card.top - 34 * s
+    layout.add('CHANNELS_TITLE', Rect(x, y, w, 22 * s), 'NOTE', label='Channels · ' + data.name)
+    for channel in choices:
+        y -= LINE_HEIGHT * s
+        layout.add('CHANSET.' + channel.key, Rect(x, y, w, 24 * s), 'TOGGLE', label=channel.label + ('' if channel.in_shader else '  (export only)'),
+                   active=channel.key in data.channels and data.channels[channel.key].enabled)
+    y -= LINE_HEIGHT * s
+    layout.add('CHANNELS_ALL', Rect(x, y, w, 24 * s), 'TOGGLE', label='Apply to every texture set', active=state.channels_all,
+               tip='Add or remove channels in all texture sets at once')
+    return card
+
+
+def shortcuts_popover(layout, state, bounds):
+    s = layout.scale
+    card = place_popover(bounds, state.popover.anchor, 340 * s, (len(ACTIONS) * LINE_HEIGHT + 60) * s, s)
+    x, w = card.x + 14 * s, card.w - 28 * s
+    y = card.top - 34 * s
+    layout.add('SHORTCUTS_TITLE', Rect(x, y, w, 22 * s), 'NOTE', label='Click a key, then press the new key. Esc clears it.')
+    keys = bindings()
+    for action, label, _ in ACTIONS:
+        y -= LINE_HEIGHT * s
+        layout.add('SHORTCUT_LABEL.' + action, Rect(x, y, w - 100 * s, 24 * s), 'NOTE', label=label)
+        layout.add('BIND.' + action, Rect(x + w - 94 * s, y, 94 * s, 24 * s), 'CHIP', label='Press a key' if state.binding == action else key_label(keys[action]),
+                   active=state.binding == action)
+    return card
+
+
 def export_popover(layout, state, bounds, data, directory):
     s = layout.scale
     project = data.id_data.devil_painter
@@ -806,8 +948,13 @@ def export_popover(layout, state, bounds, data, directory):
                    label=f'{item.name}  ·  {item.resolution} px' + (f'  ·  {count} UDIM tiles' if count > 1 else ''), tip='Export this texture set')
     y -= LINE_HEIGHT * s
     depth = 'From template' if project.export_depth == 'TEMPLATE' else project.export_depth + '-bit'
-    layout.add('EXPORT_DEPTH', Rect(x, y, 200 * s, 24 * s), 'DROPDOWN', label='Bit depth', text=depth,
+    third = (w - 8 * s) / 3
+    layout.add('EXPORT_DEPTH', Rect(x, y, third, 24 * s), 'DROPDOWN', label='Depth', text=depth,
                tip='Override the bit depth; formats that cannot hold it use their closest depth')
+    layout.add('EXPORT_SIZE', Rect(x + third + 4 * s, y, third, 24 * s), 'DROPDOWN', label='Size', text=size_label(project.export_size),
+               tip='Write every file at this size, or at each texture set resolution')
+    layout.add('EXPORT_PADDING', Rect(x + 2 * (third + 4 * s), y, third, 24 * s), 'DROPDOWN', label='Padding', text=padding_label(project.export_padding),
+               tip='How far colors bleed past the UV islands')
     y -= LINE_HEIGHT * s
     editing = state.text is not None and state.text.key == 'EXPORT_PATTERN'
     layout.add('EXPORT_PATTERN', Rect(x, y, w, 24 * s), 'FIELD', text=state.text.text if editing else project.export_pattern,
@@ -821,7 +968,7 @@ def export_popover(layout, state, bounds, data, directory):
     return card
 
 
-def painter_layout(bounds, scale, state, data, obj_name, tool, brush, directory, setup):
+def painter_layout(bounds, scale, state, data, obj_name, tool, brush, directory, setup, viewport):
     layout = Layout(scale, MinimalMetrics.resolve(), zones(bounds, scale, state.column_width, state.shelf_open))
     if data is None:
         start_layout(layout, state, bounds, obj_name, setup)
@@ -837,6 +984,14 @@ def painter_layout(bounds, scale, state, data, obj_name, tool, brush, directory,
             layout.popover = color_popover(layout, state, bounds)
         elif state.popover.kind == 'MENU':
             layout.popover = menu_popover(layout, state, bounds)
+        elif state.popover.kind == 'PROJECT' and data is not None:
+            layout.popover = project_popover(layout, state, bounds, data)
+        elif state.popover.kind == 'VIEWPORT' and data is not None:
+            layout.popover = viewport_popover(layout, state, bounds, *viewport)
+        elif state.popover.kind == 'CHANNELS' and data is not None:
+            layout.popover = channels_popover(layout, state, bounds, data)
+        elif state.popover.kind == 'SHORTCUTS':
+            layout.popover = shortcuts_popover(layout, state, bounds)
         elif state.popover.kind == 'BAKE' and data is not None:
             layout.popover = bake_popover(layout, state, bounds, data)
         elif state.popover.kind == 'BRUSH' and data is not None:

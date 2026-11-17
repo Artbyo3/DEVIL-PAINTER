@@ -25,7 +25,8 @@ def on_save(_):
             continue
         for data in project.sets:
             keys = [image for layer in data.layers for image in actions.owned_images(layer)] + [item.image for item in data.maps]
-            images = tiles.every_image(data, keys) + ([data.stroke] if data.stroke else [])
+            images = tiles.every_image(data, keys) + ([data.stroke] if data.stroke else []) + ([data.brush_alpha] if data.brush_alpha else [])
+            images += [slot.image for layer in data.layers for slot in layer.slots if slot.source == 'IMAGE' and slot.image is not None]
             for image in images:
                 if image.is_dirty or image.packed_file is None:
                     image.pack()

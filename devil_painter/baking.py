@@ -66,7 +66,7 @@ def uv_name(obj, project):
     return project.uv_map if project.uv_map in obj.data.uv_layers else obj.data.uv_layers.active.name
 
 
-def bake_pass(context, obj, project, wanted, prepare, bake_type='EMIT', samples=BAKE_SAMPLES, extra=(), **options):
+def bake_pass(context, obj, project, wanted, prepare, bake_type='EMIT', samples=BAKE_SAMPLES, extra=(), margin=BAKE_MARGIN, **options):
     mesh = obj.data
     name = uv_name(obj, project)
     face_tiles = tiles.face_tiles(mesh, name)
@@ -94,7 +94,7 @@ def bake_pass(context, obj, project, wanted, prepare, bake_type='EMIT', samples=
                         tree.nodes.active = node
                     layer = tiles.shifted_uv(mesh, name, face_tiles == number, number)
                     try:
-                        bpy.ops.object.bake(type=bake_type, margin=BAKE_MARGIN, use_clear=True, target='IMAGE_TEXTURES', uv_layer=layer, **options)
+                        bpy.ops.object.bake(type=bake_type, margin=margin, use_clear=True, target='IMAGE_TEXTURES', uv_layer=layer, **options)
                     finally:
                         mesh.uv_layers.remove(mesh.uv_layers[layer])
                         mesh.uv_layers.active = mesh.uv_layers[name]
@@ -110,7 +110,7 @@ def bake_pass(context, obj, project, wanted, prepare, bake_type='EMIT', samples=
     return results
 
 
-def bake_channel(context, obj, project, wanted, channel):
+def bake_channel(context, obj, project, wanted, channel, margin=BAKE_MARGIN):
     def prepare(data):
         if channel in set_channels(data):
             compositing.rebuild(data, solo=channel, raw=True)
@@ -119,7 +119,7 @@ def bake_channel(context, obj, project, wanted, channel):
             emission_tree(data.material.node_tree, rgba(channel.default))
 
     results = {}
-    for key, pixels in bake_pass(context, obj, project, wanted, prepare).items():
+    for key, pixels in bake_pass(context, obj, project, wanted, prepare, margin=margin).items():
         values = pixels[..., :3].copy()
         values[pixels[..., 3] < .5] = channel.default
         results[key] = values

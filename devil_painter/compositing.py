@@ -101,9 +101,11 @@ class Sampler:
 
 
 class Build:
-    def __init__(self, nodes, links, sampler, stroke=None, maps=None, live=False, size=1.0, active=1001):
+    def __init__(self, nodes, links, sampler, stroke=None, maps=None, live=False, size=1.0, active=1001, shading=None):
         self.nodes, self.links, self.sampler, self.stroke = nodes, links, sampler, stroke
         self.maps, self.live, self.size, self.active = maps or {}, live, size, active
+        self.shading = shading or dict(shader='PRINCIPLED', normal_format='OPENGL', normal_space='TANGENT')
+        self.shaded = None
 
 
 def slot_signature(slot):
@@ -124,7 +126,9 @@ def signature(data):
     stroke = stroke_link(data)
     owner = f'{stroke[0]}:{",".join(stroke[2])}:{active_tile(data)}' if stroke else ''
     tiles = ','.join(str(number) for number in numbers(data))
-    return f'{channels};{data.solo};{layers};{owner};{maps};{tiles};{data.id_data.devil_painter.uv_map}'
+    project = data.id_data.devil_painter
+    shading = f'{data.visible}{data.shader}{project.normal_format}{project.normal_space}'
+    return f'{channels};{data.solo};{layers};{owner};{maps};{tiles};{project.uv_map};{shading}'
 
 
 def stroke_over(build, image, alpha, color, x):
@@ -207,17 +211,88 @@ def slot_content(build, layer, slot, vector, name, x, y):
     return None
 
 
+def vector_math(nodes, links, operation, *values):
+    node = nodes.new('ShaderNodeVectorMath')
+    node.operation = operation
+    for index, value in enumerate(values):
+        if isinstance(value, tuple):
+            node.inputs[index].default_value = value
+        else:
+            links.new(value, node.inputs[index])
+    return node.outputs['Vector']
+
+
+def flip_green(nodes, links, color):
+    split = nodes.new('ShaderNodeSeparateColor')
+    links.new(color, split.inputs['Color'])
+    join = nodes.new('ShaderNodeCombineColor')
+    links.new(split.outputs[0], join.inputs[0])
+    links.new(math_node(nodes, links, 'SUBTRACT', 1.0, split.outputs[1]), join.inputs[1])
+    links.new(split.outputs[2], join.inputs[2])
+    return join.outputs['Color']
+
+
+def blend_normals(nodes, links, base, detail):
+    unpacked = [vector_math(nodes, links, 'MULTIPLY_ADD', color, (2.0, 2.0, 2.0), (-1.0, -1.0, -1.0)) for color in (base, detail)]
+    parts = []
+    for vector in unpacked:
+        split = nodes.new('ShaderNodeSeparateXYZ')
+        links.new(vector, split.inputs['Vector'])
+        parts.append(split)
+    join = nodes.new('ShaderNodeCombineXYZ')
+    links.new(math_node(nodes, links, 'ADD', parts[0].outputs['X'], parts[1].outputs['X']), join.inputs['X'])
+    links.new(math_node(nodes, links, 'ADD', parts[0].outputs['Y'], parts[1].outputs['Y']), join.inputs['Y'])
+    links.new(math_node(nodes, links, 'MULTIPLY', parts[0].outputs['Z'], parts[1].outputs['Z']), join.inputs['Z'])
+    normalized = vector_math(nodes, links, 'NORMALIZE', join.outputs['Vector'])
+    return vector_math(nodes, links, 'MULTIPLY_ADD', normalized, (.5, .5, .5), (.5, .5, .5))
+
+
+def combine_baked(build, results):
+    nodes, links = build.nodes, build.links
+    baked = build.maps.get('normal')
+    if 'normal' in results and baked is not None:
+        color, _ = build.sampler.sample(baked, None, (-800, -1500))
+        if build.shading['normal_format'] == 'DIRECTX':
+            color = flip_green(nodes, links, color)
+        results['normal'] = blend_normals(nodes, links, color, results['normal'])
+    if 'ambient_occlusion' in results:
+        occlusion = results['ambient_occlusion']
+        ambient = build.maps.get('ao')
+        if ambient is not None:
+            mix = nodes.new('ShaderNodeMix')
+            mix.data_type = 'RGBA'
+            mix.blend_type = 'MULTIPLY'
+            socket(mix.inputs, 'Factor', 'VALUE').default_value = 1.0
+            links.new(occlusion, socket(mix.inputs, 'A', 'RGBA'))
+            links.new(build.sampler.sample(ambient, None, (-800, -1700))[0], socket(mix.inputs, 'B', 'RGBA'))
+            occlusion = results['ambient_occlusion'] = socket(mix.outputs, 'Result', 'RGBA')
+        if 'base_color' in results:
+            shade = nodes.new('ShaderNodeMix')
+            shade.data_type = 'RGBA'
+            shade.blend_type = 'MULTIPLY'
+            socket(shade.inputs, 'Factor', 'VALUE').default_value = 1.0
+            links.new(results['base_color'], socket(shade.inputs, 'A', 'RGBA'))
+            links.new(occlusion, socket(shade.inputs, 'B', 'RGBA'))
+            build.shaded = socket(shade.outputs, 'Result', 'RGBA')
+
+
 def surface_normal(build, results, x):
     nodes, links = build.nodes, build.links
     normal = None
     if 'normal' in results:
         node = nodes.new('ShaderNodeNormalMap')
+        node.name = 'shader.normal_map'
         node.uv_map = build.sampler.uv_map
+        node.space = build.shading['normal_space']
         node.location = (x, -600)
-        links.new(results['normal'], node.inputs['Color'])
+        color = results['normal']
+        if build.shading['normal_format'] == 'DIRECTX':
+            color = flip_green(nodes, links, color)
+        links.new(color, node.inputs['Color'])
         normal = node.outputs['Normal']
     if 'height' in results:
         bump = nodes.new('ShaderNodeBump')
+        bump.name = 'shader.bump'
         bump.location = (x, -800)
         bump.inputs['Distance'].default_value = BUMP_DISTANCE
         links.new(results['height'], bump.inputs['Height'])
@@ -316,18 +391,26 @@ def build_tree(build, channels, layers, solo=None, raw=False):
         node.location = (-400, 300 - 250 * row)
         results[channel.key] = node.outputs[0]
     column = [0]
+    shader.name = 'shader.bsdf'
     results = compose(build, channels, layers, '', results, column)
+    build.shaded = None
+    combine_baked(build, results)
     end = 300 * column[0]
     output.location, shader.location = (end + 600, 0), (end + 300, 0)
     for key, name in SHADER_INPUTS.items():
         if key in results:
-            links.new(results[key], shader.inputs[name])
-    if 'emission' in results:
-        shader.inputs['Emission Strength'].default_value = 1.0
+            links.new(build.shaded if key == 'base_color' and build.shaded is not None else results[key], shader.inputs[name])
     normal = surface_normal(build, results, end)
     if normal is not None:
         links.new(normal, shader.inputs['Normal'])
-    surface = solo_shader(nodes, links, solo, results[solo.key], end + 300, raw) if solo else shader.outputs[0]
+    surface = shader.outputs[0]
+    if solo:
+        surface = solo_shader(nodes, links, solo, results[solo.key], end + 300, raw)
+    elif build.shading['shader'] == 'UNLIT' and 'base_color' in results:
+        unlit = nodes.new('ShaderNodeEmission')
+        unlit.location = (end + 300, 400)
+        links.new(build.shaded if build.shaded is not None else results['base_color'], unlit.inputs['Color'])
+        surface = unlit.outputs[0]
     links.new(surface, output.inputs['Surface'])
     return output
 
@@ -399,20 +482,38 @@ def set_build(data, tree, raw=False):
     project = data.id_data.devil_painter
     sampler = Sampler(tree.nodes, tree.links, numbers(data), lambda image, number: variant(data, image, number), project.uv_map)
     maps = {item.name: item.image for item in data.maps if item.image is not None}
-    return Build(tree.nodes, tree.links, sampler, None if raw else stroke_link(data), maps, False, 1.0, active_tile(data))
+    shading = dict(shader=data.shader, normal_format=project.normal_format, normal_space=project.normal_space)
+    return Build(tree.nodes, tree.links, sampler, None if raw else stroke_link(data), maps, False, 1.0, active_tile(data), shading)
 
 
 def rebuild(data, solo=None, raw=False):
     material = data.material
     build = set_build(data, material.node_tree, raw)
-    output = build_tree(build, set_channels(data), list(data.layers), solo or solo_channel(data), raw)
+    channels = set_channels(data)
+    output = build_tree(build, channels, list(data.layers) if data.visible else [], solo or solo_channel(data), raw)
+    material.surface_render_method = 'BLENDED' if any(channel.key == 'opacity' for channel in channels) else 'DITHERED'
     if not raw and solo is None and viewed_map(data) is not None:
         show_map(build, output, viewed_map(data))
     material[SIGNATURE_KEY] = '' if raw else signature(data)
 
 
 def update_values(data):
-    write_values(data.material.node_tree.nodes, set_channels(data), list(data.layers), brush_values(data))
+    nodes = data.material.node_tree.nodes
+    if not data.visible:
+        return
+    write_values(nodes, set_channels(data), list(data.layers), brush_values(data))
+    if 'shader.normal_map' in nodes:
+        nodes['shader.normal_map'].inputs['Strength'].default_value = data.normal_strength
+    if 'shader.bump' in nodes:
+        nodes['shader.bump'].inputs['Strength'].default_value = data.bump_strength
+    if 'shader.bsdf' in nodes:
+        nodes['shader.bsdf'].inputs['Emission Strength'].default_value = data.emission_strength
+    obj = data.id_data
+    project = obj.devil_painter
+    for layer in shown_layers(data.layers):
+        mapping = nodes.get(layer.uid + '.mapping')
+        if mapping is not None and layer.projection == 'TRIPLANAR' and project.use_physical:
+            mapping.inputs['Scale'].default_value = tuple(layer.tiling * axis / project.physical_size for axis in obj.scale)
 
 
 def sync(data):

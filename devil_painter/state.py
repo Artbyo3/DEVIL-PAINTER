@@ -33,4 +33,12 @@ class WorkspaceState:
     view_2d: bool = False
     setup_resolutions: dict = field(default_factory=dict)
     setup_udim: bool = True
+    setup_template: str = 'PBR Metal Rough'
+    setup_normal_format: str = 'OPENGL'
+    setup_normal_space: str = 'TANGENT'
+    setup_unwrap: str = 'SMART'
+    channels_all: bool = False
+    recent_colors: list = field(default_factory=list)
+    picking: str = ''
+    binding: str = ''
     bake_keys: set = field(default_factory=lambda: {'ao', 'curvature', 'thickness', 'position', 'world_normal', 'id'})
