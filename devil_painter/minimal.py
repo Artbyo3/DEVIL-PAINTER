@@ -8,7 +8,10 @@ from .blending import BLEND_MODES, CHANNEL, linear_to_srgb
 from .canvas import Layout, Rect
 from .document import PROJECTIONS, RESOLUTIONS, active_layer, children, editing_mask, set_channels, slot_value, uses_coordinates
 from .library import capture, texture_folder
+from .exporting import FORMAT_LABELS, SOURCES, TOKENS, find_template, is_custom
 from .masks import GENERATOR
+from .sets import tile_label
+from .tiles import numbers
 from .meshmaps import MESH_MAP, MESH_MAPS
 from .painting import TOOLS
 from .shell import GAP, distribute, zones
@@ -21,6 +24,7 @@ LINE_HEIGHT = 28
 THUMBNAIL = 32
 MAP_TILE = 56
 MAPS_SHARE = .3
+SETS_SHARE = .25
 INDENT = 14
 CHANNEL_OPACITY_WIDTH = 44
 BLEND_WIDTH = 78
@@ -123,21 +127,35 @@ def panel(layout, state, spec, x, top, width, view):
     return card, viewport, scroll
 
 
-def start_layout(layout, bounds, obj_name, resolution):
+SETUP_ROW = 30
+
+
+def start_layout(layout, state, bounds, obj_name, setup):
     s = layout.scale
-    w, h = 320 * s, 176 * s
+    rows, udim_found = setup
+    w, h = 460 * s, (196 + SETUP_ROW * max(1, len(rows))) * s
     card = Rect(bounds.x + (bounds.w - w) / 2, bounds.y + (bounds.h - h) / 2, w, h)
-    layout.cards.append((card, 'Devil Painter'))
+    layout.cards.append((card, 'New Devil Painter project'))
     layout.add('CLOSE', Rect(card.x + card.w - 32 * s, card.y + card.h - 32 * s, 24 * s, 24 * s), 'ICON', icon='CLOSE',
                tip='Close', shortcut='Ctrl Alt P')
-    layout.add('TARGET', Rect(card.x + 14 * s, card.y + card.h - 70 * s, card.w - 28 * s, 22 * s), 'NOTE',
-               label=obj_name or 'Select a mesh object to paint.')
-    chip_w = (card.w - 28 * s - 8 * s) / len(RESOLUTIONS)
-    for index, size in enumerate(RESOLUTIONS):
-        layout.add(f'RES_{size}', Rect(card.x + 14 * s + index * (chip_w + 4 * s), card.y + 58 * s, chip_w, 24 * s), 'CHIP',
-                   label=f'{size // 1024}K', active=size == resolution, tip=f'{size} x {size} textures')
-    layout.add('START', Rect(card.x + 14 * s, card.y + 14 * s, card.w - 28 * s, 30 * s), 'PRIMARY', icon='PAINT',
-               label='Start painting', tip='Create a layer stack for this mesh')
+    x, w = card.x + 14 * s, card.w - 28 * s
+    layout.add('TARGET', Rect(x, card.top - 64 * s, w, 22 * s), 'NOTE', label=obj_name or 'Select a mesh object to paint.')
+    layout.add('SETUP_HINT', Rect(x, card.top - 90 * s, w, 20 * s), 'NOTE', label='One texture set per material slot')
+    y = card.top - 92 * s
+    for index, (name, found) in enumerate(rows):
+        y -= SETUP_ROW * s
+        chosen = state.setup_resolutions.get(index, 2048)
+        layout.add(f'SETUP_SET.{index}', Rect(x, y, 150 * s, 24 * s), 'NOTE', label=name)
+        layout.add(f'SETUP_TILES.{index}', Rect(x + 154 * s, y, 120 * s, 24 * s), 'NOTE', label=tile_label(found))
+        chip_w = (w - 280 * s - 8 * s) / len(RESOLUTIONS)
+        for column, size in enumerate(RESOLUTIONS):
+            layout.add(f'RES.{index}.{size}', Rect(x + 280 * s + column * (chip_w + 4 * s), y, chip_w, 24 * s), 'CHIP', label=f'{size // 1024}K',
+                       active=size == chosen, tip=f'{size} x {size} pixels per tile for {name}')
+    if udim_found:
+        layout.add('SETUP_UDIM', Rect(x, card.y + 56 * s, w, 24 * s), 'TOGGLE', label='Use UDIM tiles from the UV layout', active=state.setup_udim,
+                   tip='Paint, bake, and export every UV tile the mesh uses')
+    layout.add('START', Rect(x, card.y + 14 * s, w, 30 * s), 'PRIMARY', icon='PAINT',
+               label='Start painting', tip='Create the project: texture sets, materials, and a first paint layer in each')
 
 
 def view_label(data):
@@ -165,8 +183,10 @@ def workspace_bar(layout, zone, data, obj_name, view_2d):
     bake = flat
     layout.add('CHANNELS', channels, 'DROPDOWN', label='Channels', text=str(len(set_channels(data))),
                tip=channel_names(data) + '. Choose which channels this texture set paints and exports')
+    count = len(numbers(data))
+    tile = f'  ·  tile {data.id_data.devil_painter.active_tile}' if count > 1 else ''
     layout.add('SET_NAME', Rect(zone.x + 12 * s, y, max(0.0, bake.x - zone.x - 24 * s), h), 'NOTE',
-               label=f'{obj_name}  ·  {data.resolution} px')
+               label=f'{obj_name}  ·  {data.name}  ·  {data.resolution} px{tile}')
 
 
 BRUSH_SLIDERS = (('BRUSH_FLOW', 'Flow', 'brush_flow', 1.0, 'How much paint each dab lays down; low flow builds up gradually'),
@@ -520,23 +540,60 @@ def maps_panel(layout, state, data):
     return ColumnPanel('MAPS', 'Mesh maps', (rows * (MAP_TILE + 20) + 12) * s if rows else (LINE_HEIGHT + 12) * s, fill_maps, 10 * s)
 
 
+def set_preview(data):
+    top = next((layer for layer in reversed(data.layers) if layer.kind != 'FOLDER'), None)
+    return layer_preview(top) if top is not None else None
+
+
+def fill_sets(layout, state, data, flow):
+    s = layout.scale
+    project = data.id_data.devil_painter
+    for index, item in enumerate(project.sets):
+        line = flow.line(ROW_HEIGHT * s)
+        if not flow.visible(line):
+            continue
+        row = Rect(line.x + 2 * s, line.y + 1 * s, line.w - 4 * s, line.h - 2 * s)
+        count = len(numbers(item))
+        flow.add(f'SET.{index}', row, 'ROW', label=item.name, text=f'{item.resolution // 1024}K' + (f' · {count} tiles' if count > 1 else ''),
+                 active=index == project.active_set, second=1.0 if index == project.active_set else 0.0, preview=set_preview(item),
+                 color=(.2, .2, .2, 1.0), tip='Paint this texture set. Clicking its faces in the viewport selects it too')
+        flow.add(f'SETRES.{index}', Rect(row.x + row.w - 112 * s, row.y + 9 * s, 50 * s, row.h - 18 * s), 'DROPDOWN',
+                 text=f'{item.resolution // 1024}K', tip='Change the resolution of this texture set')
+    tile_numbers = numbers(data)
+    if len(tile_numbers) > 1:
+        x, y, h = flow.field()
+        width = min(64 * s, (flow.viewport.w - 24 * s) / len(tile_numbers) - 4 * s)
+        for column, number in enumerate(tile_numbers):
+            flow.add(f'TILE.{number}', Rect(x + column * (width + 4 * s), y, width, h), 'CHIP', label=str(number),
+                     active=number == project.active_tile, tip=f'Paint UDIM tile {number}')
+
+
+def sets_panel(layout, state, data):
+    s = layout.scale
+    project = data.id_data.devil_painter
+    lines = len(project.sets) * ROW_HEIGHT + (LINE_HEIGHT if len(numbers(data)) > 1 else 0)
+    return ColumnPanel('SETS', 'Texture sets', (lines + 8) * s, fill_sets, 4 * s)
+
+
 def column_layout(layout, state, data, zone):
     s = layout.scale
-    panels = [layers_panel(layout, state, data)] + ([properties_panel(layout, state, data)] if data.layers else []) + [maps_panel(layout, state, data)]
+    flexible = [layers_panel(layout, state, data)] + ([properties_panel(layout, state, data)] if data.layers else [])
+    panels = [sets_panel(layout, state, data)] + flexible + [maps_panel(layout, state, data)]
     room = max(0.0, zone.h - len(panels) * HEADER * s - (len(panels) - 1) * GAP * s)
     wants = [0.0 if spec.key in state.collapsed else spec.body for spec in panels]
+    sets_view = min(wants[0], room * SETS_SHARE)
     maps_view = min(wants[-1], room * MAPS_SHARE)
-    room -= maps_view
-    views = distribute(wants[:-1], room, (state.split, 1 - state.split)[:len(panels) - 1]) + [maps_view]
+    room -= sets_view + maps_view
+    views = [sets_view] + distribute(wants[1:-1], room, (state.split, 1 - state.split)[:len(flexible)]) + [maps_view]
     layout.add('COLUMN_EDGE', Rect(zone.x - 6 * s, zone.y, 6 * s, zone.h), 'GRIP', tip='Drag to resize the column')
-    layout.splitter = (zone.top - HEADER * s, room)
+    layout.splitter = (zone.top - 2 * HEADER * s - sets_view - GAP * s, room)
     top = zone.top
     for index, (spec, view) in enumerate(zip(panels, views)):
         card, viewport, scroll = panel(layout, state, spec, zone.x, top, zone.w, view)
         if view > 0:
             spec.fill(layout, state, data, Flow(layout, viewport, scroll, spec.pad))
         top = card.y - GAP * s
-        if index == 0 and len(panels) > 2 and all(wants[:2]) and sum(wants[:2]) > room:
+        if index == 1 and len(flexible) > 1 and all(wants[1:3]) and sum(wants[1:3]) > room:
             layout.add('SPLITTER', Rect(zone.x, top, zone.w, GAP * s), 'GRIP', tip='Drag to share space between the panels')
 
 
@@ -693,24 +750,81 @@ def bake_popover(layout, state, bounds, data):
     return card
 
 
+EXPORT_WIDTH = 600
+SOURCE_CELL = 74
+
+
+def output_row(layout, x, y, w, index, item, editable, s):
+    h = 24 * s
+    if editable:
+        layout.add(f'OUT_NAME.{index}', Rect(x, y, 120 * s, h), 'FIELD', text=item['name'], tip='Output name, used by the {output} token')
+    else:
+        layout.add(f'OUT_LABEL.{index}', Rect(x, y, 120 * s, h), 'NOTE', label=item['name'])
+    cell_x = x + 124 * s
+    for slot in range(4):
+        rect = Rect(cell_x + slot * (SOURCE_CELL + 2) * s, y, SOURCE_CELL * s, h)
+        text = SOURCES[item['sources'][slot]][0] if slot < len(item['sources']) else '-'
+        if editable:
+            layout.add(f'OUT_SRC.{index}.{slot}', rect, 'DROPDOWN', text=text, tip='RGBA'[slot] + ' channel of this file')
+        else:
+            layout.add(f'OUT_CELL.{index}.{slot}', rect, 'NOTE', label=text)
+    tail = cell_x + 4 * (SOURCE_CELL + 2) * s + 4 * s
+    if editable:
+        layout.add(f'OUT_FORMAT.{index}', Rect(tail, y, 56 * s, h), 'DROPDOWN', text=FORMAT_LABELS[item['format']], tip='File format')
+        layout.add(f'OUT_DEPTH.{index}', Rect(tail + 60 * s, y, 44 * s, h), 'DROPDOWN', text=item['depth'], tip='Bits per channel')
+        layout.add(f'OUT_REMOVE.{index}', Rect(x + w - 20 * s, y, 20 * s, h), 'ICON', icon='CLOSE', tip='Remove this output')
+    else:
+        layout.add(f'OUT_INFO.{index}', Rect(tail, y, w - (tail - x), h), 'NOTE', label=f'{FORMAT_LABELS[item["format"]]} {item["depth"]}')
+
+
 def export_popover(layout, state, bounds, data, directory):
     s = layout.scale
-    card = place_popover(bounds, state.popover.anchor, 360 * s, 150 * s, s)
+    project = data.id_data.devil_painter
+    template = find_template(project.export_template)
+    editable = is_custom(template['name'])
+    lines = len(template['outputs']) + len(project.sets) + 7 + (1 if editable else 0)
+    card = place_popover(bounds, state.popover.anchor, EXPORT_WIDTH * s, (lines * LINE_HEIGHT + 40) * s, s)
     x, w = card.x + 14 * s, card.w - 28 * s
-    layout.add('EXPORT_TITLE', Rect(x, card.top - 34 * s, w, 22 * s), 'NOTE', label='Export textures')
+    y = card.top - 34 * s
+    layout.add('EXPORT_TITLE', Rect(x, y, w, 22 * s), 'NOTE', label='Export textures')
+    y -= LINE_HEIGHT * s
+    layout.add('EXPORT_TEMPLATE', Rect(x, y, w - 190 * s, 24 * s), 'DROPDOWN', label='Template', text=template['name'],
+               tip='Which files to write and how channels pack into them')
+    layout.add('TEMPLATE_DUPLICATE', Rect(x + w - 184 * s, y, 120 * s, 24 * s), 'CHIP', label='Copy to custom', tip='Make an editable copy of this template')
+    if editable:
+        layout.add('TEMPLATE_DELETE', Rect(x + w - 58 * s, y, 58 * s, 24 * s), 'CHIP', label='Delete', tip='Delete this custom template')
+    for index, item in enumerate(template['outputs']):
+        y -= LINE_HEIGHT * s
+        output_row(layout, x, y, w, index, item, editable, s)
+    if editable:
+        y -= LINE_HEIGHT * s
+        layout.add('OUT_ADD', Rect(x, y, 120 * s, 24 * s), 'CHIP', label='+ Output', tip='Add a file to this template')
+    for index, item in enumerate(project.sets):
+        y -= LINE_HEIGHT * s
+        count = len(numbers(item))
+        layout.add(f'EXPORT_SET.{index}', Rect(x, y, w, 24 * s), 'TOGGLE', active=item.export,
+                   label=f'{item.name}  ·  {item.resolution} px' + (f'  ·  {count} UDIM tiles' if count > 1 else ''), tip='Export this texture set')
+    y -= LINE_HEIGHT * s
+    depth = 'From template' if project.export_depth == 'TEMPLATE' else project.export_depth + '-bit'
+    layout.add('EXPORT_DEPTH', Rect(x, y, 200 * s, 24 * s), 'DROPDOWN', label='Bit depth', text=depth,
+               tip='Override the bit depth; formats that cannot hold it use their closest depth')
+    y -= LINE_HEIGHT * s
+    editing = state.text is not None and state.text.key == 'EXPORT_PATTERN'
+    layout.add('EXPORT_PATTERN', Rect(x, y, w, 24 * s), 'FIELD', text=state.text.text if editing else project.export_pattern,
+               caret=state.text.cursor if editing else -1, tip='File names. Tokens: ' + ' '.join(TOKENS))
+    y -= LINE_HEIGHT * s
     editing = state.text is not None and state.text.key == 'EXPORT_DIR'
-    layout.add('EXPORT_DIR', Rect(x, card.top - 66 * s, w - 76 * s, 24 * s), 'FIELD', text=state.text.text if editing else directory,
+    layout.add('EXPORT_DIR', Rect(x, y, w - 76 * s, 24 * s), 'FIELD', text=state.text.text if editing else directory,
                caret=state.text.cursor if editing else -1, tip='Folder for the textures')
-    layout.add('BROWSE', Rect(x + w - 70 * s, card.top - 66 * s, 70 * s, 24 * s), 'CHIP', label='Browse', tip='Pick a folder')
-    layout.add('EXPORT_INFO', Rect(x, card.top - 94 * s, w, 20 * s), 'NOTE', label=f'{channel_names(data)}  ·  PNG  ·  {data.resolution} px')
-    layout.add('EXPORT_RUN', Rect(x, card.y + 12 * s, w, 28 * s), 'PRIMARY', icon='SAVE', label='Export', tip='Write the textures now')
+    layout.add('BROWSE', Rect(x + w - 70 * s, y, 70 * s, 24 * s), 'CHIP', label='Browse', tip='Pick a folder')
+    layout.add('EXPORT_RUN', Rect(x, card.y + 12 * s, w, 28 * s), 'PRIMARY', icon='SAVE', label='Export', tip='Bake and write the textures now')
     return card
 
 
-def painter_layout(bounds, scale, state, data, obj_name, tool, brush, directory):
+def painter_layout(bounds, scale, state, data, obj_name, tool, brush, directory, setup):
     layout = Layout(scale, MinimalMetrics.resolve(), zones(bounds, scale, state.column_width, state.shelf_open))
     if data is None:
-        start_layout(layout, bounds, obj_name, state.resolution)
+        start_layout(layout, state, bounds, obj_name, setup)
     else:
         workspace_bar(layout, layout.zones.bar, data, obj_name, state.view_2d)
         tool_strip(layout, layout.zones.strip, tool, brush, data)

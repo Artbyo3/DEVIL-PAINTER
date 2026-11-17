@@ -1,10 +1,8 @@
 from dataclasses import dataclass
-import bpy
-from . import compositing
-from .baking import bake_scene
+from .baking import bake_pass, emission_tree
 from .signals import map_signal
+from .tiles import create, variant
 
-BAKE_MARGIN = 16
 CAGE_EXTRUSION = .1
 
 
@@ -25,69 +23,42 @@ def object_size(obj):
     return max(max(obj.dimensions), 1e-3)
 
 
-def map_image(obj, data, key):
+def map_key_image(obj, data, key):
     item = data.maps.get(key)
     if item is None:
         item = data.maps.add()
         item.name = key
-    image = item.image
-    if image is None or tuple(image.size) != (data.resolution, data.resolution):
-        image = bpy.data.images.new(f'DP {obj.name} {key} map', data.resolution, data.resolution, alpha=True)
-        image.colorspace_settings.name = 'Non-Color'
-        item.image = image
-    image.generated_color = (0.0, 0.0, 0.0, 0.0)
-    image.source = 'GENERATED'
-    return image
+    if item.image is None or tuple(item.image.size) != (data.resolution, data.resolution):
+        item.image = create(data, f'DP {obj.name} {data.name} {key} map', (0.0, 0.0, 0.0, 0.0), True)
+    return item.image
 
 
-def target_node(tree, image):
-    target = tree.nodes.new('ShaderNodeTexImage')
-    target.image = image
-    tree.nodes.active = target
-    return target
+def store(data, key_image, number, pixels):
+    image = variant(data, key_image, number)
+    image.pixels.foreach_set(pixels.ravel())
+    image.update()
+    image.pack()
 
 
-def bake_signal(tree, key, size, image):
-    nodes, links = tree.nodes, tree.links
-    nodes.clear()
-    output = nodes.new('ShaderNodeOutputMaterial')
-    emission = nodes.new('ShaderNodeEmission')
-    links.new(map_signal(nodes, links, key, size), emission.inputs['Color'])
-    links.new(emission.outputs[0], output.inputs['Surface'])
-    target_node(tree, image)
-    bpy.ops.object.bake(type='EMIT', margin=BAKE_MARGIN, use_clear=True, target='IMAGE_TEXTURES')
-
-
-def bake_normal(context, obj, data, image):
-    source = data.bake_source
-    tree = data.material.node_tree
-    tree.nodes.clear()
-    target_node(tree, image)
-    source.hide_render = False
-    source.select_set(True)
-    context.view_layer.objects.active = obj
-    bpy.ops.object.bake(type='NORMAL', normal_space='TANGENT', use_selected_to_active=True, cage_extrusion=CAGE_EXTRUSION * object_size(obj),
-                        margin=BAKE_MARGIN, use_clear=True, target='IMAGE_TEXTURES')
-    source.select_set(False)
-
-
-def bake_maps(context, obj, data, keys):
+def bake_maps(context, obj, project, wanted, keys, source, samples):
     size = object_size(obj)
     baked = []
-    with bake_scene(context, obj, data.bake_samples):
-        try:
-            for key in keys:
-                if MESH_MAP[key].needs_source and data.bake_source is None:
-                    continue
-                image = map_image(obj, data, key)
-                if key == 'normal':
-                    bake_normal(context, obj, data, image)
-                else:
-                    bake_signal(data.material.node_tree, key, size, image)
-                image.pack()
-                baked.append(key)
-        finally:
-            data.material[compositing.SIGNATURE_KEY] = ''
-            compositing.sync(data)
+    for key in keys:
+        if MESH_MAP[key].needs_source and source is None:
+            continue
+        if key == 'normal':
+            results = bake_pass(context, obj, project, wanted, lambda data: emission_tree(data.material.node_tree, (0.5, 0.5, 1.0, 1.0)),
+                                'NORMAL', samples, (source,), normal_space='TANGENT', use_selected_to_active=True,
+                                cage_extrusion=CAGE_EXTRUSION * size)
+        else:
+            def prepare(data, key=key):
+                tree = data.material.node_tree
+                emission_tree(tree, (0.0, 0.0, 0.0, 1.0))
+                emission = next(node for node in tree.nodes if node.type == 'EMISSION')
+                tree.links.new(map_signal(tree.nodes, tree.links, key, size), emission.inputs['Color'])
+            results = bake_pass(context, obj, project, wanted, prepare, 'EMIT', samples)
+        for (index, number), pixels in results.items():
+            data = project.sets[index]
+            store(data, map_key_image(obj, data, key), number, pixels)
+        baked.append(key)
     return baked
-

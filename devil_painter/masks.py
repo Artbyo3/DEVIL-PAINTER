@@ -43,17 +43,15 @@ def operate(nodes, links, operation, first, second, name=''):
     return node.outputs[0]
 
 
-def generator_mask(nodes, links, layer, maps, live, size):
+def generator_mask(nodes, links, layer, build):
     generator = GENERATOR[layer.generator]
-    if live:
-        source = map_signal(nodes, links, generator.map_key, size)
+    if build.live:
+        source = map_signal(nodes, links, generator.map_key, build.size)
     else:
-        image = maps.get(generator.map_key)
+        image = build.maps.get(generator.map_key)
         if image is None:
             return None
-        texture = nodes.new('ShaderNodeTexImage')
-        texture.image = image
-        source = texture.outputs['Color']
+        source = build.sampler.sample(image)[0]
     split = nodes.new('ShaderNodeSeparateColor')
     links.new(source, split.inputs['Color'])
     signal = operate(nodes, links, 'MULTIPLY', operate(nodes, links, 'ADD', split.outputs[generator.channel], generator.offset), generator.gain)

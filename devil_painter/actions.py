@@ -1,7 +1,6 @@
 import json
 import bpy
-import numpy
-from . import baking, brushes, compositing, library, meshmaps, painting, smart, strokes
+from . import brushes, compositing, exporting, library, meshmaps, painting, sets, smart, strokes, tiles
 from .masks import GENERATOR, GENERATOR_FIELDS
 from .meshmaps import MESH_MAP
 from .blending import BLEND_MODES, CHANNEL
@@ -13,15 +12,7 @@ LAYER_FIELDS = ('kind', 'visible', 'opacity', 'projection', 'tiling', 'material'
 
 
 def image_for(obj, data, label, opaque):
-    size = data.resolution
-    image = bpy.data.images.new(f'DP {obj.name} {label}', size, size, alpha=True)
-    image.alpha_mode = 'STRAIGHT'
-    pixels = numpy.zeros(size * size * 4, dtype=numpy.float32)
-    if opaque:
-        pixels[:] = 1.0
-    image.pixels.foreach_set(pixels)
-    image.pack()
-    return image
+    return tiles.create(data, f'DP {obj.name} {data.name} {label}', (1.0, 1.0, 1.0, 1.0) if opaque else (0.0, 0.0, 0.0, 0.0))
 
 
 def has_uvs(obj):
@@ -43,7 +34,7 @@ def prepare(obj, data):
     strokes.ensure_buffer(obj, data)
 
 
-def start(context, obj, resolution):
+def start(context, obj, resolutions, use_udim):
     if obj is None or obj.type != 'MESH':
         raise ValueError('Select a mesh object to paint.')
     unwrapped = ''
@@ -55,25 +46,61 @@ def start(context, obj, resolution):
         bpy.ops.uv.smart_project()
         bpy.ops.object.mode_set(mode='OBJECT')
         unwrapped = ' It had no UVs, so it was unwrapped automatically.'
-    data = obj.devil_painter
-    data.resolution = resolution
-    data.enabled = True
-    data.channels.clear()
-    add_set_channels(data)
-    prepare(obj, data)
-    material = bpy.data.materials.new(f'Devil Painter {obj.name}')
-    data.material = material
-    if obj.material_slots:
-        for slot in obj.material_slots:
-            slot.material = material
-    else:
-        obj.data.materials.append(material)
+    project = obj.devil_painter
+    project.sets.clear()
+    project.uv_map = sets.uv_name(obj)
+    project.active_set, project.active_tile = 0, tiles.FIRST_TILE
+    layout = sets.detect(obj, use_udim)
+    if not obj.material_slots:
+        obj.data.materials.append(None)
+    for index, (name, found) in enumerate(layout):
+        data = project.sets.add()
+        data.name, data.slot = name, index
+        data.resolution = resolutions[index] if index < len(resolutions) else resolutions[-1]
+        for number in found:
+            data.tiles.add().number = number
+        add_set_channels(data)
+        prepare(obj, data)
+        data.material = bpy.data.materials.new(f'Devil Painter {obj.name} {name}')
+        obj.material_slots[index].material = data.material
+    project.enabled = True
     painting.enter_paint_mode(context, obj)
-    add_layer(context, obj, data, 'PAINT')
+    for data in project.sets:
+        project.active_set = list(project.sets).index(data)
+        add_layer(context, obj, data, 'PAINT')
+    project.active_set = 0
+    project.active_tile = tiles.numbers(project.sets[0])[0]
     painting.activate_tool(context, 'PAINT')
+    sets.mask_faces(obj, project)
+    painting.update_canvas(context, project.sets[0])
+    brushes.sync(context, project.sets[0])
+    tile_count = sum(len(tiles.numbers(data)) for data in project.sets)
+    return f'Painting {obj.name}: {len(project.sets)} texture sets, {tile_count} tiles.' + unwrapped
+
+
+def activate(context, obj, project, index, tile):
+    if index == project.active_set and tile == project.active_tile:
+        return ''
+    project.active_set = index
+    data = project.sets[index]
+    project.active_tile = tile if tile in tiles.numbers(data) else tiles.numbers(data)[0]
+    sets.mask_faces(obj, project)
     painting.update_canvas(context, data)
+    compositing.sync(data)
     brushes.sync(context, data)
-    return f'Painting {obj.name} at {resolution} px.' + unwrapped
+    count = len(tiles.numbers(data))
+    return f'Painting {data.name}' + (f', tile {project.active_tile}.' if count > 1 else '.')
+
+
+def set_resolution(context, obj, data, size):
+    keys = [image for layer in data.layers for image in owned_images(layer)] + [item.image for item in data.maps if item.image is not None]
+    for image in tiles.every_image(data, keys):
+        image.scale(size, size)
+        image.pack()
+    data.resolution = size
+    if data.stroke is not None:
+        data.stroke.scale(size, size)
+    return refresh(context, obj, data, f'{data.name} now paints at {size} px.')
 
 
 def new_layer(data, kind):
@@ -142,9 +169,9 @@ def owned_images(layer):
     return [image for image in (layer.image, layer.mask, *canvases) if image is not None]
 
 
-def remove_images(layer):
+def remove_images(data, layer):
     for image in owned_images(layer):
-        bpy.data.images.remove(image)
+        tiles.remove(data, image)
 
 
 def delete_layer(context, obj, data):
@@ -156,7 +183,7 @@ def delete_layer(context, obj, data):
     doomed = {layer.uid, *descendants(data.layers, layer.uid)}
     for position in range(len(data.layers) - 1, -1, -1):
         if data.layers[position].uid in doomed:
-            remove_images(data.layers[position])
+            remove_images(data, data.layers[position])
             data.layers.remove(position)
     siblings = children(data.layers, parent)
     data.active_uid = siblings[-1].uid if siblings else find_layer(data, parent).uid if parent else data.layers[-1].uid if data.layers else ''
@@ -244,16 +271,10 @@ def copy_layer(obj, data, source, parent, position):
         for key, value in slot_values.items():
             setattr(slot, key, value)
         if values['kind'] == 'PAINT' and slot.image is not None:
-            canvas = slot.image.copy()
-            canvas.name = f'DP {obj.name} {layer.uid} {slot_name}'
-            canvas.pack()
-            slot.image = canvas
+            slot.image = tiles.copy(data, slot.image, f'DP {obj.name} {data.name} {layer.uid} {slot_name}')
     for key, image in images.items():
         if image is not None:
-            copy = image.copy()
-            copy.name = f'DP {obj.name} {layer.uid}' + (' mask' if key == 'mask' else '')
-            copy.pack()
-            setattr(layer, key, copy)
+            setattr(layer, key, tiles.copy(data, image, f'DP {obj.name} {data.name} {layer.uid}' + (' mask' if key == 'mask' else '')))
     new_uid = layer.uid
     if position is not None:
         data.layers.move(len(data.layers) - 1, position)
@@ -346,8 +367,10 @@ def set_solo(context, obj, data, key):
 
 
 def bake_mesh_maps(context, obj, data, keys):
-    baked = meshmaps.bake_maps(context, obj, data, keys)
+    project = obj.devil_painter
+    baked = meshmaps.bake_maps(context, obj, project, list(range(len(project.sets))), keys, data.bake_source, data.bake_samples)
     painting.enter_paint_mode(context, obj)
+    sets.mask_faces(obj, project)
     if not baked:
         return 'Nothing to bake. Pick a high-poly source for the normal map.'
     return refresh(context, obj, data, f'Baked {len(baked)} mesh maps.')
@@ -385,7 +408,7 @@ def remove_mask(context, obj, data):
     mask = layer.mask
     layer.mask = None
     if mask is not None:
-        bpy.data.images.remove(mask)
+        tiles.remove(data, mask)
     data.target = 'CONTENT'
     return refresh(context, obj, data, f'Mask removed from {layer.name}.')
 
@@ -396,6 +419,13 @@ def set_target(context, obj, data, target):
     return 'Painting edits the mask.' if target == 'MASK' else 'Painting edits the layer.'
 
 
-def export(context, obj, data, directory):
-    written = baking.export(context, obj, data, directory, bpy.path.clean_name(obj.name))
+def export(context, obj, project, directory):
+    wanted = [index for index, data in enumerate(project.sets) if data.export]
+    if not wanted:
+        return 'Pick at least one texture set to export.'
+    template = exporting.find_template(project.export_template)
+    written = exporting.export(context, obj, project, template, wanted, directory, project.export_pattern, project.export_depth)
+    painting.enter_paint_mode(context, obj)
+    sets.mask_faces(obj, project)
+    painting.update_canvas(context, project.sets[project.active_set])
     return f'Exported {len(written)} textures to {directory}.'

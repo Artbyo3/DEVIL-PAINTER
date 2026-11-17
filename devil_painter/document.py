@@ -34,6 +34,16 @@ class DEVIL_PAINTER_PG_map(bpy.types.PropertyGroup):
     image: bpy.props.PointerProperty(type=bpy.types.Image)
 
 
+class DEVIL_PAINTER_PG_tile(bpy.types.PropertyGroup):
+    number: bpy.props.IntProperty(default=1001, min=1001, max=2000)
+
+
+class DEVIL_PAINTER_PG_tile_image(bpy.types.PropertyGroup):
+    key: bpy.props.PointerProperty(type=bpy.types.Image)
+    number: bpy.props.IntProperty(default=1001)
+    image: bpy.props.PointerProperty(type=bpy.types.Image)
+
+
 def is_mesh(self, obj):
     return obj.type == 'MESH'
 
@@ -59,7 +69,10 @@ class DEVIL_PAINTER_PG_layer(bpy.types.PropertyGroup):
 
 
 class DEVIL_PAINTER_PG_texture_set(bpy.types.PropertyGroup):
-    enabled: bpy.props.BoolProperty(default=False)
+    slot: bpy.props.IntProperty(default=0, min=0)
+    tiles: bpy.props.CollectionProperty(type=DEVIL_PAINTER_PG_tile)
+    tile_images: bpy.props.CollectionProperty(type=DEVIL_PAINTER_PG_tile_image)
+    export: bpy.props.BoolProperty(default=True)
     resolution: bpy.props.IntProperty(default=2048, min=64, max=8192)
     channels: bpy.props.CollectionProperty(type=DEVIL_PAINTER_PG_channel)
     layers: bpy.props.CollectionProperty(type=DEVIL_PAINTER_PG_layer)
@@ -85,17 +98,40 @@ class DEVIL_PAINTER_PG_texture_set(bpy.types.PropertyGroup):
     maps: bpy.props.CollectionProperty(type=DEVIL_PAINTER_PG_map)
     bake_samples: bpy.props.IntProperty(default=16, min=1, max=256)
     bake_source: bpy.props.PointerProperty(type=bpy.types.Object, poll=is_mesh)
+
+
+class DEVIL_PAINTER_PG_project(bpy.types.PropertyGroup):
+    enabled: bpy.props.BoolProperty(default=False)
+    sets: bpy.props.CollectionProperty(type=DEVIL_PAINTER_PG_texture_set)
+    active_set: bpy.props.IntProperty(default=0, min=0)
+    active_tile: bpy.props.IntProperty(default=1001, min=1001, max=2000)
+    uv_map: bpy.props.StringProperty()
     export_directory: bpy.props.StringProperty(default='', subtype='DIR_PATH')
+    export_template: bpy.props.StringProperty(default='Standard PBR')
+    export_depth: bpy.props.StringProperty(default='TEMPLATE')
+    export_pattern: bpy.props.StringProperty(default='{mesh}_{set}_{output}')
 
 
-CLASSES = (DEVIL_PAINTER_PG_slot, DEVIL_PAINTER_PG_channel, DEVIL_PAINTER_PG_map, DEVIL_PAINTER_PG_layer, DEVIL_PAINTER_PG_texture_set)
+CLASSES = (DEVIL_PAINTER_PG_slot, DEVIL_PAINTER_PG_channel, DEVIL_PAINTER_PG_map, DEVIL_PAINTER_PG_tile, DEVIL_PAINTER_PG_tile_image,
+           DEVIL_PAINTER_PG_layer, DEVIL_PAINTER_PG_texture_set, DEVIL_PAINTER_PG_project)
+
+
+def project_of(obj):
+    if obj is None or obj.type != 'MESH':
+        return None
+    project = obj.devil_painter
+    return project if project.enabled and project.sets else None
 
 
 def texture_set(obj):
-    if obj is None or obj.type != 'MESH':
-        return None
-    data = obj.devil_painter
-    return data if data.enabled else None
+    project = project_of(obj)
+    return project.sets[min(project.active_set, len(project.sets) - 1)] if project is not None else None
+
+
+def active_tile(data):
+    project = data.id_data.devil_painter
+    numbers = [tile.number for tile in data.tiles] or [1001]
+    return project.active_tile if project.active_tile in numbers else numbers[0]
 
 
 def set_channels(data):
@@ -195,7 +231,7 @@ def paint_target(data):
 def register():
     for cls in CLASSES:
         bpy.utils.register_class(cls)
-    bpy.types.Object.devil_painter = bpy.props.PointerProperty(type=DEVIL_PAINTER_PG_texture_set)
+    bpy.types.Object.devil_painter = bpy.props.PointerProperty(type=DEVIL_PAINTER_PG_project)
 
 
 def unregister():

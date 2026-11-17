@@ -1,7 +1,7 @@
 from pathlib import Path
 import bpy
 from . import library
-from .document import texture_set
+from .document import project_of, texture_set
 
 
 class DEVIL_PAINTER_OT_choose_export_folder(bpy.types.Operator):
@@ -15,12 +15,12 @@ class DEVIL_PAINTER_OT_choose_export_folder(bpy.types.Operator):
         return texture_set(context.view_layer.objects.active) is not None
 
     def invoke(self, context, event):
-        self.directory = texture_set(context.view_layer.objects.active).export_directory
+        self.directory = project_of(context.view_layer.objects.active).export_directory
         context.window_manager.fileselect_add(self)
         return {'RUNNING_MODAL'}
 
     def execute(self, context):
-        texture_set(context.view_layer.objects.active).export_directory = self.directory
+        project_of(context.view_layer.objects.active).export_directory = self.directory
         return {'FINISHED'}
 
 

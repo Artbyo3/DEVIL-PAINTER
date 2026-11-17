@@ -19,7 +19,6 @@ class TextEdit:
 
 @dataclass
 class WorkspaceState:
-    resolution: int = 2048
     collapsed: set = field(default_factory=set)
     scroll: dict = field(default_factory=dict)
     popover: Optional[Popover] = None
@@ -32,4 +31,6 @@ class WorkspaceState:
     shelf_tab: str = 'MATERIALS'
     armed: str = ''
     view_2d: bool = False
+    setup_resolutions: dict = field(default_factory=dict)
+    setup_udim: bool = True
     bake_keys: set = field(default_factory=lambda: {'ao', 'curvature', 'thickness', 'position', 'world_normal', 'id'})

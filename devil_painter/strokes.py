@@ -1,7 +1,8 @@
 import bpy
 import numpy
 from . import compositing
-from .document import find_layer, set_channels, slot_value
+from .document import active_tile, find_layer, set_channels, slot_value
+from .tiles import blank, create, variant
 
 HISTORY_LIMIT = 80
 _history = []
@@ -9,20 +10,10 @@ _future = []
 _state = dict(redoing=False)
 
 
-def blank_image(name, size, fill):
-    image = bpy.data.images.new(name, size, size, alpha=True)
-    image.alpha_mode = 'STRAIGHT'
-    pixels = numpy.empty((size * size, 4), dtype=numpy.float32)
-    pixels[:] = fill
-    image.pixels.foreach_set(pixels.ravel())
-    image.pack()
-    return image
-
-
 def ensure_buffer(obj, data):
     image = data.stroke
     if image is None or tuple(image.size) != (data.resolution, data.resolution):
-        data.stroke = blank_image(f'DP {obj.name} stroke', data.resolution, (0.0, 0.0, 0.0, 0.0))
+        data.stroke = blank(f'DP {obj.name} {data.name} stroke', data.resolution, (0.0, 0.0, 0.0, 0.0))
     return data.stroke
 
 
@@ -50,9 +41,7 @@ def ensure_canvases(obj, data):
             slot = layer.slots[channel.key]
             if channel.key == 'base_color' or not slot.enabled or (slot.source == 'IMAGE' and slot.image is not None):
                 continue
-            canvas = blank_image(f'DP {obj.name} {layer.uid} {slot.name}', data.resolution, (*rgb(slot_value(slot)), 1.0))
-            canvas.colorspace_settings.name = 'Non-Color'
-            slot.source, slot.image = 'IMAGE', canvas
+            slot.source, slot.image = 'IMAGE', create(data, f'DP {obj.name} {data.name} {layer.uid} {slot.name}', (*rgb(slot_value(slot)), 1.0), True)
 
 
 def merge(obj, data):
@@ -67,18 +56,22 @@ def merge(obj, data):
     region = (slice(rows[0], rows[-1] + 1), slice(columns[0], columns[-1] + 1))
     added = coverage[region][..., None]
     snapshot = []
-    base = read(layer.image)
+    tile = active_tile(data)
+    painted = variant(data, layer.image, tile)
+    base = read(painted)
+    if base.shape != stroke.shape:
+        return False
     crop = base[region]
-    snapshot.append((layer.image.name, region, crop.copy()))
+    snapshot.append((painted.name, region, crop.copy()))
     alpha = crop[..., 3:]
     total = alpha + added * (1 - alpha)
     weight = added / numpy.maximum(total, 1e-4)
     crop[..., :3] += weight * (stroke[region][..., :3] - crop[..., :3])
     crop[..., 3:] = total
-    write(layer.image, base)
+    write(painted, base)
     for channel in set_channels(data):
         brush_slot, slot = data.brush_slots[channel.key], layer.slots[channel.key]
-        canvas = slot.image if slot.source == 'IMAGE' else None
+        canvas = variant(data, slot.image, tile) if slot.source == 'IMAGE' else None
         if channel.key == 'base_color' or not (brush_slot.enabled and slot.enabled) or canvas is None:
             continue
         values = read(canvas)

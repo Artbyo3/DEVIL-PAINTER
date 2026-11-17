@@ -1,6 +1,6 @@
 import bpy
 from bpy.app.handlers import persistent
-from . import actions, document, operators, strokes, thumbnails
+from . import actions, document, operators, strokes, thumbnails, tiles
 from .editor import DEVIL_PAINTER_OT_editor, close_active
 
 
@@ -20,13 +20,15 @@ def on_load(_):
 @persistent
 def on_save(_):
     for obj in bpy.data.objects:
-        data = document.texture_set(obj)
-        if data is None:
+        project = document.project_of(obj)
+        if project is None:
             continue
-        images = [image for layer in data.layers for image in actions.owned_images(layer)] + ([data.stroke] if data.stroke else [])
-        for image in images:
-            if image.is_dirty or image.packed_file is None:
-                image.pack()
+        for data in project.sets:
+            keys = [image for layer in data.layers for image in actions.owned_images(layer)] + [item.image for item in data.maps]
+            images = tiles.every_image(data, keys) + ([data.stroke] if data.stroke else [])
+            for image in images:
+                if image.is_dirty or image.packed_file is None:
+                    image.pack()
 
 
 classes = (DEVIL_PAINTER_OT_editor,) + operators.CLASSES

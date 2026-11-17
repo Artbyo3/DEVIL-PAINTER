@@ -3,7 +3,8 @@ import time
 import bpy
 import numpy
 from .blending import CHANNEL
-from .document import add_slots, children
+from .document import add_slots, children, texture_set
+from .tiles import adopt
 from .library import BUILTIN_MATERIALS, apply_definition, apply_generator, capture, library_root, material, pattern, plain, save_settings, settings
 from .masks import GENERATOR_FIELDS, SMART_MASKS
 
@@ -92,7 +93,7 @@ def save_smart(layer):
     slug = re.sub(r'[^A-Za-z0-9]+', '_', layer.name).strip('_') or 'smart'
     folder = library_root() / 'smart' / f'{slug}_{int(time.time() * 1000)}'
     folder.mkdir(parents=True)
-    layers = [layer] if layer.kind != 'FOLDER' else subtree(layer.id_data.devil_painter.layers, layer)
+    layers = [layer] if layer.kind != 'FOLDER' else subtree(texture_set(layer.id_data).layers, layer)
     entries, index = [], {}
     for item in layers:
         parent = index.get(item.parent, -1)
@@ -118,7 +119,7 @@ def remove_smart(index):
     return name
 
 
-def owned_image(data, path, name, data_values):
+def owned_image(data, path, name, data_values, fill=(0.0, 0.0, 0.0, 0.0)):
     image = bpy.data.images.load(path)
     image.name = name
     image.alpha_mode = 'STRAIGHT'
@@ -127,7 +128,7 @@ def owned_image(data, path, name, data_values):
     if tuple(image.size) != (data.resolution, data.resolution):
         image.scale(data.resolution, data.resolution)
     image.pack()
-    return image
+    return adopt(data, image, fill)
 
 
 def build(obj, data, definition, root, blank):
@@ -148,13 +149,13 @@ def build(obj, data, definition, root, blank):
             layer.image = owned_image(data, item['paint'], f'DP {obj.name} {uid}', False) if item['paint'] else blank(obj, data, uid, False)
             for slot in layer.slots:
                 if slot.source == 'IMAGE' and slot.image is not None:
-                    slot.image = owned_image(data, slot.image.filepath, f'DP {obj.name} {uid} {slot.name}', True)
+                    slot.image = owned_image(data, slot.image.filepath, f'DP {obj.name} {uid} {slot.name}', True, (0.5, 0.5, 0.5, 1.0))
         if item['mask']:
-            layer.mask = owned_image(data, item['mask'], f'DP {obj.name} {uid} mask', False)
+            layer.mask = owned_image(data, item['mask'], f'DP {obj.name} {uid} mask', False, (1.0, 1.0, 1.0, 1.0))
         uids.append(uid)
     settings_root = definition.get('root')
     if settings_root:
         root.opacity = settings_root['opacity']
         apply_generator(root, settings_root['generator'])
         if settings_root['mask']:
-            root.mask = owned_image(data, settings_root['mask'], f'DP {obj.name} {root.uid} mask', False)
+            root.mask = owned_image(data, settings_root['mask'], f'DP {obj.name} {root.uid} mask', False, (1.0, 1.0, 1.0, 1.0))

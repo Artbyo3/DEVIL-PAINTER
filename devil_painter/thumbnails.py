@@ -7,7 +7,7 @@ import bpy.utils.previews
 import gpu
 import numpy
 from .blending import CHANNELS, srgb_to_linear
-from .compositing import build_tree, write_values
+from .compositing import Build, Sampler, build_tree, write_values
 from .document import add_slots
 from .library import apply_definition, library_root
 
@@ -109,13 +109,15 @@ def render(path, definition):
         scene.collection.objects.link(sphere)
         scene.collection.objects.link(camera)
         mesh.materials.append(material)
-        layers = sphere.devil_painter.layers
+        layers = sphere.devil_painter.sets.add().layers
         for index, item in enumerate(definitions):
             layer = layers.add()
             layer.uid, layer.kind = f'T{index}', 'FILL'
             add_slots(layer)
             apply_definition(layer, item)
-        build_tree(material.node_tree, CHANNELS, list(layers), masking=({}, True, 2.0))
+        tree = material.node_tree
+        build_tree(Build(tree.nodes, tree.links, Sampler(tree.nodes, tree.links, [1001], lambda image, number: image, ''), live=True, size=2.0),
+                   CHANNELS, list(layers))
         write_values(material.node_tree.nodes, CHANNELS, list(layers))
         if any('generator' in item for item in definitions):
             sphere.rotation_euler = (.5, 0.0, .7)

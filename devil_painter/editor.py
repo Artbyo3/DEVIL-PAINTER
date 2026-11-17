@@ -4,10 +4,11 @@ import traceback
 from pathlib import Path
 import bpy
 import numpy
-from . import actions, brushes, compositing, library, painting, shelf, smart, strokes, thumbnails
+from . import actions, brushes, compositing, exporting, library, painting, sets, shelf, smart, strokes, thumbnails
 from .blending import BLEND_MODES, CHANNEL, CHANNELS, linear_to_srgb, srgb_to_linear
 from .canvas import Rect
-from .document import active_layer, paint_target, set_channels, slot_value, texture_set
+from .document import RESOLUTIONS, active_layer, active_tile, paint_target, set_channels, slot_value, texture_set
+from .tiles import variant
 from .draw import Renderer
 from .masks import GENERATORS
 from .meshmaps import MESH_MAPS
@@ -22,6 +23,9 @@ POINTER_TOKENS = ('MOUSE', 'TRACKPAD', 'NDOF', 'PEN', 'ERASER')
 HIDDEN_REGIONS = ('show_region_header', 'show_region_tool_header', 'show_region_toolbar', 'show_region_asset_shelf', 'show_gizmo_navigate')
 FLAT_REGIONS = ('show_region_header', 'show_region_tool_header', 'show_region_toolbar', 'show_region_ui', 'show_region_asset_shelf')
 MOVES = {'MOVE_UP': 1, 'MOVE_DOWN': -1}
+EXPORT_MENUS = {'EXPORT_TEMPLATE', 'EXPORT_DEPTH'}
+EXPORT_MENU_PREFIXES = ('OUT_SRC.', 'OUT_FORMAT.', 'OUT_DEPTH.')
+EXPORT_EDITS = ('SET_TEMPLATE.', 'SET_EXPORT_DEPTH.', 'OUT_REMOVE.', 'SET_SRC.', 'SET_FORMAT.', 'SET_DEPTH.')
 PROJECTION_LABELS = {'UV': 'UV', 'TRIPLANAR': 'Tri-planar'}
 BRUSH_RANGES = {key: (field, top, .01 if key == 'BRUSH_FLOW' else 1.0 if key == 'BRUSH_SPACING' else 0.0) for key, _, field, top, _ in BRUSH_SLIDERS}
 BRUSH_FLAGS = {key: field for key, _, field in BRUSH_TOGGLES}
@@ -80,9 +84,14 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         data = texture_set(obj)
         self.stroke_pending = False
         self.flat_area = None
+        self.saved_mask = None
+        self.setup_cache = None
         if data is not None:
-            actions.prepare(obj, data)
+            for item in obj.devil_painter.sets:
+                actions.prepare(obj, item)
             painting.enter_paint_mode(context, obj)
+            self.remember_mask(obj)
+            sets.mask_faces(obj, obj.devil_painter)
             painting.update_canvas(context, data)
             brushes.sync(context, data)
         self.renderer = Renderer()
@@ -137,8 +146,29 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         obj, data = self.painted()
         brush = (painting.brush_value(self.scene, 'size'), (*painting.brush_value(self.scene, 'color'), 1.0))
         name = obj.name if obj is not None and obj.type == 'MESH' else ''
-        directory = (data.export_directory or default_directory(obj)) if data is not None else ''
-        return painter_layout(self.bounds, scale, self.state, data, name, painting.active_tool(self.scene), brush, directory)
+        directory = (obj.devil_painter.export_directory or default_directory(obj)) if data is not None else ''
+        return painter_layout(self.bounds, scale, self.state, data, name, painting.active_tool(self.scene), brush, directory, self.setup(obj, data))
+
+    def setup(self, obj, data):
+        if data is not None or obj is None or obj.type != 'MESH':
+            return [], False
+        key = (obj.name, len(obj.data.polygons), len(obj.material_slots), self.state.setup_udim)
+        if self.setup_cache is None or self.setup_cache[0] != key:
+            found = sets.has_udim(obj)
+            self.setup_cache = (key, (sets.detect(obj, found and self.state.setup_udim), found))
+        return self.setup_cache[1]
+
+    def remember_mask(self, obj):
+        if self.saved_mask is None:
+            self.saved_mask = (obj.name, sets.remember_mask(obj.data))
+
+    def restore_mask(self):
+        if self.saved_mask is None:
+            return
+        obj = bpy.data.objects.get(self.saved_mask[0])
+        if obj is not None and obj.type == 'MESH':
+            sets.restore_mask(obj.data, self.saved_mask[1])
+        self.saved_mask = None
 
     def draw_overlay(self):
         if self._closed:
@@ -280,7 +310,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         if space is None:
             return
         obj, data = self.painted()
-        image = paint_target(data) if data is not None else None
+        image = variant(data, paint_target(data), active_tile(data)) if data is not None else None
         if space.image != image:
             space.image = image
 
@@ -314,6 +344,13 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         if data is None or obj.mode != 'TEXTURE_PAINT':
             return
         inside = 0 <= self.pointer[0] < self._region.width and 0 <= self.pointer[1] < self._region.height
+        if inside:
+            face = sets.face_under(self._region, self._area.spaces.active.region_3d, obj, self.pointer)
+            if face >= 0:
+                message = actions.activate(context, obj, obj.devil_painter, *sets.locate(obj, obj.devil_painter, face))
+                if message:
+                    self.message = message
+                    data = texture_set(obj)
         if inside and painting.uses_stroke_buffer(context, data):
             self.stroke_pending = True
         else:
@@ -366,7 +403,11 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.state.hsv = colorsys.rgb_to_hsv(red, green, blue)
             self.apply_color(context, commit=True)
         elif edit.key == 'EXPORT_DIR' and data is not None:
-            data.export_directory = edit.text.strip()
+            obj.devil_painter.export_directory = edit.text.strip()
+        elif edit.key == 'EXPORT_PATTERN' and data is not None:
+            obj.devil_painter.export_pattern = edit.text.strip() or '{mesh}_{set}_{output}'
+        elif edit.key.startswith('OUT_NAME.') and data is not None:
+            exporting.edit_output(obj.devil_painter.export_template, int(edit.key.removeprefix('OUT_NAME.')), name=edit.text.strip() or 'Output')
         elif edit.key == 'TEXTURE_DIR':
             library.set_texture_folder(edit.text)
 
@@ -530,10 +571,17 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         if key == 'CLOSE':
             self.cleanup()
             return {'FINISHED'}
-        if key.startswith('RES_'):
-            self.state.resolution = int(key.removeprefix('RES_'))
+        if key.startswith('RES.'):
+            _, index, size = key.split('.')
+            self.state.setup_resolutions[int(index)] = int(size)
+        elif key == 'SETUP_UDIM':
+            self.state.setup_udim = not self.state.setup_udim
         elif key == 'START':
-            self.message = actions.start(context, obj, self.state.resolution)
+            rows, found = self.setup(obj, data)
+            resolutions = [self.state.setup_resolutions.get(index, 2048) for index in range(max(1, len(rows)))]
+            if obj is not None and obj.type == 'MESH':
+                self.remember_mask(obj)
+            self.message = actions.start(context, obj, resolutions, found and self.state.setup_udim)
             self.hide_regions()
         elif key.startswith('PANEL_'):
             self.state.collapsed ^= {key.removeprefix('PANEL_')}
@@ -663,9 +711,32 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         elif key == 'BROWSE':
             bpy.ops.devil_painter.choose_export_folder('INVOKE_DEFAULT')
         elif key == 'EXPORT_RUN':
-            directory = bpy.path.abspath(data.export_directory or default_directory(obj))
-            self.message = actions.export(context, obj, data, directory)
+            project = obj.devil_painter
+            directory = bpy.path.abspath(project.export_directory or default_directory(obj))
             self.state.popover = None
+            self.message = actions.export(context, obj, project, directory)
+        elif key.startswith('SET.'):
+            self.message = actions.activate(context, obj, obj.devil_painter, int(key.removeprefix('SET.')), obj.devil_painter.active_tile)
+        elif key.startswith('TILE.'):
+            project = obj.devil_painter
+            self.message = actions.activate(context, obj, project, project.active_set, int(key.removeprefix('TILE.')))
+        elif key.startswith('SETRES.'):
+            index = int(key.removeprefix('SETRES.'))
+            current = obj.devil_painter.sets[index].resolution
+            self.state.popover = Popover('MENU', control.rect, items=tuple((f'SET_SETRES.{index}.{size}', f'{size} px', size == current)
+                                                                          for size in RESOLUTIONS))
+        elif key.startswith('SET_SETRES.'):
+            _, index, size = key.split('.')
+            self.message = actions.set_resolution(context, obj, obj.devil_painter.sets[int(index)], int(size))
+        elif key in EXPORT_MENUS or key.startswith(EXPORT_MENU_PREFIXES):
+            self.open_export_menu(obj.devil_painter, key, control)
+        elif key.startswith(EXPORT_EDITS) or key in {'TEMPLATE_DUPLICATE', 'TEMPLATE_DELETE', 'OUT_ADD'}:
+            self.message = self.edit_export(obj.devil_painter, key)
+        elif key.startswith('OUT_NAME.') or key == 'EXPORT_PATTERN':
+            self.begin_text(key, control.text)
+        elif key.startswith('EXPORT_SET.'):
+            item = obj.devil_painter.sets[int(key.removeprefix('EXPORT_SET.'))]
+            item.export = not item.export
         elif key.startswith('BLEND.'):
             channel = key.removeprefix('BLEND.')
             current = active_layer(data).slots[channel].blend
@@ -766,11 +837,69 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             return actions.add_material(context, obj, data, shelf.pattern_definition(item.payload))
         return actions.add_material(context, obj, data, item.payload)
 
+    def open_export_menu(self, project, key, control):
+        template = exporting.find_template(project.export_template)
+        if key == 'EXPORT_TEMPLATE':
+            items = tuple((f'SET_TEMPLATE.{index}', item['name'], item['name'] == template['name']) for index, item in enumerate(exporting.all_templates()))
+        elif key == 'EXPORT_DEPTH':
+            items = tuple((f'SET_EXPORT_DEPTH.{depth}', 'From template' if depth == 'TEMPLATE' else depth + '-bit', depth == project.export_depth)
+                          for depth in exporting.DEPTHS)
+        elif key.startswith('OUT_SRC.'):
+            _, index, slot = key.split('.')
+            items = tuple((f'SET_SRC.{index}.{slot}.{source}', label, False) for source, (label, _, _) in exporting.SOURCES.items())
+            if slot in {'1', '3'}:
+                items += ((f'SET_SRC.{index}.{slot}.none', 'Single channel' if slot == '1' else 'No alpha', False),)
+        elif key.startswith('OUT_FORMAT.'):
+            index = key.removeprefix('OUT_FORMAT.')
+            items = tuple((f'SET_FORMAT.{index}.{name}', label, False) for name, label in exporting.FORMAT_LABELS.items())
+        else:
+            index = int(key.removeprefix('OUT_DEPTH.'))
+            allowed = exporting.FORMATS[template['outputs'][index]['format']][1]
+            items = tuple((f'SET_DEPTH.{index}.{depth}', depth + '-bit', False) for depth in allowed)
+        self.state.popover = Popover('MENU', control.rect, items=items)
+
+    def edit_export(self, project, key):
+        name = project.export_template
+        if key.startswith('SET_TEMPLATE.'):
+            project.export_template = exporting.all_templates()[int(key.removeprefix('SET_TEMPLATE.'))]['name']
+            return f'Exporting with the {project.export_template} template.'
+        if key.startswith('SET_EXPORT_DEPTH.'):
+            project.export_depth = key.removeprefix('SET_EXPORT_DEPTH.')
+            return 'Bit depth set.'
+        if key == 'TEMPLATE_DUPLICATE':
+            project.export_template = exporting.duplicate_template(name)
+            return f'Created the editable {project.export_template} template.'
+        if key == 'TEMPLATE_DELETE':
+            exporting.delete_template(name)
+            project.export_template = exporting.BUILTIN_TEMPLATES[0]['name']
+            return f'Deleted the {name} template.'
+        if key == 'OUT_ADD':
+            exporting.add_output(name)
+            return 'Added an output.'
+        if key.startswith('OUT_REMOVE.'):
+            exporting.remove_output(name, int(key.removeprefix('OUT_REMOVE.')))
+            return 'Removed the output.'
+        if key.startswith('SET_SRC.'):
+            _, index, slot, source = key.split('.', 3)
+            exporting.set_source(name, int(index), int(slot), source)
+            return 'Channel packing updated.'
+        if key.startswith('SET_FORMAT.'):
+            _, index, file_format = key.split('.')
+            exporting.set_format(name, int(index), file_format)
+            return 'Format updated.'
+        _, index, depth = key.split('.')
+        exporting.edit_output(name, int(index), depth=depth)
+        return 'Bit depth updated.'
+
     def cleanup(self):
         global _active
         if self._closed:
             return
         self._closed = True
+        try:
+            self.restore_mask()
+        except ReferenceError:
+            self.saved_mask = None
         if self._handle is not None:
             bpy.types.SpaceView3D.draw_handler_remove(self._handle, 'WINDOW')
             self._handle = None

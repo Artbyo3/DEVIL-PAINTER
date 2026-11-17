@@ -15,6 +15,7 @@ sys.path.insert(0, str(ROOT))
 import devil_painter
 from devil_painter import editor, library, painting, shelf, smart, thumbnails
 from devil_painter.compositing import SIGNATURE_KEY, socket
+from devil_painter.document import texture_set
 from devil_painter.ui_system import SURFACE_FLOATING
 from tools.workspace import prepare_scratch
 
@@ -131,6 +132,7 @@ def reveal(window, region, key, panel='PROPERTIES'):
 
 def png_pixels(path):
     image = bpy.data.images.load(str(path))
+    image.colorspace_settings.name = 'Non-Color'
     values = numpy.empty(len(image.pixels), dtype=numpy.float32)
     image.pixels.foreach_get(values)
     bpy.data.images.remove(image)
@@ -187,13 +189,13 @@ def journey():
     check(not any(getattr(space, name) for name in HIDDEN), "Blender's header, tool header, toolbar and navigation gizmo are hidden")
     check(control('TARGET').label == 'Cube', 'the start card offers to paint the selected mesh')
 
-    click(window, region, 'RES_1024')
+    click(window, region, 'RES.0.1024')
     yield 0.3
     click(window, region, 'START')
     yield 1.5
-    data = cube.devil_painter
+    data = texture_set(cube)
     paint_layer = data.layers[0]
-    check(data.enabled and data.resolution == 1024 and len(data.layers) == 1 and paint_layer.kind == 'PAINT', 'Start painting creates a 1K stack with a paint layer')
+    check(cube.devil_painter.enabled and len(cube.devil_painter.sets) == 1 and data.resolution == 1024 and len(data.layers) == 1 and paint_layer.kind == 'PAINT', 'Start painting creates a 1K stack with a paint layer')
     check(cube.mode == 'TEXTURE_PAINT' and space.shading.type == 'MATERIAL', 'the viewport switches to texture paint with material preview')
     check(bpy.context.scene.tool_settings.image_paint.canvas == data.stroke and data.stroke_owner == paint_layer.uid,
           'the brush paints into the stroke buffer of the selected layer')
@@ -271,13 +273,13 @@ def journey():
     press(window, 'Z', *middle, ctrl=True)
     yield 0.8
     cube = bpy.data.objects['Cube']
-    data = cube.devil_painter
+    data = texture_set(cube)
     paint_layer = data.layers[0]
     check(editor._active is not None and channel_max(bpy.data.images[metallic_canvas.name]) < .1, 'Ctrl+Z undoes the stroke on every channel')
     press(window, 'Z', *middle, ctrl=True, shift=True)
     yield 1.0
     cube = bpy.data.objects['Cube']
-    data = cube.devil_painter
+    data = texture_set(cube)
     paint_layer = data.layers[0]
     check(channel_max(bpy.data.images[metallic_canvas.name]) > .9 and alpha(data.stroke).max() == 0.0, 'Ctrl+Shift+Z repaints it')
     rect = control('BRUSHVAL.metallic').rect
@@ -349,23 +351,23 @@ def journey():
     press(window, 'Z', *middle, ctrl=True)
     yield 0.8
     cube = bpy.data.objects['Cube']
-    data = cube.devil_painter
+    data = texture_set(cube)
     check(editor._active is not None and has('ADD_PAINT'), 'Ctrl+Z keeps Devil Painter open')
     check(not data.channels['emission'].enabled and not has('SWATCH.emission'), 'Ctrl+Z undoes adding emission')
     press(window, 'Z', *middle, ctrl=True, shift=True)
     yield 0.8
     cube = bpy.data.objects['Cube']
-    data = cube.devil_painter
+    data = texture_set(cube)
     check(data.channels['emission'].enabled, 'Ctrl+Shift+Z redoes it')
     click(window, region, 'UNDO')
     yield 0.8
     cube = bpy.data.objects['Cube']
-    data = cube.devil_painter
+    data = texture_set(cube)
     check(editor._active is not None and not data.channels['emission'].enabled, 'the dock Undo button undoes without closing Devil Painter')
     click(window, region, 'REDO')
     yield 0.8
     cube = bpy.data.objects['Cube']
-    data = cube.devil_painter
+    data = texture_set(cube)
     paint_layer, fill = data.layers[0], data.layers[1]
     check(editor._active is not None and data.channels['emission'].enabled and has('SWATCH.emission'), 'the dock Redo button redoes it')
 
@@ -449,17 +451,14 @@ def journey():
     yield 0.2
     type_text(window, str(export_dir), *spot(region, 'EXPORT_DIR'))
     yield 0.3
-    check(Path(data.export_directory) == export_dir, 'typing the folder sets the export directory')
+    check(Path(cube.devil_painter.export_directory) == export_dir, 'typing the folder sets the export directory')
     click(window, region, 'EXPORT_RUN')
     yield 1.0
-    files = {suffix: export_dir / f'Cube_{suffix}.png' for suffix in ('BaseColor', 'Roughness', 'Metallic', 'Normal', 'Height', 'Emission')}
+    files = {suffix: export_dir / f'Cube_Material_{suffix}.png' for suffix in ('BaseColor', 'Roughness', 'Metallic', 'Normal', 'Height', 'Emission')}
     check(all(path.is_file() for path in files.values()), 'Export writes one PNG per texture set channel')
-    check(not (export_dir / 'Cube_Opacity.png').exists(), 'channels outside the texture set are not exported')
-    height = bpy.data.images.load(str(files['Height']))
-    values = numpy.empty(len(height.pixels), dtype=numpy.float32)
-    height.pixels.foreach_get(values)
+    check(not (export_dir / 'Cube_Material_Opacity.png').exists(), 'channels outside the texture set are not exported')
+    values = png_pixels(files['Height'])[:, 0]
     check(values.max() > .8 and abs(values.min() - .5) < .02, 'exported height rises only where the fill shows through its mask')
-    bpy.data.images.remove(height)
     metallic = bpy.data.images.load(str(files['Metallic']))
     values = numpy.empty(len(metallic.pixels), dtype=numpy.float32)
     metallic.pixels.foreach_get(values)
@@ -592,7 +591,7 @@ def journey():
     yield 0.3
     click(window, region, 'EXPORT_RUN')
     yield 1.5
-    normal = png_pixels(export_dir / 'Cube_Normal.png')
+    normal = png_pixels(export_dir / 'Cube_Material_Normal.png')
     match = (numpy.abs(normal[:, 0] - .4) < .03) & (numpy.abs(normal[:, 1] - .6) < .03)
     check(editor._active.message.startswith('Exported 6 textures') and match.mean() > .3,
           'export bakes the texture set normal map into the normal channel')
@@ -900,10 +899,13 @@ def journey():
     yield 0.4
     check(control('PANEL_LAYERS').rect.w > width + 40, 'dragging the column edge widens the right column')
     check(has('SPLITTER'), 'a divider appears between layers and properties when they do not fit')
-    layers_view = editor._active.workspace.scroll_areas['LAYERS'][0].h
+    properties_top = control('PANEL_PROPERTIES').rect.y
     drag(window, region, 'SPLITTER', 0, -60)
     yield 0.4
-    check(editor._active.workspace.scroll_areas['LAYERS'][0].h > layers_view + 30, 'dragging the divider gives the layers more room')
+    check(control('PANEL_PROPERTIES').rect.y < properties_top - 30, 'dragging the divider gives the layers more room')
+    for _ in range(4):
+        click(window, region, 'ADD_PAINT')
+        yield 0.2
     before = editor._active.state.scroll.get('LAYERS', 0.0)
     x, y = spot(region, 'PANEL_LAYERS', fy=-1.0)
     move(window, x, y)
@@ -913,11 +915,10 @@ def journey():
 
     rows = sum(item.key.startswith('ROW_') for item in editor._active.workspace.controls)
     check(rows < len(data.layers), 'layer rows scrolled out of view are not built or drawn')
-    layers_view = editor._active.workspace.scroll_areas['LAYERS'][0].h
     click(window, region, 'PANEL_PROPERTIES')
     yield 0.3
     check('PROPERTIES' in editor._active.state.collapsed and not has('OPACITY'), 'clicking a panel header collapses it')
-    check(editor._active.workspace.scroll_areas['LAYERS'][0].h > layers_view + 30, 'collapsing properties gives its room to the layers')
+    check(sum(item.key.startswith('ROW_') for item in editor._active.workspace.controls) > rows, 'collapsing properties gives its room to the layers')
     click(window, region, 'PANEL_PROPERTIES')
     yield 0.3
     check(has('OPACITY'), 'clicking it again expands it')
@@ -937,7 +938,7 @@ def journey():
     click(window, region, 'VIEW2D')
     yield 0.6
     flat = editor._active.flat_area
-    data = bpy.data.objects['Cube'].devil_painter
+    data = texture_set(bpy.data.objects['Cube'])
     current = next(layer for layer in data.layers if layer.uid == data.active_uid)
     check(flat is not None and flat.type == 'IMAGE_EDITOR' and flat.spaces.active.ui_mode == 'PAINT' and len(window.screen.areas) == area_count + 1
           and control('VIEW2D').active, '2D view docks an image paint view beside the model')

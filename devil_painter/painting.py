@@ -1,6 +1,7 @@
 import bpy
 from . import compositing
-from .document import active_layer, paint_target
+from .document import active_layer, active_tile, paint_target
+from .tiles import variant
 
 BRUSH_LIBRARY = 'brushes/essentials_brushes-mesh_texture.blend/Brush/'
 TOOLS = (('PAINT', 'Paint', 'Paint Soft', 'B'), ('ERASE', 'Erase', 'Erase Soft', 'E'), ('FILL', 'Fill', 'Fill', 'G'),
@@ -70,4 +71,4 @@ def update_canvas(context, data):
     if data.stroke_owner != owner:
         data.stroke_owner = owner
         compositing.sync(data)
-    context.tool_settings.image_paint.canvas = data.stroke if buffered else paint_target(data)
+    context.tool_settings.image_paint.canvas = data.stroke if buffered else variant(data, paint_target(data), active_tile(data))
