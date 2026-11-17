@@ -79,6 +79,20 @@
 - "PR" or "ship it" means complete the tested changes through merge and session closure. It does not by itself request a version bump, tag, or public GitHub release; the separate release checklist applies only when a release is explicitly requested.
 - Changes that only correct workflow rules or documentation do not need an artificial Blender/manual artist acceptance test. Validate those changes appropriately, preserve the existing accepted application build, and do not claim that editing a rule has itself authorized publication or merging.
 
+## PULL REQUEST RULES
+- One problem per PR. A PR addresses exactly one issue or one owner request and carries every change that fix needs across code, tests, and docs. A second fix, a cleanup, and a refactor each get their own PR.
+- Link the problem. Every PR names the issue it closes or the owner request that asked for it. Search the open PRs before starting; if one already covers the problem, build on it instead of opening a duplicate.
+- Title in plain language, conventional-commit style (for example `fix(packs): ...` or `feat(editor): ...`): what changed, in words an artist can follow.
+- Description in four parts: **Problem** (what is wrong, with reproduction steps or environment where relevant), **Change** (how this fixes it, and why any change spanning several areas belongs to the same fix), **Scope** (the issue or request it answers, and what it deliberately leaves out), **Verification** (the focused checks run and what they actually showed).
+- Verification is evidence, not a claim. "Tests pass" alone is never sufficient: state how the problem was reproduced, how the fix was checked, and the observed result, including anything that could not be checked. UI changes include before/after screenshots in the PR; motion, timing, or interaction changes include a short recording. Evidence is uploaded to the PR, never committed to the repo. Performance changes include the measured before/after numbers, charted when a chart makes the difference clearer.
+- Evidence rendering may be delegated; measurements and verdicts never are. A cheaper sub-agent may turn the main agent's measured data and captured screenshots into charts and before/after sheets, working only from that material. The main agent verifies every rendered item against its source data before it is posted; anything the sub-agent measured, judged, or altered on its own is rejected.
+- Drafts follow the same rules. Draft status does not defer triage, checks, or any requirement above.
+- Keep the PR mergeable. Resolve conflicts with `main` promptly as they appear instead of letting the branch sit conflicting; a PR left conflicting is stalled work and is reported as such.
+- If an agent did the work, the PR description ends by naming the model and harness that produced it.
+- These rules shape how PRs are written and kept. They do not replace the acceptance workflow above: artist acceptance still gates shipping, and work here is owner-directed, so outside-contribution gatekeeping (contribution bans, per-person PR limits, feature freezes) does not apply.
+
+---
+
 ## DEVELOPER WORKFLOW SHORTCUTS
 Run the unified developer runner from the repository root:
 - `.\dev.cmd --quick`: Fast headless unit tests (includes dead code, unused import, and rule checks)
