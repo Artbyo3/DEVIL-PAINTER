@@ -1,8 +1,9 @@
-import math
 from .blending import NORMAL_DETAIL
 from .document import active_tile, children, geometry_attribute, linked_layer, set_channels, shown_layers, slot_value, uses_coordinates
-from .effects import EFFECT_FIELDS, FILTER
+from .effects import EFFECT_FIELDS
+from .filters import FILTER, content_warp, filter_color, filter_value, warp_vector, wrap_sampling
 from .masks import generator_mask, write_generator
+from .nodes import gray, link_or_set, math_node, mix_color, mix_value, socket, vector_math
 from .procedural import contrast_range, pattern_node, set_pattern_values
 from .tiles import numbers, variant
 
@@ -10,34 +11,12 @@ SIGNATURE_KEY = 'devil_painter_signature'
 BUMP_DISTANCE = .05
 DISPLAY_GAMMA = 2.2
 TRIPLANAR_BLEND = .2
-BLUR_TAPS = 8
-WARP_REACH = .1
-POSTERIZE_STEPS = 14
-LIGHT_SLOPE = 1.0
 SHADER_INPUTS = {'base_color': 'Base Color', 'roughness': 'Roughness', 'metallic': 'Metallic', 'emission': 'Emission Color',
                  'opacity': 'Alpha'}
 
 
-def socket(sockets, name, kind):
-    return next(item for item in sockets if item.name == name and item.type == kind)
-
-
 def rgba(value):
     return (*value, 1.0) if len(value) == 3 else (value[0], value[0], value[0], 1.0)
-
-
-def math_node(nodes, links, operation, first, second, x=0, y=0, name=''):
-    node = nodes.new('ShaderNodeMath')
-    node.operation = operation
-    node.location = (x, y)
-    if name:
-        node.name = name
-    for index, value in enumerate((first, second)):
-        if isinstance(value, float):
-            node.inputs[index].default_value = value
-        else:
-            links.new(value, node.inputs[index])
-    return node.outputs[0]
 
 
 class Sampler:
@@ -205,86 +184,6 @@ def stroke_over(build, image, alpha, color, x):
     return total, mix_color(build, color, texture.outputs['Color'], weight), weight
 
 
-def mix_color(build, below, above, factor, mode='MIX'):
-    node = build.nodes.new('ShaderNodeMix')
-    node.data_type = 'RGBA'
-    node.blend_type = mode
-    node.clamp_result = True
-    link_or_set(build, socket(node.inputs, 'Factor', 'VALUE'), factor)
-    link_or_set(build, socket(node.inputs, 'A', 'RGBA'), below)
-    link_or_set(build, socket(node.inputs, 'B', 'RGBA'), above)
-    return socket(node.outputs, 'Result', 'RGBA')
-
-
-def mix_value(build, below, above, factor):
-    node = build.nodes.new('ShaderNodeMix')
-    node.data_type = 'FLOAT'
-    node.clamp_result = True
-    link_or_set(build, socket(node.inputs, 'Factor', 'VALUE'), factor)
-    link_or_set(build, socket(node.inputs, 'A', 'VALUE'), below)
-    link_or_set(build, socket(node.inputs, 'B', 'VALUE'), above)
-    return socket(node.outputs, 'Result', 'VALUE')
-
-
-def link_or_set(build, target, value):
-    if isinstance(value, (float, int)):
-        target.default_value = float(value) if target.type == 'VALUE' else (float(value),) * 3 + (1.0,)
-    elif isinstance(value, tuple):
-        target.default_value = value
-    else:
-        build.links.new(value, target)
-
-
-def gray(build, color):
-    node = build.nodes.new('ShaderNodeRGBToBW')
-    build.links.new(color, node.inputs['Color'])
-    return node.outputs['Val']
-
-
-def offset(build, vector, dx, dy):
-    return vector_math(build.nodes, build.links, 'ADD', vector, (dx, dy, 0.0))
-
-
-def averaged(build, samples):
-    color, alpha = samples[0]
-    for index, (next_color, next_alpha) in enumerate(samples[1:], 2):
-        color = mix_color(build, color, next_color, 1.0 / index)
-        alpha = mix_value(build, alpha, next_alpha, 1.0 / index)
-    return color, alpha
-
-
-def warp_vector(build, effect, vector):
-    noise = build.nodes.new('ShaderNodeTexNoise')
-    noise.inputs['Scale'].default_value = effect.scale
-    build.links.new(vector, noise.inputs['Vector'])
-    centered = vector_math(build.nodes, build.links, 'SUBTRACT', noise.outputs['Color'], (.5, .5, .5))
-    return vector_math(build.nodes, build.links, 'MULTIPLY_ADD', centered, (effect.amount * WARP_REACH,) * 3, vector)
-
-
-def wrap_sampling(build, effect, inner):
-    step = effect.radius / max(build.resolution, 1)
-
-    def ring(image, vector):
-        angles = [index * math.tau / BLUR_TAPS for index in range(BLUR_TAPS)]
-        return [inner(image, vector)] + [inner(image, offset(build, vector, math.cos(angle) * step, math.sin(angle) * step)) for angle in angles]
-
-    def line(image, vector):
-        direction = math.radians(effect.angle)
-        positions = [(index / (BLUR_TAPS // 2)) * step for index in range(-(BLUR_TAPS // 2), BLUR_TAPS // 2 + 1)]
-        return [inner(image, offset(build, vector, math.cos(direction) * position, math.sin(direction) * position)) for position in positions]
-
-    def sample(image, vector):
-        if effect.filter == 'WARP':
-            return inner(image, warp_vector(build, effect, vector))
-        center = inner(image, vector)
-        blurred = averaged(build, line(image, vector) if effect.filter == 'DIRECTIONAL_BLUR' else ring(image, vector))
-        if effect.filter == 'SHARPEN':
-            detail = mix_color(build, center[0], blurred[0], 1.0, 'SUBTRACT')
-            return mix_color(build, center[0], detail, effect.amount * 2, 'ADD'), center[1]
-        return mix_color(build, center[0], blurred[0], effect.opacity), mix_value(build, center[1], blurred[1], effect.opacity)
-    return sample
-
-
 def sampling(build, layer, target):
     chain = build.sampler.sample
     for effect in layer.effects:
@@ -325,85 +224,6 @@ def levels_color(build, color, effect):
     socket(output.inputs, 'To Min', 'VECTOR').default_value = (effect.out_low,) * 3
     socket(output.inputs, 'To Max', 'VECTOR').default_value = (effect.out_high,) * 3
     return mix_color(build, color, socket(output.outputs, 'Vector', 'VECTOR'), effect.opacity)
-
-
-def noise_factor(build, effect):
-    coordinates = build.nodes.new('ShaderNodeTexCoord')
-    noise = build.nodes.new('ShaderNodeTexNoise')
-    noise.inputs['Scale'].default_value = effect.scale
-    noise.inputs['Detail'].default_value = 8.0
-    build.links.new(coordinates.outputs['Object'], noise.inputs['Vector'])
-    return noise.outputs['Fac']
-
-
-def filter_value(build, value, effect):
-    nodes, links = build.nodes, build.links
-    if effect.filter == 'INVERT':
-        result = math_node(nodes, links, 'SUBTRACT', 1.0, value)
-    elif effect.filter == 'POSTERIZE':
-        steps = 2.0 + round(effect.amount * POSTERIZE_STEPS)
-        result = math_node(nodes, links, 'DIVIDE', math_node(nodes, links, 'FLOOR', math_node(nodes, links, 'MULTIPLY', value, steps), 0.0), steps - 1)
-    elif effect.filter == 'CONTRAST':
-        spread = (1 - effect.amount) * .5 + .01
-        ranged = nodes.new('ShaderNodeMapRange')
-        link_or_set(build, ranged.inputs['Value'], value)
-        ranged.inputs['From Min'].default_value, ranged.inputs['From Max'].default_value = .5 - spread, .5 + spread
-        result = ranged.outputs['Result']
-    elif effect.filter == 'THRESHOLD':
-        result = math_node(nodes, links, 'GREATER_THAN', value, effect.amount)
-    elif effect.filter == 'GRAIN':
-        result = math_node(nodes, links, 'ADD', value, math_node(nodes, links, 'MULTIPLY', math_node(nodes, links, 'SUBTRACT', noise_factor(build, effect), .5),
-                                                                  effect.amount * 2))
-    else:
-        return value
-    return mix_value(build, value, result, effect.opacity)
-
-
-def filter_color(build, color, effect):
-    nodes, links = build.nodes, build.links
-    if effect.filter == 'HSV':
-        node = nodes.new('ShaderNodeHueSaturation')
-        node.inputs['Hue'].default_value, node.inputs['Saturation'].default_value = effect.hue, effect.saturation
-        node.inputs['Value'].default_value = effect.brightness
-        links.new(color, node.inputs['Color'])
-        return mix_color(build, color, node.outputs['Color'], effect.opacity)
-    if effect.filter == 'TINT':
-        return mix_color(build, color, (*effect.color, 1.0), effect.opacity, 'MULTIPLY')
-    if effect.filter == 'GRADIENT_MAP':
-        return mix_color(build, color, mix_color(build, (*effect.color_b, 1.0), (*effect.color, 1.0), gray(build, color)), effect.opacity)
-    if effect.filter == 'LIGHT':
-        geometry = nodes.new('ShaderNodeNewGeometry')
-        direction = math.radians(effect.angle)
-        light = (math.cos(direction) * LIGHT_SLOPE, math.sin(direction) * LIGHT_SLOPE, 1.0)
-        dot = build.nodes.new('ShaderNodeVectorMath')
-        dot.operation = 'DOT_PRODUCT'
-        links.new(geometry.outputs['Normal'], dot.inputs[0])
-        dot.inputs[1].default_value = light
-        lit = math_node(nodes, links, 'ADD', math_node(nodes, links, 'MULTIPLY', dot.outputs['Value'], .5), .5)
-        shading = mix_color(build, (0.0, 0.0, 0.0, 1.0), (2.0, 2.0, 2.0, 1.0), lit)
-        return mix_color(build, color, mix_color(build, color, shading, 1.0, 'MULTIPLY'), effect.amount)
-    if effect.filter == 'INVERT':
-        node = nodes.new('ShaderNodeInvert')
-        node.inputs['Fac'].default_value = effect.opacity
-        links.new(color, node.inputs['Color'])
-        return node.outputs['Color']
-    if effect.filter == 'CONTRAST':
-        node = nodes.new('ShaderNodeBrightContrast')
-        node.inputs['Contrast'].default_value = (effect.amount - .5) * 2
-        links.new(color, node.inputs['Color'])
-        return mix_color(build, color, node.outputs['Color'], effect.opacity)
-    if effect.filter in {'POSTERIZE', 'THRESHOLD'}:
-        if effect.filter == 'THRESHOLD':
-            level = math_node(nodes, links, 'GREATER_THAN', gray(build, color), effect.amount)
-            return mix_color(build, color, mix_color(build, (0.0, 0.0, 0.0, 1.0), (1.0, 1.0, 1.0, 1.0), level), effect.opacity)
-        steps = 2.0 + round(effect.amount * POSTERIZE_STEPS)
-        stepped = vector_math(nodes, links, 'DIVIDE', vector_math(nodes, links, 'FLOOR', vector_math(nodes, links, 'MULTIPLY', color, (steps,) * 3)),
-                              (steps - 1,) * 3)
-        return mix_color(build, color, stepped, effect.opacity)
-    if effect.filter == 'GRAIN':
-        grain = math_node(nodes, links, 'MULTIPLY', math_node(nodes, links, 'SUBTRACT', noise_factor(build, effect), .5), effect.amount * 2)
-        return mix_color(build, color, vector_math(nodes, links, 'ADD', color, grain), effect.opacity)
-    return color
 
 
 def combine_mask(build, value, other, blend, factor):
@@ -530,8 +350,7 @@ def slot_content(build, layer, slot, vector, name, x, y):
         return texture.outputs['Color']
     if slot.source == 'PATTERN':
         texture, factor = pattern_node(nodes, slot.pattern, name + '.texture', (x - 450, y - 120))
-        warp = next((effect for effect in layer.effects if effect.enabled and effect.target == 'CONTENT' and effect.kind == 'FILTER'
-                     and effect.filter == 'WARP'), None)
+        warp = content_warp(layer.effects)
         links.new(warp_vector(build, warp, vector) if warp else vector, texture.inputs['Vector'])
         contrast = nodes.new('ShaderNodeMapRange')
         contrast.name = name + '.contrast'
@@ -549,17 +368,6 @@ def slot_content(build, layer, slot, vector, name, x, y):
 def content_effects_for(layer, key):
     return [effect for effect in layer.effects if effect.enabled and effect.target == 'CONTENT' and effect.kind in {'LEVELS', 'FILTER'}
             and effect.channel in {'ALL', key} and not (effect.kind == 'FILTER' and FILTER[effect.filter].sampling)]
-
-
-def vector_math(nodes, links, operation, *values):
-    node = nodes.new('ShaderNodeVectorMath')
-    node.operation = operation
-    for index, value in enumerate(values):
-        if isinstance(value, tuple):
-            node.inputs[index].default_value = value
-        else:
-            links.new(value, node.inputs[index])
-    return node.outputs['Vector']
 
 
 def flip_green(nodes, links, color):

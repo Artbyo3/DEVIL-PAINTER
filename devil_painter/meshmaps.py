@@ -15,6 +15,7 @@ EDGE_ROUNDING = .02
 LOW_SUFFIX = re.compile(r'[ _.\-]*(low|lp|lo)$', re.IGNORECASE)
 COPY_SUFFIX = re.compile(r'\.\d+$')
 HIGH_WORDS = ('high', 'hp', 'hi')
+BORDER_SHARE = 1 / 32
 GOLDEN_RATIO = .618033988749895
 
 
@@ -27,7 +28,7 @@ class MeshMap:
 
 MESH_MAPS = (MeshMap('ao', 'Ambient occlusion'), MeshMap('curvature', 'Curvature'), MeshMap('thickness', 'Thickness'),
              MeshMap('position', 'Position'), MeshMap('world_normal', 'World normal'), MeshMap('id', 'ID'),
-             MeshMap('normal', 'Normal'), MeshMap('height', 'Height', needs_source=True))
+             MeshMap('normal', 'Normal'), MeshMap('height', 'Height', needs_source=True), MeshMap('uv_border', 'UV border distance'))
 MESH_MAP = {item.key: item for item in MESH_MAPS}
 
 
@@ -213,9 +214,33 @@ def bake_height(context, obj, project, wanted, sources, samples, distance):
     return {key: height_pixels(high[key], low[key], normal[key], span, distance) for key in low}
 
 
+def shifted(mask, dy, dx):
+    result = numpy.zeros_like(mask)
+    height, width = mask.shape
+    result[max(dy, 0):height + min(dy, 0), max(dx, 0):width + min(dx, 0)] = mask[max(-dy, 0):height + min(-dy, 0), max(-dx, 0):width + min(-dx, 0)]
+    return result
+
+
+def border_pixels(coverage):
+    inside = coverage[..., 3] > .5
+    reach = max(4, round(inside.shape[0] * BORDER_SHARE))
+    distance = numpy.zeros(inside.shape, dtype=numpy.float32)
+    current = inside
+    for _ in range(reach):
+        current = current & shifted(current, 1, 0) & shifted(current, -1, 0) & shifted(current, 0, 1) & shifted(current, 0, -1)
+        distance += current
+    result = numpy.zeros(coverage.shape, dtype=numpy.float32)
+    result[..., :3] = (distance / reach)[..., None]
+    result[..., 3] = inside
+    return result
+
+
 def bake_key(context, obj, project, wanted, key, data, sources, size):
     samples, distance = data.bake_samples, data.bake_extrusion * size
     black = lambda item: emission_tree(item.material.node_tree, (0.0, 0.0, 0.0, 1.0))
+    if key == 'uv_border':
+        coverage = bake_pass(context, obj, project, wanted, lambda item: emission_tree(item.material.node_tree, (1.0, 1.0, 1.0, 1.0)), 'EMIT', 1, margin=0)
+        return {item: border_pixels(pixels) for item, pixels in coverage.items()}
     if key == 'height':
         return bake_height(context, obj, project, wanted, sources, samples, distance)
     if key == 'normal':

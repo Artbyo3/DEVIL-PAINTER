@@ -819,7 +819,8 @@ def set_generator(context, obj, data, values):
     if layer.generator == 'NONE':
         return refresh(context, obj, data, f'{layer.name} has no generator.')
     generator = GENERATOR[layer.generator]
-    missing = '' if generator.map_key in data.maps and data.maps[generator.map_key].image else f' Bake the {MESH_MAP[generator.map_key].label.lower()} map to see it.'
+    absent = [key for key in generator.maps if key not in data.maps or data.maps[key].image is None]
+    missing = f' Bake the {MESH_MAP[absent[0]].label.lower()} map to see it.' if absent else ''
     return refresh(context, obj, data, f'{generator.label} masks {layer.name}.{missing}')
 
 

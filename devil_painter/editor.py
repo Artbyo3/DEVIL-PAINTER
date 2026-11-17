@@ -12,13 +12,14 @@ from .blending import BLEND_MODES, CHANNEL, FOLDER_BLENDS, linear_to_srgb, srgb_
 from .ui_system import ACCENT
 from .canvas import Rect
 from .document import BAKE_ID_LABELS, RESOLUTIONS, active_effect, active_layer, active_tile, find_layer, paint_target, set_channels, slot_value, texture_set
-from .effects import FILTERS, MASK_BLENDS
+from .effects import MASK_BLENDS
+from .filters import FILTERS, GROUPS
 from .procedural import PATTERNS
 from .tiles import variant
 from .draw import Renderer
-from .masks import GENERATORS
+from .masks import BUILDER_SLIDERS, GENERATORS
 from .meshmaps import MESH_MAPS
-from .minimal import FX_RANGES, effect_menu, layer_rows, FOV_RANGE, RECENT_COLORS, SHADER_SLIDERS, BRUSH_SLIDERS, BRUSH_TOGGLES, GENERATOR_SLIDERS, MAX_BRUSH_SIZE, REPLACE_TARGET, EFFECT_TARGET, SCALE_RANGE, TILING_RANGE, from_slider, painter_layout
+from .minimal import MENU_HEADING, FX_RANGES, effect_menu, layer_rows, FOV_RANGE, RECENT_COLORS, SHADER_SLIDERS, BRUSH_SLIDERS, BRUSH_TOGGLES, GENERATOR_SLIDERS, MAX_BRUSH_SIZE, REPLACE_TARGET, EFFECT_TARGET, SCALE_RANGE, TILING_RANGE, from_slider, painter_layout
 from .shell import MARGIN, clamp_column, clamp_split
 from .state import Popover, TextEdit, WorkspaceState
 
@@ -38,7 +39,7 @@ EXPORT_EDITS = ('SET_TEMPLATE.', 'SET_EXPORT_DEPTH.', 'SET_EXPORT_SIZE.', 'SET_E
 PROJECTION_LABELS = {'UV': 'UV', 'TRIPLANAR': 'Tri-planar'}
 BRUSH_RANGES = {key: (field, top, .01 if key == 'BRUSH_FLOW' else 1.0 if key == 'BRUSH_SPACING' else 0.0) for key, _, field, top, _ in BRUSH_SLIDERS}
 BRUSH_FLAGS = {key: field for key, _, field in BRUSH_TOGGLES}
-GENERATOR_RANGES = {key: (field, top) for key, _, field, top in GENERATOR_SLIDERS}
+GENERATOR_RANGES = {**{key: (field, top) for key, _, field, top in GENERATOR_SLIDERS}, **{key: (field, 1.0) for key, _, field in BUILDER_SLIDERS}}
 BAKE_OBJECTS = {'BAKE_SOURCE': ('bake_source', 'SET_SOURCE.'), 'BAKE_CAGE': ('bake_cage', 'SET_CAGE.')}
 AUTO_BAKE_DELAY = 1.0
 LAYER_KEYS = ('ROW_', 'FX_', 'EYE_', 'FXEYE_', 'MASKTHUMB_')
@@ -659,8 +660,9 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         if key == 'FX_BLEND':
             items = tuple((f'SET_FXBLEND.{mode}', label, mode == effect.blend) for mode, label in MASK_BLENDS)
         elif key == 'FX_FILTER':
-            items = tuple((f'SET_FXFILTER.{item.key}', item.label, item.key == effect.filter) for item in FILTERS
-                          if effect.target == 'CONTENT' or not item.color_only)
+            offered = [item for item in FILTERS if effect.target == 'CONTENT' or not item.color_only]
+            items = tuple(entry for group in GROUPS for entry in ((MENU_HEADING + group, group, False),) + tuple(
+                (f'SET_FXFILTER.{item.key}', item.label, item.key == effect.filter) for item in offered if item.group == group))
         elif key == 'FX_SOURCE':
             items = (('SET_FXSOURCE.VALUE', 'Plain value', effect.source == 'VALUE'),
                      ('FX_PICK_TEXTURE', 'Texture from the shelf', effect.source == 'IMAGE')) + tuple(

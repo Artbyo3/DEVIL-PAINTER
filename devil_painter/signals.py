@@ -41,6 +41,10 @@ def map_signal(nodes, links, key, size):
         signed.inputs['Min'].default_value = -1.0
         links.new(sign, signed.inputs['Value'])
         return operate(nodes, links, 'ADD', .5, operate(nodes, links, 'MULTIPLY', operate(nodes, links, 'MULTIPLY', edge, .5), signed.outputs['Result']))
+    if key in {'height', 'uv_border'}:
+        constant = nodes.new('ShaderNodeValue')
+        constant.outputs[0].default_value = .5 if key == 'height' else 1.0
+        return constant.outputs[0]
     if key == 'position':
         return nodes.new('ShaderNodeTexCoord').outputs['Generated']
     if key == 'world_normal':

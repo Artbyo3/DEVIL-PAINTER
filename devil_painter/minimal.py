@@ -8,12 +8,13 @@ from .blending import BLEND_MODES, CHANNEL, CHANNELS, FOLDER_BLENDS, linear_to_s
 from .canvas import Layout, Rect
 from .document import (BAKE_ID_LABELS, NORMAL_FORMATS, NORMAL_SPACES, PROJECTIONS, RESOLUTIONS, SHADERS, active_effect, active_layer, children, editing_mask, find_layer,
                        linked_layer, set_channels, slot_value, uses_coordinates)
-from .effects import EFFECT_ICONS, EFFECT_KINDS, FILTER, MASK_BLENDS, effect_label
+from .effects import EFFECT_ICONS, EFFECT_KINDS, MASK_BLENDS, effect_label
+from .filters import FILTER, FILTERS
 from .library import capture, texture_folder
 from .exporting import FORMAT_LABELS, SOURCES, TOKENS, find_template, is_custom
 from .projects import UNWRAP_MODES
 from .shortcuts import ACTIONS, bindings, key_label
-from .masks import GENERATOR
+from .masks import BUILDER_SLIDERS, GENERATOR
 from .sets import tile_label
 from .tiles import numbers
 from .meshmaps import MESH_MAP, MESH_MAPS
@@ -25,6 +26,9 @@ MAX_BRUSH_SIZE = 500
 HEADER = 30
 ROW_HEIGHT = 42
 LINE_HEIGHT = 28
+MENU_ROW = 26
+MENU_WIDTH = 196
+MENU_HEADING = 'HEADING.'
 THUMBNAIL = 32
 RECENT_COLORS = 8
 FOV_RANGE = (10.0, 150.0)
@@ -462,20 +466,13 @@ def instance_section(flow, data, layer, w):
 EFFECT_SLIDERS = {'LEVELS': (('in_low', 'In low', 1.0), ('in_high', 'In high', 1.0), ('gamma', 'Gamma', 4.0), ('out_low', 'Out low', 1.0),
                              ('out_high', 'Out high', 1.0)),
                   'FILL': (('scale', 'Scale', 50.0), ('detail', 'Detail', 1.0), ('contrast', 'Contrast', .98))}
-FILTER_SLIDERS = {'BLUR': (('radius', 'Radius', 32.0),), 'DIRECTIONAL_BLUR': (('radius', 'Radius', 32.0), ('angle', 'Angle', 360.0)),
-                  'SHARPEN': (('radius', 'Radius', 32.0), ('amount', 'Amount', 1.0)), 'WARP': (('amount', 'Amount', 1.0), ('scale', 'Scale', 50.0)),
-                  'INVERT': (), 'POSTERIZE': (('amount', 'Steps', 1.0),), 'CONTRAST': (('amount', 'Contrast', 1.0),),
-                  'THRESHOLD': (('amount', 'Level', 1.0),), 'GRAIN': (('amount', 'Amount', 1.0), ('scale', 'Scale', 50.0)),
-                  'HSV': (('hue', 'Hue', 1.0), ('saturation', 'Saturation', 2.0), ('brightness', 'Value', 2.0)),
-                  'TINT': (), 'GRADIENT_MAP': (), 'LIGHT': (('angle', 'Angle', 360.0), ('amount', 'Amount', 1.0))}
-FX_RANGES = {field: (top, floor) for group in (*EFFECT_SLIDERS.values(), *FILTER_SLIDERS.values(), (('opacity', 'Opacity', 1.0), ('value', 'Value', 1.0)))
+FX_RANGES = {field: (top, floor) for group in (*EFFECT_SLIDERS.values(), *(item.sliders for item in FILTERS), (('opacity', 'Opacity', 1.0), ('value', 'Value', 1.0)))
              for field, _, top in group for floor in ({'gamma': .05, 'radius': 1.0, 'scale': .1}.get(field, 0.0),)}
-FILTER_COLORS = {'TINT': (('color', 'Tint'),), 'GRADIENT_MAP': (('color_b', 'Dark'), ('color', 'Light'))}
 
 
 def effect_sliders(effect):
     if effect.kind == 'FILTER':
-        return FILTER_SLIDERS[effect.filter]
+        return FILTER[effect.filter].sliders
     if effect.kind == 'FILL' and effect.source == 'PATTERN':
         return EFFECT_SLIDERS['FILL']
     if effect.kind == 'FILL' and effect.source == 'VALUE':
@@ -534,7 +531,7 @@ def effect_section(flow, data, layer, w):
             flow.add('FX_CHANNEL', Rect(x + half + 4 * s, y, half, h), 'DROPDOWN', label='Channel', text=CHANNEL[effect.channel].label,
                      tip='Which channel of the anchored result to use')
     slider_rows(flow, 'FX_', effect, effect_sliders(effect), w)
-    colors = FILTER_COLORS.get(effect.filter, ()) if effect.kind == 'FILTER' else ()
+    colors = FILTER[effect.filter].colors if effect.kind == 'FILTER' else ()
     if colors:
         x, y, h = flow.field()
         for index, (field, label) in enumerate(colors):
@@ -546,7 +543,7 @@ def effect_lines(data):
     effect = active_effect(data)
     lines = 2 + (effect.kind in {'PAINT', 'FILL', 'FILTER', 'COMPARE', 'ANCHOR'})
     lines += (len(effect_sliders(effect)) + 1) // 2
-    return lines + int(effect.kind == 'FILTER' and bool(FILTER_COLORS.get(effect.filter)))
+    return lines + int(effect.kind == 'FILTER' and bool(FILTER[effect.filter].colors))
 
 
 def effect_menu(target):
@@ -654,9 +651,8 @@ GENERATOR_SLIDERS = (('GEN_LEVEL', 'Level', 'gen_level', 1.0), ('GEN_CONTRAST', 
                      ('GEN_NOISE', 'Noise', 'gen_noise', 1.0), ('GEN_SCALE', 'Scale', 'gen_scale', 200.0))
 
 
-def generator_ready(data, layer):
-    key = GENERATOR[layer.generator].map_key
-    return key in data.maps and data.maps[key].image is not None
+def missing_maps(data, layer):
+    return [key for key in GENERATOR[layer.generator].maps if key not in data.maps or data.maps[key].image is None]
 
 
 def generator_section(flow, data, layer, w):
@@ -664,12 +660,13 @@ def generator_section(flow, data, layer, w):
     x, y, h = flow.field()
     label = GENERATOR[layer.generator].label if layer.generator != 'NONE' else 'None'
     flow.add('GENERATOR', Rect(x, y, w, h), 'DROPDOWN', label='Generator', text=label,
-             tip='Mask this layer from the baked mesh maps: edge wear, cavity, dirt, ground gradient, or thickness')
+             tip='Mask this layer from the baked mesh maps or a procedural pattern: wear, dirt, gradients, surfaces, UV borders, and more')
     if layer.generator == 'NONE':
         return
-    if not generator_ready(data, layer):
+    missing = missing_maps(data, layer)
+    if missing:
         x, y, h = flow.field()
-        flow.add('GEN_MISSING', Rect(x, y, w - 106 * s, h), 'NOTE', label=f'Needs the {MESH_MAP[GENERATOR[layer.generator].map_key].label.lower()} map')
+        flow.add('GEN_MISSING', Rect(x, y, w - 106 * s, h), 'NOTE', label=f'Needs the {MESH_MAP[missing[0]].label.lower()} map')
         flow.add('OPEN_BAKE', Rect(x + w - 100 * s, y, 100 * s, h), 'CHIP', label='Bake maps', tip='Open the bake card')
         return
     half = (w - 4 * s) / 2
@@ -681,13 +678,22 @@ def generator_section(flow, data, layer, w):
             flow.add(key, Rect(x + column * (width + 4 * s), y, width, h), 'SLIDER', label=text, value=value / top,
                      text=f'{value:.0f}' if key == 'GEN_SCALE' else f'{value:.2f}')
     flow.add('GEN_INVERT', Rect(x + w - 80 * s, y, 80 * s, h), 'TOGGLE', label='Invert', active=layer.gen_invert, tip='Swap revealed and hidden areas')
+    if layer.generator == 'BUILDER':
+        x, y, h = flow.field()
+        third = (w - 8 * s) / 3
+        for column, (key, text, field) in enumerate(BUILDER_SLIDERS):
+            value = getattr(layer, field)
+            flow.add(key, Rect(x + column * (third + 4 * s), y, third, h), 'SLIDER', label=text, value=value, text=f'{value:.2f}',
+                     tip=f'How much {text.lower()} feed the mask')
 
 
 def generator_lines(data):
     layer = active_layer(data)
     if layer.generator == 'NONE':
         return 1
-    return 3 if generator_ready(data, layer) else 2
+    if missing_maps(data, layer):
+        return 2
+    return 4 if layer.generator == 'BUILDER' else 3
 
 
 def mask_section(flow, data, layer, w):
@@ -946,11 +952,13 @@ def color_popover(layout, state, bounds):
 def menu_popover(layout, state, bounds):
     s = layout.scale
     items = state.popover.items
-    card = place_popover(bounds, state.popover.anchor, 196 * s, (len(items) * 26 + 8) * s, s)
-    y = card.top - 4 * s
-    for key, label, active in items:
-        y -= 26 * s
-        layout.add(key, Rect(card.x + 4 * s, y, card.w - 8 * s, 26 * s), 'MENUITEM', label=label, active=active)
+    rows = max(1, min(len(items), int((bounds.h - 24 * s) // (MENU_ROW * s))))
+    columns = math.ceil(len(items) / rows)
+    card = place_popover(bounds, state.popover.anchor, MENU_WIDTH * columns * s, (rows * MENU_ROW + 8) * s, s)
+    for index, (key, label, active) in enumerate(items):
+        column, row = divmod(index, rows)
+        rect = Rect(card.x + (4 + column * MENU_WIDTH) * s, card.top - (4 + (row + 1) * MENU_ROW) * s, (MENU_WIDTH - 8) * s, MENU_ROW * s)
+        layout.add(key, rect, 'NOTE' if key.startswith(MENU_HEADING) else 'MENUITEM', label=label, active=active)
     return card
 
 

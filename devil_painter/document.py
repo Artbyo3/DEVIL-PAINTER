@@ -1,6 +1,7 @@
 import bpy
 from .blending import BLEND_MODES, CHANNEL, CHANNELS, FOLDER_BLENDS
-from .effects import EFFECT_KINDS, FILTERS, MASK_BLENDS
+from .effects import EFFECT_KINDS, MASK_BLENDS
+from .filters import FILTERS
 from .masks import GENERATORS
 from .procedural import PATTERNS
 
@@ -101,6 +102,9 @@ class DEVIL_PAINTER_PG_layer(bpy.types.PropertyGroup):
     gen_noise: bpy.props.FloatProperty(default=.3, min=0.0, max=1.0)
     gen_scale: bpy.props.FloatProperty(default=20.0, min=.5, max=200.0)
     gen_invert: bpy.props.BoolProperty(default=False)
+    gen_edges: bpy.props.FloatProperty(default=.5, min=0.0, max=1.0)
+    gen_dirt: bpy.props.FloatProperty(default=.5, min=0.0, max=1.0)
+    gen_top: bpy.props.FloatProperty(default=0.0, min=0.0, max=1.0)
     tiling: bpy.props.FloatProperty(default=1.0, min=0.05, max=100.0)
     slots: bpy.props.CollectionProperty(type=DEVIL_PAINTER_PG_slot)
     image: bpy.props.PointerProperty(type=bpy.types.Image)
