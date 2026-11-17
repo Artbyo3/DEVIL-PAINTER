@@ -1,7 +1,7 @@
 [project]
 site_url = "https://artbyo3.github.io/DEVIL-PAINTER/"
 site_name = "Devil Painter"
-site_description = "Devil Painter add-on for Blender."
+site_description = "A layer-based texture painting add-on for Blender."
 site_author = "Artbyo3"
 extra_css = ["stylesheets/extra.css", "stylesheets/landing.css", "stylesheets/guides.css", "stylesheets/screenshots.css"]
 

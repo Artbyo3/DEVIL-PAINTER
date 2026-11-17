@@ -228,7 +228,7 @@ body:has(.dp-landing-container) .md-content__inner {
   line-height: 1.3;
   letter-spacing: 0.005em;
   text-decoration: none !important;
-  cursor: default;
+  cursor: pointer;
   user-select: none;
   transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease, box-shadow 160ms ease;
 }
@@ -328,6 +328,24 @@ body:has(.dp-landing-container) a:focus-visible {
   width: 100%;
   height: 32px;
   mask-image: linear-gradient(to right, transparent, #000 8%, #000 92%, transparent);
+}
+
+.dp-contributors-stripe.is-static {
+  justify-content: center;
+  mask-image: none;
+}
+
+.dp-contributors-track.is-static {
+  animation: none;
+  justify-content: center;
+}
+
+.dp-contributors-track.is-static .dp-marquee-set {
+  gap: 2.5rem;
+}
+
+.dp-contributors-track.is-static .dp-contributor-item {
+  margin-right: 0;
 }
 
 .dp-contributor-item {
