@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Optional
-from .shell import HEIGHTS, PLACES, SIDES, WIDTHS
+from .shell import HEIGHTS, WIDTHS, default_strips
 
 
 @dataclass
@@ -27,9 +27,9 @@ class WorkspaceState:
     text: Optional[TextEdit] = None
     drag: Optional[tuple] = None
     hsv: tuple = (0.0, 0.0, 0.0)
-    places: dict = field(default_factory=lambda: {side: list(PLACES[side]) for side in SIDES})
+    strips: dict = field(default_factory=default_strips)
     section_heights: dict = field(default_factory=lambda: dict(HEIGHTS))
-    side_widths: dict = field(default_factory=lambda: dict(WIDTHS))
+    section_widths: dict = field(default_factory=lambda: dict(WIDTHS))
     shelf_open: bool = True
     shelf_tab: str = 'MATERIALS'
     armed: str = ''

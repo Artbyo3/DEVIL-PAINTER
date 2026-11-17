@@ -27,7 +27,7 @@ from .masks import BUILDER_SLIDERS, GENERATORS
 from .polyfill import POLY_NOUN
 from .meshmaps import MESH_MAPS
 from .minimal import MENU_HEADING, SAMPLE_TOP, EXPOSURE_RANGE, GAMMA_RANGE, PROJECTOR_RANGE, NORMAL_SLIDERS, STENCIL_SLIDERS, FX_RANGES, effect_menu, layer_rows, FOV_RANGE, RECENT_COLORS, SHADER_SLIDERS, BRUSH_SLIDERS, BRUSH_TOGGLES, GENERATOR_SLIDERS, MAX_BRUSH_SIZE, REPLACE_TARGET, EFFECT_TARGET, SCALE_RANGE, TILING_RANGE, from_slider, painter_layout
-from .shell import HEADER, HEIGHTS, PANELS, ROWS_ONLY, SECTIONS, SIDES, clamp_height, clamp_width, flexible, place, resize_stack
+from .shell import COLUMNS, HEADER, HEIGHTS, PANELS, ROWS_ONLY, SECTIONS, SIDES, WIDTHS, clamp_length, clamp_strip, default_strips, flexible, place, resize_run
 from .state import Popover, TextEdit, WorkspaceState
 
 TIMER_INTERVAL = .3
@@ -563,12 +563,12 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self._area.tag_redraw()
             if result is not None:
                 return result
-            if control.kind == 'TOOL' and self.state.drag is None and 'DOCK' in layout.zones.rects and layout.zones.rects['DOCK'].contains(*self.pointer):
-                self.grab_section('DOCK')
-        elif control is None and press and event.type == 'LEFTMOUSE' and not event.alt and layout.covers(*self.pointer):
+        elif control is None and press and event.type in {'LEFTMOUSE', 'RIGHTMOUSE'} and not event.alt and layout.covers(*self.pointer):
             name = next((key for key, rect in layout.zones.rects.items() if rect.contains(*self.pointer)), None)
-            if name is not None:
+            if name is not None and event.type == 'LEFTMOUSE':
                 self.grab_section(name)
+            elif name is not None:
+                self.state.popover = Popover('MENU', Rect(self.pointer[0], self.pointer[1], 1, 1), items=(('RESET_LAYOUT', 'Reset layout', False),))
         return {'RUNNING_MODAL'}
 
     def grab_section(self, name):
@@ -930,35 +930,36 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
     def load_column(self):
         saved = library.settings().get('workspace', {})
         try:
-            places = {side: [key for key in saved.get('places', {}).get(side, ()) if key in SECTIONS] for side in SIDES}
-            if sorted(key for side in SIDES for key in places[side]) == sorted(SECTIONS) and not any(key in ROWS_ONLY for side in ('LEFT', 'RIGHT')
-                                                                                                    for key in places[side]):
-                self.state.places = places
-            self.state.section_heights.update({key: clamp_height(key, float(value)) for key, value in saved.get('heights', {}).items() if key in SECTIONS})
-            self.state.side_widths.update({side: float(value) for side, value in saved.get('widths', {}).items() if side in ('LEFT', 'RIGHT')})
+            strips = {side: [dict(size=float(strip['size']), items=[key for key in strip['items'] if key in SECTIONS]) for strip in saved.get('strips', {}).get(side, ())]
+                      for side in SIDES}
+            placed = [key for side in SIDES for strip in strips[side] for key in strip['items']]
+            if sorted(placed) == sorted(SECTIONS) and not any(key in ROWS_ONLY for side in COLUMNS for strip in strips[side] for key in strip['items']):
+                self.state.strips = {side: [strip for strip in strips[side] if strip['items']] for side in SIDES}
+            self.state.section_heights.update({key: clamp_length(key, float(value)) for key, value in saved.get('heights', {}).items() if key in SECTIONS})
+            self.state.section_widths.update({key: clamp_length(key, float(value)) for key, value in saved.get('widths', {}).items() if key in SECTIONS})
             self.state.collapsed |= {key for key in saved.get('collapsed', ()) if key in PANELS}
-        except (TypeError, ValueError, AttributeError):
+        except (TypeError, ValueError, AttributeError, KeyError):
             return
 
     def save_column(self):
-        library.settings()['workspace'] = dict(places={side: list(keys) for side, keys in self.state.places.items()},
-                                               heights=dict(self.state.section_heights), widths=dict(self.state.side_widths),
+        library.settings()['workspace'] = dict(strips=self.state.strips, heights=dict(self.state.section_heights), widths=dict(self.state.section_widths),
                                                collapsed=sorted(key for key in self.state.collapsed if key in PANELS))
         library.save_settings()
 
+    def reset_layout(self):
+        self.state.strips, self.state.section_heights, self.state.section_widths = default_strips(), dict(HEIGHTS), dict(WIDTHS)
+        self.state.collapsed -= set(PANELS)
+        self.save_column()
+        return 'The workspace layout is back to its default.'
+
     def track_section(self, name, release, toggle):
         moved = math.dist(self.pointer, self.drag_origin) > DRAG_START * self.workspace.scale
-        places = place(self.state.places, name, *self.pointer, self.workspace.zones) if moved else None
-        self.state.drop = ('SECTION', name, places) if places is not None and not release else ()
+        strips = place(self.state.strips, name, *self.pointer, self.workspace.zones) if moved else None
+        self.state.drop = ('SECTION', name, strips) if strips is not None and not release else ()
         if not release:
             return
-        if places is not None:
-            side = next(where for where, keys in places.items() if name in keys)
-            if side in ('LEFT', 'RIGHT') and not self.state.places[side]:
-                self.state.side_widths[side] = 40.0 if name == 'DOCK' else 330.0
-            if name == 'DOCK':
-                self.state.section_heights['DOCK'] = 40.0 if side in ('TOP', 'BOTTOM') else HEIGHTS['DOCK']
-            self.state.places = places
+        if strips is not None:
+            self.state.strips = strips
         elif toggle:
             self.state.collapsed ^= {name}
         else:
@@ -967,21 +968,24 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
 
     def resize_section(self, name):
         found, s = self.workspace.zones, self.workspace.scale
-        rect, side = found.rects[name], found.sides[name]
-        header = HEADER if name in PANELS else 0
-        if side in ('TOP', 'BOTTOM'):
-            size = (rect.top - self.pointer[1]) if side == 'TOP' else (self.pointer[1] - rect.y)
-            self.state.section_heights[name] = clamp_height(name, size / s - header)
-            return
-        keys = [key for key in self.state.places[side] if key in found.rects and flexible(key, self.state.collapsed, self.state.shelf_open)]
-        if name in keys:
-            want = (rect.top - self.pointer[1]) / s - header
-            self.state.section_heights = resize_stack(keys, self.state.section_heights, name, want, found.rooms[side])
+        rect, (side, index) = found.rects[name], found.places[name]
+        items = [key for key in self.state.strips[side][index]['items'] if key in found.rects]
+        if side in COLUMNS:
+            keys = [key for key in items if flexible(key, self.state.collapsed, self.state.shelf_open) and key not in found.tails]
+            if name in keys:
+                want = (rect.top - self.pointer[1]) / s - (HEADER if name in PANELS else 0)
+                self.state.section_heights = resize_run(keys, self.state.section_heights, name, want, found.rooms[(side, index)] - 48)
+        else:
+            keys = items[:-1]
+            if name in keys:
+                self.state.section_widths = resize_run(keys, self.state.section_widths, name, (self.pointer[0] - rect.x) / s, found.rooms[(side, index)] - 48)
 
-    def resize_side(self, side):
-        area, s = self.workspace.zones.areas[side], self.workspace.scale
-        width = (self.pointer[0] - area.x) if side == 'LEFT' else (area.x + area.w - self.pointer[0])
-        self.state.side_widths[side] = clamp_width(width / s, self.state.places[side])
+    def resize_strip(self, side, index):
+        rect = next(rect for where, number, rect in self.workspace.zones.strips if where == side and number == index)
+        x, y = self.pointer
+        size = dict(LEFT=x - rect.x, RIGHT=rect.x + rect.w - x, TOP=rect.top - y, BOTTOM=y - rect.y)[side] / self.workspace.scale
+        strip = self.state.strips[side][index]
+        strip['size'] = clamp_strip(side, size, strip['items'])
 
     def drop_target(self, prefix):
         return next((control for control in self.workspace.controls if control.kind == 'ROW' and control.key.startswith(prefix)
@@ -1306,8 +1310,9 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
                 self.resize_section(key.removeprefix('SIZE.'))
             if release:
                 self.save_column()
-        elif key.startswith('WIDTH.'):
-            self.resize_side(key.removeprefix('WIDTH.'))
+        elif key.startswith('STRIP.'):
+            _, side, index = key.split('.')
+            self.resize_strip(side, int(index))
             if release:
                 self.save_column()
         elif key.startswith(('DRAG_SECTION.', 'GRAB_SECTION.')):
@@ -1493,6 +1498,9 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.message = actions.start(context, obj, resolutions, found and self.state.setup_udim, self.state.setup_template,
                                          self.state.setup_normal_format, self.state.setup_normal_space, self.state.setup_unwrap)
             self.hide_regions()
+        elif key == 'RESET_LAYOUT':
+            self.state.popover = None
+            self.message = self.reset_layout()
         elif control.kind == 'HEADER' and key.startswith('PANEL_'):
             self.state.drag = ('DRAG_SECTION.' + key.removeprefix('PANEL_'), control.rect)
             self.drag_origin = self.pointer

@@ -234,11 +234,7 @@ class Renderer:
                 self.round_rect_outline(rect, SURFACE_OUTLINE, radius=metrics.menu_back)
                 if title:
                     self.text(rect.x + 14 * s, rect.y + rect.h - 24 * s, title, 13, TEXT_PRIMARY)
-            for group in layout.tool_groups:
-                self.round_rect(group, SURFACE_FLOATING, radius=metrics.toolbar_item)
             hovered = self.controls(ed, layout.controls[:split], metrics)
-            for group in layout.tool_groups:
-                self.round_rect_outline(group, SURFACE_OUTLINE, radius=metrics.toolbar_item)
             if layout.popover is not None:
                 self.round_rect(layout.popover, SURFACE_FLOATING, radius=metrics.menu_back)
                 self.round_rect_outline(layout.popover, SURFACE_OUTLINE, radius=metrics.menu_back)

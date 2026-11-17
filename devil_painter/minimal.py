@@ -24,7 +24,7 @@ from .meshmaps import MESH_MAP, MESH_MAPS
 from .painting import TOOLS
 from .polyfill import POLY_MODES
 from .privacy import masked, masked_path
-from .shell import HEADER, SECTIONS, arrange, flexible
+from .shell import COLUMNS, HEADER, SECTIONS, arrange, flexible
 from .ui_system import ACCENT, MinimalMetrics
 
 MAX_BRUSH_SIZE = 500
@@ -358,12 +358,12 @@ def dock_layout(layout, zone, tool, state):
     button, gap = 36 * s, 6 * s
     groups = [[(key, label, shortcut, key) for key, label, _, shortcut in TOOLS], [('POLYFILL', 'Polygon fill', '', 'POLYGON'), ('PATH', 'Path', '', 'RULER')],
               [('UNDO', 'Undo', 'Ctrl Z', 'UNDO'), ('REDO', 'Redo', 'Ctrl Shift Z', 'REDO')]]
-    left, top = zone.x, zone.top
-    per_row = max(1, int((zone.x + zone.w - left) // button))
-    size = (zone.x + zone.w - left) / per_row if per_row == 1 else button
+    layout.cards.append((zone, ''))
+    left, top = zone.x + 2 * s, zone.top - 2 * s
+    per_row = max(1, int((zone.x + zone.w - 2 * s - left) // button))
+    size = (zone.x + zone.w - 2 * s - left) / per_row if per_row == 1 else button
     index = 0
     for group in groups:
-        segments = {}
         for key, label, shortcut, icon in group:
             row, column = divmod(index, per_row)
             rect = Rect(left + column * size, top - (row + 1) * button, size, button)
@@ -372,9 +372,6 @@ def dock_layout(layout, zone, tool, state):
                 continue
             active = bool(state.poly_mode) if key == 'POLYFILL' else bool(state.path_mode) if key == 'PATH' else key == tool and not (state.poly_mode or state.path_mode)
             layout.add(key, rect, 'TOOL', icon=icon, label=label, active=active, tip=label, shortcut=shortcut)
-            segments.setdefault(row, []).append(rect)
-        for rects in segments.values():
-            layout.tool_groups.append(Rect(rects[0].x, rects[0].y, rects[-1].x + rects[-1].w - rects[0].x, button))
         if per_row == 1:
             top -= gap
 
@@ -1603,19 +1600,24 @@ def shown_sections(data):
     return {key for key in SECTIONS if key != 'PROPERTIES' or data.layers}
 
 
-def section_controls(layout, state, key, rect, side):
+def section_controls(layout, state, key, rect, side, tail):
     s = layout.scale
-    if not flexible(key, state.collapsed, state.shelf_open):
-        return
-    edge = Rect(rect.x, rect.top, rect.w, 6 * s) if side == 'BOTTOM' else Rect(rect.x, rect.y - 6 * s, rect.w, 6 * s)
-    layout.add('SIZE.' + key, edge, 'GRIP', tip=f'Drag to resize the {SECTION_NAMES[key]}')
+    if side in COLUMNS:
+        if flexible(key, state.collapsed, state.shelf_open) and not tail:
+            layout.add('SIZE.' + key, Rect(rect.x, rect.y - 6 * s, rect.w, 6 * s), 'GRIP', tip=f'Drag to resize the {SECTION_NAMES[key]}')
+    elif not tail:
+        layout.add('SIZE.' + key, Rect(rect.x + rect.w, rect.y, 6 * s, rect.h), 'GRIP', tip=f'Drag to resize the {SECTION_NAMES[key]}')
+
+
+def strip_grip(side, rect, s):
+    return dict(LEFT=Rect(rect.x + rect.w, rect.y, 6 * s, rect.h), RIGHT=Rect(rect.x - 6 * s, rect.y, 6 * s, rect.h),
+                TOP=Rect(rect.x, rect.y - 6 * s, rect.w, 6 * s), BOTTOM=Rect(rect.x, rect.top, rect.w, 6 * s))[side]
 
 
 def sections_layout(layout, state, data, bounds, obj_name, tool, brush):
     s, found = layout.scale, layout.zones
     builders = dict(SETS=sets_panel, LAYERS=layers_panel, PROPERTIES=properties_panel)
     for key, rect in found.rects.items():
-        side = found.sides[key]
         if key == 'BAR':
             workspace_bar(layout, rect, data, obj_name, state.view_2d)
         elif key == 'STRIP':
@@ -1630,21 +1632,18 @@ def sections_layout(layout, state, data, bounds, obj_name, tool, brush):
             card, viewport, scroll = panel(layout, state, spec, rect.x, rect.top, rect.w, view)
             if view > 0:
                 spec.fill(layout, state, data, Flow(layout, viewport, scroll, spec.pad))
-        section_controls(layout, state, key, rect, side)
-    for side in ('LEFT', 'RIGHT'):
-        area = found.areas[side]
-        if area.w > 0:
-            edge = Rect(area.x + area.w, area.y, 6 * s, area.h) if side == 'LEFT' else Rect(area.x - 6 * s, area.y, 6 * s, area.h)
-            layout.add('WIDTH.' + side, edge, 'GRIP', tip='Drag to resize this side')
+        section_controls(layout, state, key, rect, found.places[key][0], key in found.tails)
+    for side, index, rect in found.strips:
+        layout.add(f'STRIP.{side}.{index}', strip_grip(side, rect, s), 'GRIP', tip='Drag to resize this column' if side in COLUMNS else 'Drag to resize this row')
     if state.drop and state.drop[0] == 'SECTION':
-        moved = arrange(bounds, s, state.drop[2], state.section_heights, state.side_widths, shown_sections(data), state.collapsed, state.shelf_open)
+        moved = arrange(bounds, s, state.drop[2], state.section_heights, state.section_widths, shown_sections(data), state.collapsed, state.shelf_open)
         if state.drop[1] in moved.rects:
             layout.add('SECTION_GHOST', moved.rects[state.drop[1]], 'GHOST')
 
 
 def painter_layout(bounds, scale, state, data, obj_name, tool, brush, directory, setup, viewport):
     shown = shown_sections(data) if data is not None else set(SECTIONS)
-    layout = Layout(scale, MinimalMetrics.resolve(), arrange(bounds, scale, state.places, state.section_heights, state.side_widths, shown,
+    layout = Layout(scale, MinimalMetrics.resolve(), arrange(bounds, scale, state.strips, state.section_heights, state.section_widths, shown,
                                                               state.collapsed, state.shelf_open))
     if data is not None and state.gizmo:
         gizmo_layout(layout, state.gizmo)
