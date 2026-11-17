@@ -7,7 +7,7 @@ import numpy
 import math
 import gpu
 from gpu_extras.batch import batch_for_shader
-from . import actions, autosave, bridge, brushes, compositing, dynamics, packs, exporting, library, meshmaps, painting, polyfill, post, projection, vectors, projects, sets, shelf, shortcuts, smart, strokes, thumbnails
+from . import actions, autosave, bridge, brushes, compositing, dynamics, packs, tiles, exporting, library, meshmaps, painting, polyfill, post, projection, vectors, projects, sets, shelf, shortcuts, smart, strokes, thumbnails
 from .blending import BLEND_MODES, CHANNEL, FOLDER_BLENDS, linear_to_srgb, srgb_to_linear
 from .ui_system import ACCENT
 from .canvas import Rect
@@ -706,6 +706,8 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         buffered = painting.uses_stroke_buffer(context, data)
         if tool == 'PAINT' and data.brush_dynamics != 'NONE':
             return True
+        if obj.devil_painter.cross_tiles and len(tiles.numbers(data)) > 1 and tool in painting.BUFFER_TOOLS - {'FILL'}:
+            return True
         return buffered and (tool in GESTURE_TOOLS or (tool == 'PAINT' and 'flow' in data.brush_slots and data.brush_slots['flow'].enabled))
 
     def start_gesture(self, context, event):
@@ -780,26 +782,48 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         trails = [points]
         if data.brush_dynamics != 'NONE' and painting.active_tool(self.scene) == 'PAINT':
             trails = dynamics.trails(data.brush_dynamics, self._region, self._area.spaces.active.region_3d, obj, points, size)
-        for trail in trails:
-            self.replay(context, obj, data, trail)
-        if not buffered:
-            bpy.ops.ed.undo_push(message='Devil Painter: stroke')
-            strokes.record(None)
-            return ''
+        spots = [self.texture_point(obj, data, point) for point, _ in points]
+        project = obj.devil_painter
+        crossing = project.cross_tiles and len(tiles.numbers(data)) > 1
+        touched = list(dict.fromkeys(spot[0] for spot in spots if spot and spot[0] in tiles.numbers(data))) if crossing else []
+        home = project.active_tile
+        before, after, notes = [], [], []
+        try:
+            for tile in touched or [home]:
+                if crossing:
+                    project.active_tile = tile
+                    sets.mask_faces(obj, project)
+                    painting.update_canvas(context, data)
+                for trail in trails:
+                    self.replay(context, obj, data, trail)
+                if buffered:
+                    entry, note = self.merge_pass(obj, data, points, spots, size)
+                    notes.append(note)
+                    if entry is not None:
+                        before += entry.before
+                        after += entry.after
+        finally:
+            if crossing and project.active_tile != home:
+                project.active_tile = home
+                sets.mask_faces(obj, project)
+                painting.update_canvas(context, data)
+        bpy.ops.ed.undo_push(message='Devil Painter: stroke')
+        strokes.record(strokes.Fill(before, after) if before else None)
+        message = next((note for note in notes if note), '')
+        if len(touched) > 1 and not message:
+            message = f'The stroke crossed UV tiles {", ".join(str(tile) for tile in touched)}.'
+        return message
+
+    def merge_pass(self, obj, data, points, spots, size):
         tile = active_tile(data)
-        path = [(spot[1], spot[2]) for spot in (self.texture_point(obj, data, point) for point, _ in points) if spot and spot[0] == tile]
-        first, edge = self.texture_point(obj, data, points[0][0]), self.texture_point(obj, data, (points[0][0][0] + size, points[0][0][1]))
+        path = [(spot[1], spot[2]) for spot in spots if spot and spot[0] == tile]
+        first, edge = spots[0], self.texture_point(obj, data, (points[0][0][0] + size, points[0][0][1]))
         radius = math.dist(first[1:], edge[1:]) if first and edge and first[0] == edge[0] else size
         source = self.state.clone_source[1:] if self.state.clone_source and self.state.clone_source[0] == tile else None
         if painting.active_tool(self.scene) == 'CLONE' and source is None:
             strokes.merge(obj, data, None)
-            return 'Ctrl+click on the model to set the clone source first.'
-        entry = strokes.merge(obj, data, strokes.Gesture(path, radius, source))
-        if entry is None:
-            return ''
-        bpy.ops.ed.undo_push(message='Devil Painter: stroke')
-        strokes.record(entry)
-        return ''
+            return None, 'Ctrl+click on the model to set the clone source first.'
+        return strokes.merge(obj, data, strokes.Gesture(path, radius, source)), ''
 
     def begin_stroke(self, context):
         obj, data = self.painted()
@@ -1762,6 +1786,10 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.message = actions.set_set_value(context, obj, data, 'transparency', key.removeprefix('TRANSP.'), True)
         elif key == 'TRANSP_OVERLAP':
             self.message = actions.set_set_value(context, obj, data, 'transparency_overlap', not data.transparency_overlap, True)
+        elif key == 'CROSS_TILES':
+            obj.devil_painter.cross_tiles = not obj.devil_painter.cross_tiles
+            self.message = ('Strokes cross UV tiles; they appear when you release the mouse.' if obj.devil_painter.cross_tiles
+                            else 'Strokes stay in the tile they start in and show live.')
         elif key == 'AUTOSAVE':
             autosave.set_minutes(0 if autosave.minutes() else AUTOSAVE_DEFAULT)
             self.message = autosave.status() + '.'

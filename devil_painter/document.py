@@ -212,6 +212,7 @@ class DEVIL_PAINTER_PG_project(bpy.types.PropertyGroup):
     mask_backup: bpy.props.BoolProperty(default=False)
     mask_backup_set: bpy.props.BoolProperty(default=False)
     post_enabled: bpy.props.BoolProperty(default=False)
+    cross_tiles: bpy.props.BoolProperty(default=True)
     post_bloom: bpy.props.FloatProperty(default=.3, min=0.0, max=1.0)
     post_vignette: bpy.props.FloatProperty(default=.3, min=0.0, max=1.0)
     post_aberration: bpy.props.FloatProperty(default=0.0, min=0.0, max=1.0)

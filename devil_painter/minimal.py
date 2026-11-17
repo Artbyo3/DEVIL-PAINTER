@@ -1350,7 +1350,7 @@ def padding_label(padding):
 def project_popover(layout, state, bounds, data):
     s = layout.scale
     project = data.id_data.devil_painter
-    card = place_popover(bounds, state.popover.anchor, 420 * s, (15 * LINE_HEIGHT + 30) * s, s)
+    card = place_popover(bounds, state.popover.anchor, 420 * s, (16 * LINE_HEIGHT + 30) * s, s)
     x, w = card.x + 14 * s, card.w - 28 * s
     y = card.top - 34 * s
     layout.add('PROJECT_TITLE', Rect(x, y, w, 22 * s), 'NOTE', label='Project · ' + project.template)
@@ -1388,6 +1388,9 @@ def project_popover(layout, state, bounds, data):
                value=(max(minutes, 1) - autosave.MINUTE_RANGE[0]) / (autosave.MINUTE_RANGE[1] - autosave.MINUTE_RANGE[0]), text=f'{max(minutes, 1)} min')
     y -= LINE_HEIGHT * s
     layout.add('AUTOSAVE_INFO', Rect(x, y, w, 24 * s), 'NOTE', label=autosave.status())
+    y -= LINE_HEIGHT * s
+    layout.add('CROSS_TILES', Rect(x, y, w, 24 * s), 'TOGGLE', label='Strokes cross UV tiles', active=project.cross_tiles,
+               tip='Paint one stroke across UDIM tiles; it shows when you release the mouse. Off, strokes stay in their tile and show live')
     y -= LINE_HEIGHT * s
     half = (w - 4 * s) / 2
     layout.add('REIMPORT', Rect(x, y, half, 24 * s), 'CHIP', label='Reimport from file', tip='Swap in an updated mesh file and keep the layers')
