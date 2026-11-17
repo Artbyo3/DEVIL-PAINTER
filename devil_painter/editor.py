@@ -7,11 +7,11 @@ import numpy
 import math
 import gpu
 from gpu_extras.batch import batch_for_shader
-from . import actions, brushes, compositing, exporting, library, painting, projects, sets, shelf, shortcuts, smart, strokes, thumbnails
+from . import actions, brushes, compositing, exporting, library, meshmaps, painting, projects, sets, shelf, shortcuts, smart, strokes, thumbnails
 from .blending import BLEND_MODES, CHANNEL, FOLDER_BLENDS, linear_to_srgb, srgb_to_linear
 from .ui_system import ACCENT
 from .canvas import Rect
-from .document import RESOLUTIONS, active_effect, active_layer, active_tile, find_layer, paint_target, set_channels, slot_value, texture_set
+from .document import BAKE_ID_LABELS, RESOLUTIONS, active_effect, active_layer, active_tile, find_layer, paint_target, set_channels, slot_value, texture_set
 from .effects import FILTERS, MASK_BLENDS
 from .procedural import PATTERNS
 from .tiles import variant
@@ -39,6 +39,8 @@ PROJECTION_LABELS = {'UV': 'UV', 'TRIPLANAR': 'Tri-planar'}
 BRUSH_RANGES = {key: (field, top, .01 if key == 'BRUSH_FLOW' else 1.0 if key == 'BRUSH_SPACING' else 0.0) for key, _, field, top, _ in BRUSH_SLIDERS}
 BRUSH_FLAGS = {key: field for key, _, field in BRUSH_TOGGLES}
 GENERATOR_RANGES = {key: (field, top) for key, _, field, top in GENERATOR_SLIDERS}
+BAKE_OBJECTS = {'BAKE_SOURCE': ('bake_source', 'SET_SOURCE.'), 'BAKE_CAGE': ('bake_cage', 'SET_CAGE.')}
+AUTO_BAKE_DELAY = 1.0
 LAYER_KEYS = ('ROW_', 'FX_', 'EYE_', 'FXEYE_', 'MASKTHUMB_')
 _active = None
 
@@ -163,8 +165,26 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         name = obj.name if obj is not None and obj.type == 'MESH' else ''
         directory = (obj.devil_painter.export_directory or default_directory(obj)) if data is not None else ''
         viewport = (space.shading, space.lens, space.region_3d.view_perspective == 'ORTHO')
+        if data is not None and self.state.popover is not None and self.state.popover.kind == 'BAKE':
+            self.state.bake_found = meshmaps.bake_sources(bpy.context, obj, data)
         return painter_layout(self.bounds, scale, self.state, data, name, painting.active_tool(self.scene), brush, directory, self.setup(obj, data),
                               viewport)
+
+    def auto_bake(self, context):
+        obj, data = self.painted()
+        if data is None or not data.bake_auto or obj.mode != 'TEXTURE_PAINT' or self.stroke_pending:
+            return
+        current = meshmaps.signature(context, obj, data)
+        if current == data.bake_signature:
+            self.state.bake_pending = ''
+        elif current != self.state.bake_pending:
+            self.state.bake_pending, self.state.bake_since = current, time.monotonic()
+        elif time.monotonic() - self.state.bake_since >= AUTO_BAKE_DELAY:
+            self.state.bake_pending = ''
+            message = actions.rebake(context, obj, data)
+            if message:
+                self.message = message
+                self._area.tag_redraw()
 
     def setup(self, obj, data):
         if data is not None or obj is None or obj.type != 'MESH':
@@ -348,6 +368,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         if event.type in {'TIMER', 'MOUSEMOVE'} and self.stroke_pending:
             self.finish_stroke(context)
         if event.type == 'TIMER':
+            self.auto_bake(context)
             if thumbnails.waiting():
                 thumbnails.render_next()
                 self._area.tag_redraw()
@@ -905,6 +926,8 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
                 space.lens = FOV_RANGE[0] + x * (FOV_RANGE[1] - FOV_RANGE[0])
         elif key == 'BAKE_SAMPLES' and data is not None:
             data.bake_samples = max(1, round(x * 128))
+        elif key == 'BAKE_EXTRUSION' and data is not None:
+            data.bake_extrusion = max(.005, x * .5)
         elif key.startswith('BRUSHVAL.') and data is not None:
             data.brush_slots[key.removeprefix('BRUSHVAL.')].value = x
             self.brush_changed(context, data)
@@ -1053,12 +1076,26 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.state.popover = None if self.state.popover is not None and self.state.popover.kind == 'BAKE' else Popover('BAKE', control.rect)
         elif key.startswith('BAKEMAP.'):
             self.state.bake_keys ^= {key.removeprefix('BAKEMAP.')}
-        elif key == 'BAKE_SOURCE':
+        elif key in BAKE_OBJECTS:
+            field, prefix = BAKE_OBJECTS[key]
+            current = getattr(data, field)
             meshes = [item.name for item in context.view_layer.objects if item.type == 'MESH' and item != obj]
-            self.state.popover = Popover('MENU', control.rect, items=(('SET_SOURCE.', 'None', data.bake_source is None),) + tuple(
-                (f'SET_SOURCE.{name}', name, data.bake_source is not None and data.bake_source.name == name) for name in meshes))
-        elif key.startswith('SET_SOURCE.'):
-            self.message = actions.set_bake_source(context, obj, data, key.removeprefix('SET_SOURCE.'))
+            self.state.popover = Popover('MENU', control.rect, items=((prefix, 'None', current is None),) + tuple(
+                (prefix + name, name, current is not None and current.name == name) for name in meshes))
+        elif key.startswith(('SET_SOURCE.', 'SET_CAGE.')):
+            field, prefix = next(item for item in BAKE_OBJECTS.values() if key.startswith(item[1]))
+            self.message = actions.set_bake_object(context, obj, data, field, key.removeprefix(prefix))
+        elif key == 'BAKE_ID':
+            self.state.popover = Popover('MENU', control.rect, items=tuple((f'SET_BAKE_ID.{value}', label, data.bake_id == value) for value, label in BAKE_ID_LABELS.items()))
+        elif key.startswith('SET_BAKE_ID.'):
+            value = key.removeprefix('SET_BAKE_ID.')
+            self.message = actions.set_bake(context, obj, data, 'bake_id', value, f'ID map colors by {BAKE_ID_LABELS[value].lower()}.')
+        elif key == 'BAKE_MATCH':
+            self.message = actions.set_bake(context, obj, data, 'bake_match', not data.bake_match,
+                                            'High-poly and cage match by name.' if not data.bake_match else 'High-poly and cage are picked by hand.')
+        elif key == 'BAKE_AUTO':
+            self.message = actions.set_bake(context, obj, data, 'bake_auto', not data.bake_auto,
+                                            'Baked maps rebake when bake settings or meshes change.' if not data.bake_auto else 'Automatic rebaking is off.')
         elif key == 'BAKE_RUN':
             self.state.popover = None
             self.message = actions.bake_mesh_maps(context, obj, data, [item.key for item in MESH_MAPS if item.key in self.state.bake_keys])

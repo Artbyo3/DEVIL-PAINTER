@@ -778,17 +778,39 @@ def set_solo(context, obj, data, key):
 
 def bake_mesh_maps(context, obj, data, keys):
     project = obj.devil_painter
-    baked = meshmaps.bake_maps(context, obj, project, list(range(len(project.sets))), keys, data.bake_source, data.bake_samples)
+    failure = ''
+    try:
+        baked = meshmaps.bake_maps(context, obj, project, list(range(len(project.sets))), keys, data)
+    except RuntimeError as error:
+        baked, failure = [], 'Bake failed. ' + str(error).strip()
     painting.enter_paint_mode(context, obj)
     sets.mask_faces(obj, project)
+    data.bake_signature = meshmaps.signature(context, obj, data)
+    if failure:
+        return failure
     if not baked:
-        return 'Nothing to bake. Pick a high-poly source for the normal map.'
+        return 'Nothing to bake. Height needs a high-poly source.'
     return refresh(context, obj, data, f'Baked {len(baked)} mesh maps.')
 
 
-def set_bake_source(context, obj, data, name):
-    data.bake_source = bpy.data.objects.get(name) if name else None
-    return refresh(context, obj, data, f'Normal maps bake from {name}.' if name else 'No high-poly source.')
+def rebake(context, obj, data):
+    keys = meshmaps.baked_keys(data)
+    if not keys:
+        data.bake_signature = meshmaps.signature(context, obj, data)
+        return None
+    return 'Rebaked: ' + bake_mesh_maps(context, obj, data, keys)
+
+
+def set_bake(context, obj, data, name, value, message):
+    setattr(data, name, value)
+    bpy.ops.ed.undo_push(message='Devil Painter: ' + message)
+    return message
+
+
+def set_bake_object(context, obj, data, name, value):
+    target = bpy.data.objects.get(value) if value else None
+    noun = {'bake_source': 'High-poly source', 'bake_cage': 'Cage'}[name]
+    return set_bake(context, obj, data, name, target, f'{noun}: {value}.' if value else f'{noun}: none.')
 
 
 def set_generator(context, obj, data, values):

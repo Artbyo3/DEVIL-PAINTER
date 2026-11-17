@@ -9,6 +9,8 @@ SOURCES = (('VALUE', 'Value', ''), ('IMAGE', 'Texture', ''), ('PATTERN', 'Patter
 PROJECTIONS = (('UV', 'UV', ''), ('TRIPLANAR', 'Tri-planar', ''))
 SLOT_FIELDS = ('enabled', 'source', 'color', 'value', 'color_b', 'value_b', 'blend', 'opacity', 'pattern', 'scale', 'detail', 'contrast')
 LAYER_KINDS = (('PAINT', 'Paint', ''), ('FILL', 'Fill', ''), ('FOLDER', 'Folder', ''), ('INSTANCE', 'Instance', ''))
+BAKE_IDS = (('ISLAND', 'UV islands', ''), ('MATERIAL', 'Materials', ''), ('OBJECT', 'Objects', ''), ('VERTEX', 'Vertex colors', ''))
+BAKE_ID_LABELS = {key: label for key, label, _ in BAKE_IDS}
 NORMAL_FORMATS = (('OPENGL', 'OpenGL', ''), ('DIRECTX', 'DirectX', ''))
 NORMAL_SPACES = (('TANGENT', 'Tangent', ''), ('OBJECT', 'Object', ''))
 SHADERS = (('PRINCIPLED', 'Principled PBR', ''), ('UNLIT', 'Unlit', ''))
@@ -146,6 +148,12 @@ class DEVIL_PAINTER_PG_texture_set(bpy.types.PropertyGroup):
     maps: bpy.props.CollectionProperty(type=DEVIL_PAINTER_PG_map)
     bake_samples: bpy.props.IntProperty(default=16, min=1, max=256)
     bake_source: bpy.props.PointerProperty(type=bpy.types.Object, poll=is_mesh)
+    bake_match: bpy.props.BoolProperty(default=False)
+    bake_cage: bpy.props.PointerProperty(type=bpy.types.Object, poll=is_mesh)
+    bake_extrusion: bpy.props.FloatProperty(default=.1, min=.005, max=.5)
+    bake_id: bpy.props.EnumProperty(items=BAKE_IDS)
+    bake_auto: bpy.props.BoolProperty(default=False)
+    bake_signature: bpy.props.StringProperty()
 
 
 class DEVIL_PAINTER_PG_project(bpy.types.PropertyGroup):

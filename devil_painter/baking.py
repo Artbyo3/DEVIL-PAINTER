@@ -16,12 +16,14 @@ def bake_scene(context, obj, samples=BAKE_SAMPLES, extra=()):
     engine, saved_samples, mode = scene.render.engine, scene.cycles.samples, obj.mode
     selected = [item for item in context.view_layer.objects if item.select_get()]
     active = context.view_layer.objects.active
+    hidden = [(item, item.hide_get(), item.hide_render) for item in extra]
     try:
         if mode != 'OBJECT':
             bpy.ops.object.mode_set(mode='OBJECT')
         for item in selected:
             item.select_set(False)
         for item in extra:
+            item.hide_set(False)
             item.hide_render = False
             item.select_set(True)
         obj.select_set(True)
@@ -33,6 +35,9 @@ def bake_scene(context, obj, samples=BAKE_SAMPLES, extra=()):
         scene.render.engine, scene.cycles.samples = engine, saved_samples
         for item in (obj, *extra):
             item.select_set(False)
+        for item, hide, hide_render in hidden:
+            item.hide_set(hide)
+            item.hide_render = hide_render
         for item in selected:
             item.select_set(True)
         context.view_layer.objects.active = active

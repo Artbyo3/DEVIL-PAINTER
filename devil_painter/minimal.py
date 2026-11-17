@@ -6,7 +6,7 @@ import numpy
 from . import shelf, thumbnails
 from .blending import BLEND_MODES, CHANNEL, CHANNELS, FOLDER_BLENDS, linear_to_srgb
 from .canvas import Layout, Rect
-from .document import (NORMAL_FORMATS, NORMAL_SPACES, PROJECTIONS, RESOLUTIONS, SHADERS, active_effect, active_layer, children, editing_mask, find_layer,
+from .document import (BAKE_ID_LABELS, NORMAL_FORMATS, NORMAL_SPACES, PROJECTIONS, RESOLUTIONS, SHADERS, active_effect, active_layer, children, editing_mask, find_layer,
                        linked_layer, set_channels, slot_value, uses_coordinates)
 from .effects import EFFECT_ICONS, EFFECT_KINDS, FILTER, MASK_BLENDS, effect_label
 from .library import capture, texture_folder
@@ -41,6 +41,8 @@ SHELF_LABEL = 18
 SHELF_GAP = 8
 REPLACE_TARGET = '@material'
 EFFECT_TARGET = '@effect'
+BAKE_TIPS = {'normal': 'Tangent normal from the high-poly, or this mesh with rounded edges when there is none',
+             'height': 'Height difference from this mesh to the high-poly', 'id': 'Flat color regions to pick masks from'}
 SHELF_PROMPTS = {REPLACE_TARGET: 'Click a material to put into the selected layer', EFFECT_TARGET: 'Click a texture to fill the selected effect'}
 SCALE_RANGE = (-1.0, 9.0)
 TILING_RANGE = (-3.0, 5.0)
@@ -979,23 +981,44 @@ def brush_popover(layout, state, bounds, data):
 
 
 def bake_popover(layout, state, bounds, data):
-    s = layout.scale
-    card = place_popover(bounds, state.popover.anchor, 340 * s, ((len(MESH_MAPS) + 4) * LINE_HEIGHT + 24) * s, s)
+    s, sources = layout.scale, state.bake_found
+    card = place_popover(bounds, state.popover.anchor, 340 * s, ((len(MESH_MAPS) + 9) * LINE_HEIGHT + 24) * s, s)
     x, w = card.x + 14 * s, card.w - 28 * s
     y = card.top - 34 * s
-    layout.add('BAKE_TITLE', Rect(x, y, w, 22 * s), 'NOTE', label='Bake mesh maps from this mesh')
+    layout.add('BAKE_TITLE', Rect(x, y, w, 22 * s), 'NOTE', label='Bake mesh maps')
     for item in MESH_MAPS:
         y -= LINE_HEIGHT * s
         baked = data.maps[item.key].image if item.key in data.maps else None
         layout.add('BAKEMAP.' + item.key, Rect(x, y, w - 30 * s, 24 * s), 'TOGGLE', label=item.label + (' (needs high-poly)' if item.needs_source else ''),
-                   active=item.key in state.bake_keys, tip='Include this map in the bake')
+                   active=item.key in state.bake_keys, tip=BAKE_TIPS.get(item.key, 'Include this map in the bake'))
         layout.add('BAKETHUMB.' + item.key, Rect(x + w - 24 * s, y, 24 * s, 24 * s), 'SOURCE', icon='GRID', preview=baked)
+    y -= LINE_HEIGHT * s
+    layout.add('BAKE_ID', Rect(x, y, w, 24 * s), 'DROPDOWN', label='ID from', text=BAKE_ID_LABELS[data.bake_id],
+               tip='Color the ID map by UV island, material, object, or vertex color')
     y -= LINE_HEIGHT * s
     layout.add('BAKE_SAMPLES', Rect(x, y, w, 24 * s), 'SLIDER', label='Samples', value=data.bake_samples / 128, text=str(data.bake_samples),
                tip='More samples give smoother occlusion and thickness')
     y -= LINE_HEIGHT * s
-    layout.add('BAKE_SOURCE', Rect(x, y, w, 24 * s), 'DROPDOWN', label='High-poly', text=data.bake_source.name if data.bake_source else 'None',
-               tip='Bake the normal map from a detailed mesh onto this one')
+    layout.add('BAKE_MATCH', Rect(x, y, w, 24 * s), 'TOGGLE', label='Match high-poly and cage by name', active=data.bake_match,
+               tip='Use meshes named like this one with _high and _cage, for example Crate_low, Crate_high, Crate_cage')
+    y -= LINE_HEIGHT * s
+    if data.bake_match:
+        names = ', '.join(item.name for item in sources.high) or 'no match'
+        layout.add('BAKE_MATCHED', Rect(x, y, w, 24 * s), 'NOTE', label=f'High-poly: {names}')
+        y -= LINE_HEIGHT * s
+        layout.add('BAKE_MATCHED_CAGE', Rect(x, y, w, 24 * s), 'NOTE', label='Cage: ' + (sources.cage.name if sources.cage else 'none'))
+    else:
+        layout.add('BAKE_SOURCE', Rect(x, y, w, 24 * s), 'DROPDOWN', label='High-poly', text=data.bake_source.name if data.bake_source else 'None',
+                   tip='Bake normal, height, and ID from a detailed mesh onto this one')
+        y -= LINE_HEIGHT * s
+        layout.add('BAKE_CAGE', Rect(x, y, w, 24 * s), 'DROPDOWN', label='Cage', text=data.bake_cage.name if data.bake_cage else 'None',
+                   tip='A copy of this mesh pushed out over the high-poly to control where rays start')
+    y -= LINE_HEIGHT * s
+    layout.add('BAKE_EXTRUSION', Rect(x, y, w, 24 * s), 'SLIDER', label='Ray distance', value=data.bake_extrusion / .5,
+               text=f'{data.bake_extrusion * 100:.1f}%', tip='How far above and below this mesh to search for the high-poly, as a share of its size')
+    y -= LINE_HEIGHT * s
+    layout.add('BAKE_AUTO', Rect(x, y, w, 24 * s), 'TOGGLE', label='Rebake automatically', active=data.bake_auto,
+               tip='Rebake the baked maps when these settings, the high-poly, the cage, or this mesh change')
     layout.add('BAKE_RUN', Rect(x, card.y + 12 * s, w, 28 * s), 'PRIMARY', icon='PLAY', label='Bake', tip='Bake the selected maps now')
     return card
 
