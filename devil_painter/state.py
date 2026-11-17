@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Optional
+from .shell import PANEL_HEIGHTS, PANELS
 
 
 @dataclass
@@ -20,13 +21,15 @@ class TextEdit:
 @dataclass
 class WorkspaceState:
     collapsed: set = field(default_factory=set)
+    revealed: set = field(default_factory=set)
     scroll: dict = field(default_factory=dict)
     popover: Optional[Popover] = None
     text: Optional[TextEdit] = None
     drag: Optional[tuple] = None
     hsv: tuple = (0.0, 0.0, 0.0)
     column_width: float = 330.0
-    split: float = .5
+    panel_order: list = field(default_factory=lambda: list(PANELS))
+    panel_heights: dict = field(default_factory=lambda: dict(PANEL_HEIGHTS))
     shelf_open: bool = True
     shelf_tab: str = 'MATERIALS'
     armed: str = ''

@@ -5,7 +5,7 @@ import numpy
 from . import packs, thumbnails
 from .brushes import ALPHAS, PRESETS, alpha_path, preview_path, user_presets
 from .filters import FILTER, FILTERS
-from .library import (BUILTIN_MATERIALS, blend_definition, blend_materials, is_managed, library_root, material, pattern, plain, save_settings, scan,
+from .library import (BUILTIN_MATERIALS, blend_definition, blend_materials, library_root, managed_files, material, pattern, plain, save_settings, scan,
                       pack_alphas, scanned_blends, settings, texture, user_materials, vector_files)
 from .vectors import preview_file
 from .masks import GENERATOR, GENERATORS, SMART_MASKS
@@ -90,7 +90,8 @@ def items(tab):
                 + blend_items())
     if tab == 'TEXTURES':
         files, _ = scan()
-        return ([Item(path.stem, 'TEXTURE', path, managed=is_managed(path), mine=True) for path in files]
+        managed = managed_files()
+        return ([Item(path.stem, 'TEXTURE', path, managed=path in managed, mine=True) for path in files]
                 + [Item(path.stem, 'VECTOR', path, preview_file=preview_file(path, library_root() / 'vector_previews'), mine=True) for path in vector_files()])
     if tab == 'SMART':
         return ([Item(definition['name'], 'SMART', definition) for definition in BUILTIN_SMART]

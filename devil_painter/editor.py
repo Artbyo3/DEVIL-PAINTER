@@ -21,12 +21,13 @@ from .procedural import PATTERNS
 from .tiles import FIRST_TILE, variant
 from bpy_extras import view3d_utils
 from mathutils import Euler, Matrix, Vector
-from .draw import Renderer
+from .draw import TOAST_SECONDS, Renderer
+from .privacy import masked
 from .masks import BUILDER_SLIDERS, GENERATORS
 from .polyfill import POLY_NOUN
 from .meshmaps import MESH_MAPS
-from .minimal import MENU_HEADING, SAMPLE_TOP, EXPOSURE_RANGE, GAMMA_RANGE, PROJECTOR_RANGE, NORMAL_SLIDERS, STENCIL_SLIDERS, FX_RANGES, effect_menu, layer_rows, FOV_RANGE, RECENT_COLORS, SHADER_SLIDERS, BRUSH_SLIDERS, BRUSH_TOGGLES, GENERATOR_SLIDERS, MAX_BRUSH_SIZE, REPLACE_TARGET, EFFECT_TARGET, SCALE_RANGE, TILING_RANGE, from_slider, painter_layout
-from .shell import MARGIN, clamp_column, clamp_split
+from .minimal import HEADER, MENU_HEADING, SAMPLE_TOP, EXPOSURE_RANGE, GAMMA_RANGE, PROJECTOR_RANGE, NORMAL_SLIDERS, STENCIL_SLIDERS, FX_RANGES, effect_menu, layer_rows, FOV_RANGE, RECENT_COLORS, SHADER_SLIDERS, BRUSH_SLIDERS, BRUSH_TOGGLES, GENERATOR_SLIDERS, MAX_BRUSH_SIZE, REPLACE_TARGET, EFFECT_TARGET, SCALE_RANGE, TILING_RANGE, from_slider, painter_layout
+from .shell import MARGIN, PANELS, clamp_column, clamp_panel, reorder, resize_panel
 from .state import Popover, TextEdit, WorkspaceState
 
 TIMER_INTERVAL = .3
@@ -112,7 +113,10 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         self.message = ''
         self.toast_text = None
         self.toast_until = 0.0
+        self.toast_rect = None
+        self.toast_revealed = False
         self.state = WorkspaceState()
+        self.load_column()
         self.last_click = ('', 0.0)
         self.modifiers = (False, False)
         self._closed = False
@@ -375,9 +379,10 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         if context.area != self._area or context.region != self._region or context.window != self._window:
             return
         try:
-            thumbnails.begin_frame()
-            self.workspace = self.make_layout()
-            self.renderer.draw(self)
+            with thumbnails.foreground():
+                thumbnails.begin_frame()
+                self.workspace = self.make_layout()
+                self.renderer.draw(self)
         except Exception as exc:
             self.message = f"Render error: {exc}"
             traceback.print_exc()
@@ -386,7 +391,8 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         if self._closed:
             return {'FINISHED'}
         try:
-            return self.handle_event(context, event)
+            with thumbnails.foreground():
+                return self.handle_event(context, event)
         except ReferenceError:
             self.cleanup()
             self.report({'WARNING'}, 'Devil Painter closed because the view or scene it was using is gone. Reopen it from View > Devil Painter.')
@@ -410,7 +416,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             if packs.active():
                 self._area.tag_redraw()
             if thumbnails.waiting():
-                thumbnails.render_next()
+                thumbnails.dispatch()
                 self._area.tag_redraw()
             elif time.monotonic() < self.toast_until + TIMER_INTERVAL:
                 self._area.tag_redraw()
@@ -435,6 +441,11 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
                 return result
         if self.state.drag is not None:
             return self.drag_event(context, event)
+        if press and event.type == 'LEFTMOUSE' and self.toast_rect is not None and self.toast_rect.contains(*self.pointer) and masked(self.message) != self.message:
+            self.toast_revealed = not self.toast_revealed
+            self.toast_until = time.monotonic() + TOAST_SECONDS
+            self._area.tag_redraw()
+            return {'RUNNING_MODAL'}
         layout = self.workspace
         control = layout.hit(*self.pointer)
         over = layout.covers(*self.pointer) or control is not None
@@ -906,6 +917,44 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             return 'Click on the model to pick faces.'
         return actions.pick_geometry(context, obj, data, face, self.state.geo_pick == 'ISLAND')
 
+    def load_column(self):
+        saved = library.settings().get('column', {})
+        try:
+            if sorted(saved.get('order', ())) == sorted(PANELS):
+                self.state.panel_order = list(saved['order'])
+            self.state.panel_heights.update({key: clamp_panel(float(value)) for key, value in saved.get('heights', {}).items() if key in PANELS})
+            self.state.column_width = clamp_column(float(saved.get('width', self.state.column_width)))
+            self.state.collapsed |= {key for key in saved.get('collapsed', ()) if key in PANELS}
+        except (TypeError, ValueError, AttributeError):
+            return
+
+    def save_column(self):
+        library.settings()['column'] = dict(width=self.state.column_width, order=list(self.state.panel_order), heights=dict(self.state.panel_heights),
+                                            collapsed=sorted(key for key in self.state.collapsed if key in PANELS))
+        library.save_settings()
+
+    def track_panel(self, name, release):
+        s = self.workspace.scale
+        moved = math.dist(self.pointer, self.drag_origin) > DRAG_START * s
+        x, y = self.pointer
+        column = self.workspace.zones.column
+        nearby = [(max(card.y - y, y - card.top, 0.0), key) for key, card in self.workspace.panels.items()
+                  if key != name and column.x - 40 * s <= x <= column.x + column.w + 40 * s]
+        target = min(nearby)[1] if moved and nearby else None
+        if target is not None:
+            card = self.workspace.panels[target]
+            self.state.drop = ('PANEL_' + target, 'ABOVE' if y >= (card.y + card.top) / 2 else 'BELOW')
+        elif not moved:
+            self.state.drop = ()
+        if not release:
+            return
+        drop, self.state.drop = self.state.drop, ()
+        if not moved:
+            self.state.collapsed ^= {name}
+        elif drop:
+            self.state.panel_order = reorder(self.state.panel_order, name, drop[0].removeprefix('PANEL_'), drop[1] == 'BELOW')
+        self.save_column()
+
     def drop_target(self, prefix):
         return next((control for control in self.workspace.controls if control.kind == 'ROW' and control.key.startswith(prefix)
                      and control.hit(*self.pointer)), None)
@@ -1226,9 +1275,18 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         obj, data = self.painted()
         if key == 'COLUMN_EDGE':
             self.state.column_width = clamp_column((self.bounds.x + self.bounds.w - MARGIN * self.workspace.scale - self.pointer[0]) / self.workspace.scale)
-        elif key == 'SPLITTER':
-            top, room = self.workspace.splitter
-            self.state.split = clamp_split((top - self.pointer[1]) / room) if room > 0 else self.state.split
+            if release:
+                self.save_column()
+        elif key.startswith('PANEL_EDGE.'):
+            name, s = key.removeprefix('PANEL_EDGE.'), self.workspace.scale
+            shown = [panel for panel in self.workspace.panels if panel not in self.state.collapsed]
+            if name in shown:
+                want = (self.workspace.panels[name].top - HEADER * s - self.pointer[1]) / s
+                self.state.panel_heights = resize_panel(shown, self.state.panel_heights, name, want, self.workspace.panel_room)
+            if release:
+                self.save_column()
+        elif key.startswith('DRAG_PANEL.'):
+            self.track_panel(key.removeprefix('DRAG_PANEL.'), release)
         elif key == 'BRUSH_SIZE':
             painting.set_brush_value(self.scene, 'size', max(1, round(x * MAX_BRUSH_SIZE)))
         elif key == 'BRUSH_STRENGTH' and data is not None:
@@ -1410,8 +1468,9 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.message = actions.start(context, obj, resolutions, found and self.state.setup_udim, self.state.setup_template,
                                          self.state.setup_normal_format, self.state.setup_normal_space, self.state.setup_unwrap)
             self.hide_regions()
-        elif key.startswith('PANEL_'):
-            self.state.collapsed ^= {key.removeprefix('PANEL_')}
+        elif control.kind == 'HEADER' and key.startswith('PANEL_'):
+            self.state.drag = ('DRAG_PANEL.' + key.removeprefix('PANEL_'), control.rect)
+            self.drag_origin = self.pointer
         elif control.kind == 'GIZMO':
             self.state.drag = (key, control.rect)
             if key.startswith('PATH_POINT.'):
@@ -1614,7 +1673,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         elif key == 'SHELF_TOGGLE':
             self.state.shelf_open = not self.state.shelf_open
         elif key == 'TEXTURE_DIR':
-            self.begin_text(key, control.text)
+            self.begin_text(key, library.texture_folder())
         elif key == 'TEXTURE_BROWSE':
             bpy.ops.devil_painter.choose_texture_folder('INVOKE_DEFAULT')
         elif key.startswith('ITEM.'):
@@ -1648,6 +1707,8 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.state.popover = None if self.state.popover is not None and self.state.popover.kind == 'LIBRARIES' else Popover('LIBRARIES', control.rect)
         elif key == 'LIBRARY_NEW':
             self.begin_text(key, '')
+        elif key.startswith('LIBRARY.'):
+            self.state.revealed ^= {library.libraries()[int(key.removeprefix('LIBRARY.'))]}
         elif key.startswith('LIB_REMOVE.'):
             self.message = f'Removed the library {library.remove_library(int(key.removeprefix("LIB_REMOVE.")))}.'
         elif key == 'LIBRARY_BROWSE':
@@ -1709,7 +1770,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         elif key == 'EXPORT':
             self.state.popover = None if self.state.popover is not None and self.state.popover.kind == 'EXPORT' else Popover('EXPORT', control.rect)
         elif key == 'EXPORT_DIR':
-            self.begin_text(key, control.text)
+            self.begin_text(key, obj.devil_painter.export_directory or default_directory(obj))
         elif key == 'BROWSE':
             bpy.ops.devil_painter.choose_export_folder('INVOKE_DEFAULT')
         elif key == 'BRIDGE_COMMAND':

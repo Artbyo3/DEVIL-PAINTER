@@ -1,24 +1,44 @@
 import unittest
 from devil_painter.canvas import Rect
-from devil_painter.shell import MAX_COLUMN, MIN_COLUMN, distribute, zones
+from devil_painter.shell import MAX_COLUMN, MAX_PANEL, MIN_COLUMN, MIN_PANEL, fit_heights, reorder, resize_panel, zones
 
 
 def overlaps(a, b):
     return a.x < b.x + b.w and b.x < a.x + a.w and a.y < b.top and b.y < a.top
 
 
-class DistributeTests(unittest.TestCase):
-    def test_panels_that_fit_get_their_full_height(self):
-        self.assertEqual(distribute([100.0, 50.0], 400.0, (.5, .5)), [100.0, 50.0])
+class PanelHeightTests(unittest.TestCase):
+    def test_panels_keep_the_height_the_user_set_when_they_fit(self):
+        self.assertEqual(fit_heights([100.0, 50.0], 400.0, 48.0), [100.0, 50.0])
 
-    def test_space_a_small_panel_does_not_need_goes_to_the_other(self):
-        self.assertEqual(distribute([500.0, 50.0], 400.0, (.5, .5)), [350.0, 50.0])
+    def test_a_short_column_shrinks_panels_toward_their_minimum_without_overflow(self):
+        fitted = fit_heights([300.0, 300.0], 400.0, 48.0)
+        self.assertAlmostEqual(sum(fitted), 400.0)
+        self.assertTrue(all(height >= 48.0 for height in fitted))
 
-    def test_overflowing_panels_share_by_the_divider(self):
-        self.assertEqual(distribute([500.0, 500.0], 400.0, (.75, .25)), [300.0, 100.0])
+    def test_even_minimum_panels_never_overflow_a_tiny_column(self):
+        self.assertLessEqual(sum(fit_heights([48.0, 48.0, 48.0], 100.0, 48.0)), 100.0 + 1e-6)
 
-    def test_collapsed_panels_give_all_room_away(self):
-        self.assertEqual(distribute([0.0, 900.0], 400.0, (.5, .5)), [0.0, 400.0])
+    def test_growing_a_panel_takes_room_from_the_panels_below_only_when_the_column_is_full(self):
+        heights = dict(SETS=90.0, LAYERS=200.0, MAPS=100.0)
+        keys = ['SETS', 'LAYERS', 'MAPS']
+        roomy = resize_panel(keys, heights, 'LAYERS', 260.0, 1000.0)
+        self.assertEqual((roomy['LAYERS'], roomy['MAPS']), (260.0, 100.0))
+        full = resize_panel(keys, heights, 'LAYERS', 360.0, 500.0)
+        self.assertEqual(full['LAYERS'], 360.0)
+        self.assertEqual(full['MAPS'], 50.0)
+        self.assertLessEqual(sum(full.values()), 500.0)
+
+    def test_panel_heights_stay_within_safe_limits(self):
+        keys = ['SETS', 'LAYERS']
+        heights = dict(SETS=90.0, LAYERS=200.0)
+        self.assertEqual(resize_panel(keys, heights, 'LAYERS', -50.0, 1000.0)['LAYERS'], MIN_PANEL)
+        self.assertEqual(resize_panel(keys, heights, 'LAYERS', 99999.0, 99999.0)['LAYERS'], MAX_PANEL)
+
+    def test_a_dragged_panel_lands_above_or_below_its_target(self):
+        order = ['SETS', 'LAYERS', 'PROPERTIES', 'MAPS']
+        self.assertEqual(reorder(order, 'MAPS', 'SETS', False), ['MAPS', 'SETS', 'LAYERS', 'PROPERTIES'])
+        self.assertEqual(reorder(order, 'SETS', 'PROPERTIES', True), ['LAYERS', 'PROPERTIES', 'SETS', 'MAPS'])
 
 
 class ZoneTests(unittest.TestCase):

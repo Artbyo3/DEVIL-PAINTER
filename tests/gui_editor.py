@@ -119,14 +119,19 @@ def shown(key):
 
 
 def reveal(window, region, key, panel='PROPERTIES'):
-    for _ in range(30):
+    for direction in ('WHEELUPMOUSE', 'WHEELDOWNMOUSE'):
+        for _ in range(30):
+            if shown(key) or panel not in editor._active.workspace.scroll_areas:
+                break
+            viewport = editor._active.workspace.scroll_areas[panel][0]
+            x, y = region.x + viewport.x + viewport.w / 2, region.y + viewport.y + viewport.h / 2
+            window.event_simulate(type='MOUSEMOVE', value='NOTHING', x=int(x), y=int(y))
+            window.event_simulate(type=direction, value='PRESS', x=int(x), y=int(y))
+            yield 0.1
+            if direction == 'WHEELUPMOUSE' and editor._active.state.scroll.get(panel, 0.0) <= 0.0:
+                break
         if shown(key):
             break
-        viewport = editor._active.workspace.scroll_areas[panel][0]
-        x, y = region.x + viewport.x + viewport.w / 2, region.y + viewport.y + viewport.h / 2
-        window.event_simulate(type='MOUSEMOVE', value='NOTHING', x=int(x), y=int(y))
-        window.event_simulate(type='WHEELDOWNMOUSE', value='PRESS', x=int(x), y=int(y))
-        yield 0.1
     check(shown(key), key + ' scrolls into view')
 
 
@@ -904,6 +909,7 @@ def journey():
     yield 0.4
     check(not smart.smart_materials(), 'a saved smart material can be deleted from the shelf')
     for uid in (copy.uid, rusty_uid):
+        yield from reveal(window, region, 'ROW_' + uid, 'LAYERS')
         click(window, region, 'ROW_' + uid, kind='RIGHTMOUSE')
         yield 0.3
         click(window, region, 'DELETE')
@@ -928,11 +934,11 @@ def journey():
     drag(window, region, 'COLUMN_EDGE', -80, 0)
     yield 0.4
     check(control('PANEL_LAYERS').rect.w > width + 40, 'dragging the column edge widens the right column')
-    check(has('SPLITTER'), 'a divider appears between layers and properties when they do not fit')
-    properties_top = control('PANEL_PROPERTIES').rect.y
-    drag(window, region, 'SPLITTER', 0, -60)
+    check(has('PANEL_EDGE.LAYERS'), 'the layers panel has a border to resize it')
+    layers_height = editor._active.workspace.panels['LAYERS'].h
+    drag(window, region, 'PANEL_EDGE.LAYERS', 0, -60)
     yield 0.4
-    check(control('PANEL_PROPERTIES').rect.y < properties_top - 30, 'dragging the divider gives the layers more room')
+    check(editor._active.workspace.panels['LAYERS'].h > layers_height + 30, 'dragging the layers border gives the layers more room')
     for _ in range(4):
         click(window, region, 'ADD_PAINT')
         yield 0.2
@@ -945,10 +951,11 @@ def journey():
 
     rows = sum(item.key.startswith('ROW_') for item in editor._active.workspace.controls)
     check(rows < len(data.layers), 'layer rows scrolled out of view are not built or drawn')
+    layers_card = editor._active.workspace.panels['LAYERS']
     click(window, region, 'PANEL_PROPERTIES')
     yield 0.3
     check('PROPERTIES' in editor._active.state.collapsed and not has('OPACITY'), 'clicking a panel header collapses it')
-    check(sum(item.key.startswith('ROW_') for item in editor._active.workspace.controls) > rows, 'collapsing properties gives its room to the layers')
+    check(editor._active.workspace.panels['LAYERS'] == layers_card, 'collapsing properties leaves the layers panel at the size the user set')
     click(window, region, 'PANEL_PROPERTIES')
     yield 0.3
     check(has('OPACITY'), 'clicking it again expands it')

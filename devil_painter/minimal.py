@@ -23,7 +23,8 @@ from .tiles import numbers
 from .meshmaps import MESH_MAP, MESH_MAPS
 from .painting import TOOLS
 from .polyfill import POLY_MODES
-from .shell import GAP, distribute, zones
+from .privacy import masked, masked_path
+from .shell import GAP, MIN_PANEL, fit_heights, zones
 from .ui_system import ACCENT, MinimalMetrics
 
 MAX_BRUSH_SIZE = 500
@@ -46,8 +47,6 @@ THUMBNAIL = 32
 RECENT_COLORS = 8
 FOV_RANGE = (10.0, 150.0)
 MAP_TILE = 56
-MAPS_SHARE = .3
-SETS_SHARE = .25
 INDENT = 14
 CHANNEL_OPACITY_WIDTH = 44
 BLEND_WIDTH = 78
@@ -136,7 +135,8 @@ def panel(layout, state, spec, x, top, width, view):
     collapsed = spec.key in state.collapsed
     card = Rect(x, header.y - view, width, header.h + view)
     layout.cards.append((card, ''))
-    layout.add('PANEL_' + spec.key, header, 'HEADER', label=spec.title, active=not collapsed, tip='Collapse' if not collapsed else 'Expand')
+    layout.add('PANEL_' + spec.key, header, 'HEADER', label=spec.title, active=not collapsed,
+               tip=('Collapse' if not collapsed else 'Expand') + '. Drag to move the panel')
     right = header.x + header.w - 6 * s
     for action_key, label, width_units, tip in spec.actions:
         w = width_units * s
@@ -932,24 +932,28 @@ def sets_panel(layout, state, data):
 
 def column_layout(layout, state, data, zone):
     s = layout.scale
-    flexible = [layers_panel(layout, state, data)] + ([properties_panel(layout, state, data)] if data.layers else [])
-    panels = [sets_panel(layout, state, data)] + flexible + [maps_panel(layout, state, data)]
+    builders = dict(SETS=sets_panel, LAYERS=layers_panel, PROPERTIES=properties_panel, MAPS=maps_panel)
+    panels = [builders[key](layout, state, data) for key in state.panel_order if key != 'PROPERTIES' or data.layers]
     room = max(0.0, zone.h - len(panels) * HEADER * s - (len(panels) - 1) * GAP * s)
-    wants = [0.0 if spec.key in state.collapsed else spec.body for spec in panels]
-    sets_view = min(wants[0], room * SETS_SHARE)
-    maps_view = min(wants[-1], room * MAPS_SHARE)
-    room -= sets_view + maps_view
-    views = [sets_view] + distribute(wants[1:-1], room, (state.split, 1 - state.split)[:len(flexible)]) + [maps_view]
+    opened = [spec.key for spec in panels if spec.key not in state.collapsed]
+    views = dict(zip(opened, fit_heights([state.panel_heights[key] * s for key in opened], room, MIN_PANEL * s)))
+    layout.panel_room = room / s
     layout.add('COLUMN_EDGE', Rect(zone.x - 6 * s, zone.y, 6 * s, zone.h), 'GRIP', tip='Drag to resize the column')
-    layout.splitter = (zone.top - 2 * HEADER * s - sets_view - GAP * s, room)
     top = zone.top
-    for index, (spec, view) in enumerate(zip(panels, views)):
+    for spec in panels:
+        if top - HEADER * s < zone.y - .5:
+            break
+        view = views.get(spec.key, 0.0)
         card, viewport, scroll = panel(layout, state, spec, zone.x, top, zone.w, view)
+        layout.panels[spec.key] = card
         if view > 0:
             spec.fill(layout, state, data, Flow(layout, viewport, scroll, spec.pad))
+            layout.add('PANEL_EDGE.' + spec.key, Rect(zone.x, max(zone.y, card.y - GAP * s), zone.w, GAP * s), 'GRIP',
+                       tip='Drag to resize this panel')
+        if state.drop and state.drop[0] == 'PANEL_' + spec.key:
+            y = card.top + GAP * s / 2 if state.drop[1] == 'ABOVE' else card.y - GAP * s / 2
+            layout.add('DROP_LINE', Rect(zone.x, min(max(zone.y, y - s), zone.top - 2 * s), zone.w, 2 * s), 'SWATCH', color=ACCENT)
         top = card.y - GAP * s
-        if index == 1 and len(flexible) > 1 and all(wants[1:3]) and sum(wants[1:3]) > room:
-            layout.add('SPLITTER', Rect(zone.x, top, zone.w, GAP * s), 'GRIP', tip='Drag to share space between the panels')
 
 
 def shelf_header(layout, state, zone, header):
@@ -975,7 +979,7 @@ def shelf_header(layout, state, zone, header):
         x += 76 * s
         room -= 76 * s
         field = min(360 * s, max(0.0, room - 78 * s))
-        layout.add('TEXTURE_DIR', Rect(x, header.y, field, header.h), 'FIELD', text=state.text.text if editing else texture_folder(),
+        layout.add('TEXTURE_DIR', Rect(x, header.y, field, header.h), 'FIELD', text=state.text.text if editing else masked_path(texture_folder()),
                    caret=state.text.cursor if editing else -1, tip='Folder of textures to browse')
         layout.add('TEXTURE_BROWSE', Rect(x + field + 6 * s, header.y, 70 * s, header.h), 'CHIP', label='Browse', tip='Pick a texture folder')
 
@@ -1036,7 +1040,9 @@ def libraries_popover(layout, state, bounds):
     layout.add('LIBRARIES_TITLE', Rect(x, y, w, 24 * s), 'NOTE', label='Library folders: images, texture sets, and .blend materials')
     for index, folder in enumerate(folders):
         y -= LINE_HEIGHT * s
-        layout.add(f'LIBRARY.{index}', Rect(x, y, w - 30 * s, 24 * s), 'NOTE', label=folder)
+        shown = folder in state.revealed
+        layout.add(f'LIBRARY.{index}', Rect(x, y, w - 30 * s, 24 * s), 'NOTE', label=folder if shown else masked_path(folder),
+                   tip='Click to hide the full path' if shown else 'Click to show the full path')
         layout.add(f'LIB_REMOVE.{index}', Rect(x + w - 24 * s, y, 24 * s, 24 * s), 'ICON', icon='CLOSE', tip='Stop browsing this folder')
     y -= LINE_HEIGHT * s
     editing = state.text is not None and state.text.key == 'LIBRARY_NEW'
@@ -1543,14 +1549,14 @@ def export_popover(layout, state, bounds, data, directory):
                caret=state.text.cursor if editing else -1, tip='File names. Tokens: ' + ' '.join(TOKENS))
     y -= LINE_HEIGHT * s
     editing = state.text is not None and state.text.key == 'EXPORT_DIR'
-    layout.add('EXPORT_DIR', Rect(x, y, w - 76 * s, 24 * s), 'FIELD', text=state.text.text if editing else directory,
+    layout.add('EXPORT_DIR', Rect(x, y, w - 76 * s, 24 * s), 'FIELD', text=state.text.text if editing else masked_path(directory),
                caret=state.text.cursor if editing else -1, tip='Folder for the textures')
     layout.add('BROWSE', Rect(x + w - 70 * s, y, 70 * s, 24 * s), 'CHIP', label='Browse', tip='Pick a folder')
     y -= LINE_HEIGHT * s
     editing = state.text is not None and state.text.key == 'BRIDGE_COMMAND'
     bridge_text = bridge_command()
     layout.add('BRIDGE_COMMAND', Rect(x, y, w - 196 * s, 24 * s), 'FIELD',
-               text=state.text.text if editing else bridge_text or 'Optional app to send to, with {files} or {folder}',
+               text=state.text.text if editing else masked(bridge_text) or 'Optional app to send to, with {files} or {folder}',
                caret=state.text.cursor if editing else -1, tip='Command of another app; {files} becomes the exported files, {folder} the folder')
     layout.add('SEND', Rect(x + w - 190 * s, y, 92 * s, 24 * s), 'CHIP', label='Export & send', tip='Export, then open the textures in that app')
     layout.add('OPEN_FOLDER', Rect(x + w - 94 * s, y, 94 * s, 24 * s), 'CHIP', label='Open folder', tip='Show the export folder')

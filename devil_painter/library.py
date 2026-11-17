@@ -166,16 +166,27 @@ def scan():
         managed = image_files(managed_folder())
         browsed = [path for root in library_roots() for path in image_files(root) if path not in managed]
         files = list(dict.fromkeys(managed + browsed))
-        _cache['scan'] = (folder, files, texture_sets(files), blend_files([managed_folder(), *library_roots()]))
+        roots = [managed_folder(), *library_roots()]
+        _cache['scan'] = (folder, files, texture_sets(files), suffix_files(roots, BLEND_SUFFIX), frozenset(managed), suffix_files(roots, VECTOR_SUFFIX))
     return _cache['scan'][1:3]
 
 
-def vector_files():
+def suffix_files(roots, suffix):
     found = []
-    for root in [managed_folder(), *library_roots()]:
+    for root in roots:
         if root.is_dir():
-            found += [path for path in sorted(root.rglob('*' + VECTOR_SUFFIX)) if path.is_file()]
+            found += [path for path in sorted(root.rglob('*' + suffix)) if path.is_file()]
     return list(dict.fromkeys(found))[:MAX_FILES]
+
+
+def vector_files():
+    scan()
+    return _cache['scan'][5]
+
+
+def managed_files():
+    scan()
+    return _cache['scan'][4]
 
 
 def scanned_blends():
@@ -259,14 +270,6 @@ def pack_alphas():
 
 def library_roots():
     return [Path(folder) for folder in dict.fromkeys([texture_folder(), *libraries()]) if folder] + pack_texture_roots()
-
-
-def blend_files(roots):
-    found = []
-    for root in roots:
-        if root.is_dir():
-            found += [path for path in sorted(root.rglob('*' + BLEND_SUFFIX)) if path.is_file()]
-    return found[:MAX_FILES]
 
 
 def blend_materials(path):

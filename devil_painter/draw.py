@@ -8,6 +8,7 @@ from .canvas import Rect
 from .icons import ICON_LEVELS, icon_pixels, icon_spans
 from .minimal import THUMBNAIL
 from .previews import draw_image
+from .privacy import masked
 from .ui_system import (ACCENT, ACCENT_BG, ACCENT_BORDER, ACCENT_HOVER, BG_ELEVATED, BG_WELL, BORDER, SURFACE_FLOATING,
                         SURFACE_OUTLINE, TEXT_MUTED, TEXT_ON_ACCENT, TEXT_PRIMARY, TEXT_SECONDARY, ComponentRenderer, Tooltip)
 
@@ -262,12 +263,15 @@ class Renderer:
         if ed.message != ed.toast_text:
             ed.toast_text = ed.message
             ed.toast_until = time.monotonic() + TOAST_SECONDS
+            ed.toast_revealed = False
+        ed.toast_rect = None
         if not ed.message or time.monotonic() >= ed.toast_until:
             return
         stage = ed.workspace.zones.stage
         toast = Rect(stage.x, stage.y, min(460 * s, max(120 * s, stage.w)), 30 * s)
+        ed.toast_rect = toast
         self.round_rect(toast, SURFACE_FLOATING, radius=metrics.tooltip)
-        self.text(toast.x + 12 * s, toast.y + 10 * s, ed.message, 10, TEXT_SECONDARY, max_width=toast.w - 24 * s)
+        self.text(toast.x + 12 * s, toast.y + 10 * s, ed.message if ed.toast_revealed else masked(ed.message), 10, TEXT_SECONDARY, max_width=toast.w - 24 * s)
 
     def tool(self, control, hover, metrics):
         rect = control.rect
@@ -324,9 +328,18 @@ class Renderer:
     def checker(self, rect):
         cells = 4
         size = rect.w / cells
-        for column in range(cells):
-            for row in range(cells):
-                self.rect(Rect(rect.x + column * size, rect.y + row * size, size, size), CHECKER[(column + row) % 2])
+        for parity, color in enumerate(CHECKER):
+            points, indices = [], []
+            for column in range(cells):
+                for row in range(cells):
+                    if (column + row) % 2 != parity:
+                        continue
+                    x, y = round(rect.x + column * size), round(rect.y + row * size)
+                    w, h = round(rect.x + (column + 1) * size) - x, round(rect.y + (row + 1) * size) - y
+                    base = len(points)
+                    points += [(x, y), (x + w, y), (x + w, y + h), (x, y + h)]
+                    indices += [(base, base + 1, base + 2), (base, base + 2, base + 3)]
+            self.triangles(points, color, indices)
 
     def thumbnail(self, rect, image, color, mask, selected):
         if mask:
