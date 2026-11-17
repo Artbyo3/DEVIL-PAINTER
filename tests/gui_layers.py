@@ -118,6 +118,15 @@ def png(path):
     return values
 
 
+def write_png(path, color):
+    image = bpy.data.images.new(path.stem, 16, 16, alpha=False)
+    image.pixels.foreach_set(numpy.tile(numpy.array(color, dtype=numpy.float32), 16 * 16))
+    image.filepath_raw = str(path)
+    image.file_format = 'PNG'
+    image.save()
+    bpy.data.images.remove(image)
+
+
 def nodes(data):
     return data.material.node_tree.nodes
 
@@ -317,6 +326,30 @@ def journey():
     yield from menu(window, region, 'FX_BLEND', 'SET_FXBLEND.SUBTRACT')
     check(layer.effects[0].blend == 'SUBTRACT', 'mask effects pick how they combine with the mask below')
 
+    textures = scratch / 'textures'
+    textures.mkdir(exist_ok=True)
+    write_png(textures / 'lone.png', (.3, .3, .3, 1.0))
+    click(window, region, 'SHELF_TAB.TEXTURES')
+    yield 0.3
+    click(window, region, 'TEXTURE_DIR')
+    yield 0.2
+    type_text(window, str(textures), *spot(region, 'TEXTURE_DIR'))
+    for _ in range(15):
+        yield 0.2
+        if has('ITEM.0'):
+            break
+    yield from reveal(window, region, 'FX_SOURCE')
+    yield from menu(window, region, 'FX_SOURCE', 'FX_PICK_TEXTURE')
+    check(editor._active.state.shelf_tab == 'TEXTURES' and has('ARM_INFO') and has('ITEM.0'), 'picking a texture for the fill effect arms the texture shelf')
+    click(window, region, 'ITEM.0')
+    yield 0.6
+    effect = layer.effects[0]
+    check(effect.source == 'IMAGE' and effect.texture is not None and effect.texture.name.startswith('lone')
+          and any(node.bl_idname == 'ShaderNodeTexImage' and node.image == effect.texture for node in nodes(body)),
+          'a shelf texture fills the mask effect through an image node')
+    check(control(f'FX_{fill_uid}.{fill_effect}').preview == effect.texture, 'the texture fill effect row shows the texture as its thumbnail')
+    yield from reveal(window, region, 'FX_SOURCE')
+    yield from menu(window, region, 'FX_SOURCE', 'SET_FXPATTERN.CELLS')
     yield from add_effect(window, region, 'MASK', 'LEVELS')
     yield from slide(window, region, 'FX_gamma', .5)
     levels = layer.effects[-1]

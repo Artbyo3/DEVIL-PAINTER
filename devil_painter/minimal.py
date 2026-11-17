@@ -40,6 +40,8 @@ SHELF_TILE = 72
 SHELF_LABEL = 18
 SHELF_GAP = 8
 REPLACE_TARGET = '@material'
+EFFECT_TARGET = '@effect'
+SHELF_PROMPTS = {REPLACE_TARGET: 'Click a material to put into the selected layer', EFFECT_TARGET: 'Click a texture to fill the selected effect'}
 SCALE_RANGE = (-1.0, 9.0)
 TILING_RANGE = (-3.0, 5.0)
 
@@ -851,7 +853,7 @@ def shelf_header(layout, state, zone, header):
     x += 8 * s
     room = toggle.x - 8 * s - x
     if state.armed:
-        label = 'Click a material to put into the selected layer' if state.armed == REPLACE_TARGET else f'Click a texture or pattern for {CHANNEL[state.armed].label.lower()}'
+        label = SHELF_PROMPTS.get(state.armed) or f'Click a texture or pattern for {CHANNEL[state.armed].label.lower()}'
         layout.add('ARM_INFO', Rect(x, header.y, max(0.0, room - 78 * s), header.h), 'NOTE', label=label)
         layout.add('CANCEL_ARM', Rect(toggle.x - 78 * s, header.y, 70 * s, header.h), 'CHIP', label='Cancel', tip='Stop picking', shortcut='Esc')
     elif state.shelf_open and state.shelf_tab == 'TEXTURES' and room > 230 * s:
@@ -896,7 +898,9 @@ def shelf_layout(layout, state, zone):
             continue
         if state.armed == REPLACE_TARGET and item.kind == 'MATERIAL':
             tip = 'Click to put this material into the selected layer'
-        elif state.armed and state.armed != REPLACE_TARGET and item.kind != 'MATERIAL':
+        elif state.armed == EFFECT_TARGET and item.kind == 'TEXTURE':
+            tip = 'Click to fill the selected effect with this texture'
+        elif state.armed in CHANNEL and item.kind != 'MATERIAL':
             tip = f'Click to use for {CHANNEL[state.armed].label.lower()}'
         else:
             tip = 'Click to add as a fill layer'
