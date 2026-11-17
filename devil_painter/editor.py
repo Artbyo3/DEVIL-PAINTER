@@ -563,7 +563,17 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self._area.tag_redraw()
             if result is not None:
                 return result
+            if control.kind == 'TOOL' and self.state.drag is None and 'DOCK' in layout.zones.rects and layout.zones.rects['DOCK'].contains(*self.pointer):
+                self.grab_section('DOCK')
+        elif control is None and press and event.type == 'LEFTMOUSE' and not event.alt and layout.covers(*self.pointer):
+            name = next((key for key, rect in layout.zones.rects.items() if rect.contains(*self.pointer)), None)
+            if name is not None:
+                self.grab_section(name)
         return {'RUNNING_MODAL'}
+
+    def grab_section(self, name):
+        self.state.drag = ('GRAB_SECTION.' + name, self.workspace.zones.rects[name])
+        self.drag_origin = self.pointer
 
     def flat_space(self):
         try:
@@ -936,7 +946,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
                                                collapsed=sorted(key for key in self.state.collapsed if key in PANELS))
         library.save_settings()
 
-    def track_section(self, name, release):
+    def track_section(self, name, release, toggle):
         moved = math.dist(self.pointer, self.drag_origin) > DRAG_START * self.workspace.scale
         places = place(self.state.places, name, *self.pointer, self.workspace.zones) if moved else None
         self.state.drop = ('SECTION', name, places) if places is not None and not release else ()
@@ -949,8 +959,10 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             if name == 'DOCK':
                 self.state.section_heights['DOCK'] = 40.0 if side in ('TOP', 'BOTTOM') else HEIGHTS['DOCK']
             self.state.places = places
-        elif name in PANELS:
+        elif toggle:
             self.state.collapsed ^= {name}
+        else:
+            return
         self.save_column()
 
     def resize_section(self, name):
@@ -1298,8 +1310,8 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.resize_side(key.removeprefix('WIDTH.'))
             if release:
                 self.save_column()
-        elif key.startswith('DRAG_SECTION.'):
-            self.track_section(key.removeprefix('DRAG_SECTION.'), release)
+        elif key.startswith(('DRAG_SECTION.', 'GRAB_SECTION.')):
+            self.track_section(key.partition('.')[2], release, key.startswith('DRAG_SECTION.'))
         elif key == 'BRUSH_SIZE':
             painting.set_brush_value(self.scene, 'size', max(1, round(x * MAX_BRUSH_SIZE)))
         elif key == 'BRUSH_STRENGTH' and data is not None:
@@ -1481,9 +1493,6 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.message = actions.start(context, obj, resolutions, found and self.state.setup_udim, self.state.setup_template,
                                          self.state.setup_normal_format, self.state.setup_normal_space, self.state.setup_unwrap)
             self.hide_regions()
-        elif control.kind == 'HANDLE':
-            self.state.drag = ('DRAG_SECTION.' + key.removeprefix('MOVE.'), control.rect)
-            self.drag_origin = self.pointer
         elif control.kind == 'HEADER' and key.startswith('PANEL_'):
             self.state.drag = ('DRAG_SECTION.' + key.removeprefix('PANEL_'), control.rect)
             self.drag_origin = self.pointer

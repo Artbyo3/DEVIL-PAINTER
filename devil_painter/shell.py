@@ -4,7 +4,6 @@ from .canvas import Rect
 MARGIN = 8
 GAP = 8
 HEADER = 30
-HANDLE = 10
 SHELF_CLOSED = 34
 PANELS = ('SETS', 'LAYERS', 'PROPERTIES', 'MAPS')
 SECTIONS = ('BAR', 'STRIP', 'DOCK', 'SHELF') + PANELS

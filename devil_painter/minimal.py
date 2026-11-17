@@ -24,7 +24,7 @@ from .meshmaps import MESH_MAP, MESH_MAPS
 from .painting import TOOLS
 from .polyfill import POLY_MODES
 from .privacy import masked, masked_path
-from .shell import HANDLE, HEADER, PANELS, SECTIONS, arrange, flexible
+from .shell import HEADER, SECTIONS, arrange, flexible
 from .ui_system import ACCENT, MinimalMetrics
 
 MAX_BRUSH_SIZE = 500
@@ -353,12 +353,12 @@ def tool_strip(layout, zone, tool, brush, data, state):
         x += width + 4 * s
 
 
-def dock_layout(layout, zone, tool, state, across):
+def dock_layout(layout, zone, tool, state):
     s = layout.scale
     button, gap = 36 * s, 6 * s
     groups = [[(key, label, shortcut, key) for key, label, _, shortcut in TOOLS], [('POLYFILL', 'Polygon fill', '', 'POLYGON'), ('PATH', 'Path', '', 'RULER')],
               [('UNDO', 'Undo', 'Ctrl Z', 'UNDO'), ('REDO', 'Redo', 'Ctrl Shift Z', 'REDO')]]
-    left, top = (zone.x + HANDLE * s, zone.top) if across else (zone.x, zone.top - HANDLE * s)
+    left, top = zone.x, zone.top
     per_row = max(1, int((zone.x + zone.w - left) // button))
     size = (zone.x + zone.w - left) / per_row if per_row == 1 else button
     index = 0
@@ -945,7 +945,7 @@ def sets_panel(layout, state, data):
 
 def tab_rows(zone, s):
     tab_w = max(64 * s, min(76 * s, (zone.w - 46 * s) / len(shelf.TABS) - 4 * s))
-    per_row = max(1, int((zone.w - 42 * s) // (tab_w + 4 * s)))
+    per_row = max(1, int((zone.w - 38 * s) // (tab_w + 4 * s)))
     return tab_w, per_row, math.ceil(len(shelf.TABS) / per_row)
 
 
@@ -954,10 +954,10 @@ def shelf_header(layout, state, zone, header):
     tab_w, per_row, rows = tab_rows(zone, s)
     for index, (tab, label) in enumerate(shelf.TABS):
         row, column = divmod(index, per_row)
-        x = zone.x + 12 * s + column * (tab_w + 4 * s)
+        x = zone.x + 8 * s + column * (tab_w + 4 * s)
         layout.add('SHELF_TAB.' + tab, Rect(x, header.y - row * 26 * s, tab_w, header.h), 'CHIP', label=label,
                    active=state.shelf_open and tab == state.shelf_tab, tip=f'Browse {label.lower()}')
-    x = zone.x + 12 * s + (len(shelf.TABS) - (rows - 1) * per_row) * (tab_w + 4 * s) if rows == 1 else zone.x + zone.w
+    x = zone.x + 8 * s + len(shelf.TABS) * (tab_w + 4 * s) if rows == 1 else zone.x + zone.w
     toggle = Rect(zone.x + zone.w - 30 * s, header.y, 22 * s, header.h)
     layout.add('SHELF_TOGGLE', toggle, 'ICON', icon='DOWN' if state.shelf_open else 'DISCLOSURE',
                tip='Hide the shelf' if state.shelf_open else 'Show the shelf')
@@ -1000,7 +1000,7 @@ def packs_row(layout, zone, viewport):
 
 def search_row(layout, state, zone, row):
     s = layout.scale
-    x = zone.x + 12 * s
+    x = zone.x + 8 * s
     editing = state.text is not None and state.text.key == 'SHELF_SEARCH'
     query = shelf_query(state)
     narrow = zone.w < SEARCH_SPLIT * s
@@ -1010,7 +1010,7 @@ def search_row(layout, state, zone, row):
     x += width + 6 * s
     if narrow:
         row = Rect(row.x, row.y - 26 * s, row.w, row.h)
-        x = zone.x + 12 * s
+        x = zone.x + 8 * s
     for scope, label in shelf.SCOPES:
         layout.add('SCOPE.' + scope, Rect(x, row.y, 62 * s, row.h), 'CHIP', label=label, active=state.shelf_scope == scope,
                    tip={'ALL': 'Show everything', 'BUILTIN': 'Show what ships with Devil Painter', 'MINE': 'Show your saved assets and libraries'}[scope])
@@ -1605,15 +1605,6 @@ def shown_sections(data):
 
 def section_controls(layout, state, key, rect, side):
     s = layout.scale
-    if key not in PANELS:
-        if key == 'DOCK' and side in ('LEFT', 'RIGHT'):
-            layout.cards.append((Rect(rect.x, rect.top - HANDLE * s, rect.w, HANDLE * s), ''))
-            handle = Rect(rect.x + 4 * s, rect.top - (HANDLE - 2) * s, max(0.0, rect.w - 8 * s), 6 * s)
-        else:
-            if key == 'DOCK':
-                layout.cards.append((Rect(rect.x, rect.y, HANDLE * s, rect.h), ''))
-            handle = Rect(rect.x + 2 * s, rect.y + 4 * s, 6 * s, max(0.0, rect.h - 8 * s))
-        layout.add('MOVE.' + key, handle, 'HANDLE', tip=f'Drag to move the {SECTION_NAMES[key]} to any side')
     if not flexible(key, state.collapsed, state.shelf_open):
         return
     edge = Rect(rect.x, rect.top, rect.w, 6 * s) if side == 'BOTTOM' else Rect(rect.x, rect.y - 6 * s, rect.w, 6 * s)
@@ -1630,7 +1621,7 @@ def sections_layout(layout, state, data, bounds, obj_name, tool, brush):
         elif key == 'STRIP':
             tool_strip(layout, rect, tool, brush, data, state)
         elif key == 'DOCK':
-            dock_layout(layout, rect, tool, state, side in ('TOP', 'BOTTOM'))
+            dock_layout(layout, rect, tool, state)
         elif key == 'SHELF':
             shelf_layout(layout, state, rect)
         else:
