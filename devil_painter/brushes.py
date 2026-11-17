@@ -3,7 +3,7 @@ import json
 import math
 import bpy
 import numpy
-from .blending import CHANNEL, linear_to_srgb
+from .blending import CHANNEL
 from .document import set_channels, set_slot_value
 from .library import library_root, load_image, save_settings, settings
 from .painting import STROKE_TOOLS, active_tool, brush_source
@@ -245,7 +245,7 @@ def use_material(context, data, definition):
         value = values.get('value', channel.default)
         set_slot_value(slot, tuple(value) if isinstance(value, (list, tuple)) else (value,))
         if channel.key == 'base_color' and slot.source == 'VALUE':
-            brush_source(context, 'color').color = tuple(float(part) for part in linear_to_srgb(numpy.array(value[:3])))
+            brush_source(context, 'color').color = tuple(float(part) for part in value[:3])
     data.brush_material = definition['name']
 
 

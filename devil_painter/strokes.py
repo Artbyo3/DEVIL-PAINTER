@@ -171,6 +171,11 @@ def merge(obj, data, gesture=None, tool=None):
     if not rows.size:
         return None
     tool = tool or (data.stroke_tool if data.stroke_tool in MERGE_TOOLS else 'PAINT')
+    if tool in {'PAINT', 'FILL'}:
+        for channel in set_channels(data):
+            if data.brush_slots[channel.key].enabled and not layer.slots[channel.key].enabled:
+                layer.slots[channel.key].enabled = True
+        ensure_canvases(obj, data)
     reach = 0 if tool in {'PAINT', 'FILL', 'ERASE'} else int(gesture.radius * 2 + 2) if gesture is not None else 0
     height, width = coverage.shape
     region = (slice(max(rows[0] - reach, 0), min(rows[-1] + 1 + reach, height)), slice(max(columns[0] - reach, 0), min(columns[-1] + 1 + reach, width)))
