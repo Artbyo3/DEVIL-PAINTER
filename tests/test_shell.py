@@ -1,122 +1,98 @@
 import unittest
 from devil_painter.canvas import Rect
-from devil_painter.shell import (MAX_COLUMN, MAX_PANEL, MIN_COLUMN, MIN_PANEL, ZONE_LIMITS, ZONE_ORDER, ZONE_SIDES, ZONE_SIZES, fit_heights,
-                                 move_zone, reorder, resize_panel, zone_size, zones)
+from devil_painter.shell import (HEADER, HEIGHTS, MAX_SIZE, MIN_PANEL, PANELS, SECTIONS, WIDTHS, arrange, clamp_strip, default_strips, fit_heights, place,
+                                 resize_run)
 
-
-def sized(column=330):
-    return dict(ZONE_SIZES, COLUMN=column)
+BOUNDS = Rect(0, 0, 1600, 900)
 
 
 def overlaps(a, b):
     return a.x < b.x + b.w and b.x < a.x + a.w and a.y < b.top and b.y < a.top
 
 
-class PanelHeightTests(unittest.TestCase):
-    def test_panels_keep_the_height_the_user_set_when_they_fit(self):
+def layout(strips, bounds=BOUNDS, collapsed=(), shelf_open=True):
+    return arrange(bounds, 1.0, strips, dict(HEIGHTS), dict(WIDTHS), set(SECTIONS), set(collapsed), shelf_open)
+
+
+def clean(found, bounds=BOUNDS):
+    parts = list(found.rects.values()) + [found.stage]
+    for index, first in enumerate(parts):
+        if first.x < bounds.x - .5 or first.y < bounds.y - .5 or first.x + first.w > bounds.x + bounds.w + .5 or first.top > bounds.top + .5:
+            return False
+        if any(overlaps(first, second) for second in parts[index + 1:]):
+            return False
+    return True
+
+
+class FitTests(unittest.TestCase):
+    def test_sections_keep_the_size_the_user_set_when_they_fit(self):
         self.assertEqual(fit_heights([100.0, 50.0], 400.0, 48.0), [100.0, 50.0])
 
-    def test_a_short_column_shrinks_panels_toward_their_minimum_without_overflow(self):
+    def test_a_short_column_shrinks_sections_toward_their_minimum_without_overflow(self):
         fitted = fit_heights([300.0, 300.0], 400.0, 48.0)
         self.assertAlmostEqual(sum(fitted), 400.0)
         self.assertTrue(all(height >= 48.0 for height in fitted))
 
-    def test_even_minimum_panels_never_overflow_a_tiny_column(self):
-        self.assertLessEqual(sum(fit_heights([48.0, 48.0, 48.0], 100.0, 48.0)), 100.0 + 1e-6)
-
-    def test_growing_a_panel_takes_room_from_the_panels_below_only_when_the_column_is_full(self):
-        heights = dict(SETS=90.0, LAYERS=200.0, MAPS=100.0)
-        keys = ['SETS', 'LAYERS', 'MAPS']
-        roomy = resize_panel(keys, heights, 'LAYERS', 260.0, 1000.0)
-        self.assertEqual((roomy['LAYERS'], roomy['MAPS']), (260.0, 100.0))
-        full = resize_panel(keys, heights, 'LAYERS', 360.0, 500.0)
-        self.assertEqual(full['LAYERS'], 360.0)
-        self.assertEqual(full['MAPS'], 50.0)
-        self.assertLessEqual(sum(full.values()), 500.0)
-
-    def test_panel_heights_stay_within_safe_limits(self):
-        keys = ['SETS', 'LAYERS']
-        heights = dict(SETS=90.0, LAYERS=200.0)
-        self.assertEqual(resize_panel(keys, heights, 'LAYERS', -50.0, 1000.0)['LAYERS'], MIN_PANEL)
-        self.assertEqual(resize_panel(keys, heights, 'LAYERS', 99999.0, 99999.0)['LAYERS'], MAX_PANEL)
-
-    def test_a_dragged_panel_lands_above_or_below_its_target(self):
-        order = ['SETS', 'LAYERS', 'PROPERTIES', 'MAPS']
-        self.assertEqual(reorder(order, 'MAPS', 'SETS', False), ['MAPS', 'SETS', 'LAYERS', 'PROPERTIES'])
-        self.assertEqual(reorder(order, 'SETS', 'PROPERTIES', True), ['LAYERS', 'PROPERTIES', 'SETS', 'MAPS'])
-
-
-class ZoneTests(unittest.TestCase):
-    def test_zones_never_overlap_at_common_viewport_sizes(self):
-        for width, height in ((800, 600), (1280, 720), (1920, 1080), (3840, 2160)):
-            for scale, shelf_open in ((1.0, True), (2.0, True), (1.0, False)):
-                area = zones(Rect(0, 0, width, height), scale, ZONE_ORDER, sized(), shelf_open)
-                parts = (area.bar, area.strip, area.dock, area.stage, area.shelf, area.column)
-                for index, first in enumerate(parts):
-                    for second in parts[index + 1:]:
-                        self.assertFalse(overlaps(first, second), (width, height, scale, first, second))
-
-    def test_column_width_is_clamped(self):
-        bounds = Rect(0, 0, 3000, 1000)
-        self.assertEqual(zones(bounds, 1.0, ZONE_ORDER, sized(10)).column.w, MIN_COLUMN)
-        self.assertEqual(zones(bounds, 1.0, ZONE_ORDER, sized(9000)).column.w, MAX_COLUMN)
-
-    def test_shelf_sits_under_the_stage_and_collapses_to_its_header(self):
-        open_zones = zones(Rect(0, 0, 1600, 900), 1.0, ZONE_ORDER, sized(), True)
-        closed_zones = zones(Rect(0, 0, 1600, 900), 1.0, ZONE_ORDER, sized(), False)
-        self.assertLess(open_zones.shelf.top, open_zones.stage.y)
-        self.assertEqual(open_zones.shelf.x, open_zones.stage.x)
-        self.assertGreater(closed_zones.stage.h, open_zones.stage.h)
-
-    def test_column_never_takes_more_than_half_the_viewport(self):
-        self.assertLessEqual(zones(Rect(0, 0, 500, 600), 1.0, ZONE_ORDER, sized(480)).column.w, 250)
+    def test_growing_a_section_takes_room_only_from_the_sections_after_it(self):
+        lengths = dict(SETS=90.0, LAYERS=200.0, MAPS=100.0)
+        grown = resize_run(['SETS', 'LAYERS', 'MAPS'], lengths, 'LAYERS', 360.0, 500.0)
+        self.assertEqual((grown['SETS'], grown['LAYERS'], grown['MAPS']), (90.0, 360.0, 50.0))
+        self.assertEqual(resize_run(['SETS', 'LAYERS'], lengths, 'LAYERS', -50.0, 1000.0)['LAYERS'], MIN_PANEL)
+        self.assertEqual(resize_run(['SETS', 'LAYERS'], lengths, 'LAYERS', 99999.0, 99999.0)['LAYERS'], MAX_SIZE)
 
 
 class ArrangementTests(unittest.TestCase):
-    bounds = Rect(0, 0, 1600, 900)
+    def test_the_default_layout_matches_the_workspace(self):
+        found = layout(default_strips())
+        self.assertTrue(clean(found))
+        self.assertEqual(found.places['BAR'][0], 'TOP')
+        self.assertEqual(found.places['DOCK'][0], 'LEFT')
+        self.assertEqual(found.places['SHELF'][0], 'BOTTOM')
+        self.assertTrue(all(found.places[key][0] == 'RIGHT' for key in PANELS))
+        self.assertGreater(found.stage.w, 600)
 
-    def rects(self, order):
-        area = zones(self.bounds, 1.0, order, sized())
-        return {key: getattr(area, key.lower()) for key in ZONE_SIDES}, area
+    def test_every_section_fits_without_overlap_at_common_sizes(self):
+        for width, height in ((800, 600), (1280, 720), (1920, 1080), (3840, 2160)):
+            bounds = Rect(0, 0, width, height)
+            self.assertTrue(clean(layout(default_strips(), bounds), bounds), (width, height))
 
-    def test_every_arrangement_keeps_sections_apart_and_inside(self):
-        orders = [ZONE_ORDER, move_zone(ZONE_ORDER, 'SHELF', 800, 880, self.rects(ZONE_ORDER)[0], self.bounds),
-                  move_zone(ZONE_ORDER, 'COLUMN', 10, 400, self.rects(ZONE_ORDER)[0], self.bounds),
-                  move_zone(ZONE_ORDER, 'DOCK', 1590, 400, self.rects(ZONE_ORDER)[0], self.bounds),
-                  move_zone(ZONE_ORDER, 'BAR', 800, 5, self.rects(ZONE_ORDER)[0], self.bounds)]
-        for order in orders:
-            rects, area = self.rects(order)
-            parts = list(rects.values()) + [area.stage]
-            for index, first in enumerate(parts):
-                self.assertTrue(first.x >= 0 and first.y >= 0 and first.x + first.w <= 1600 and first.top <= 900, (order, first))
-                for second in parts[index + 1:]:
-                    self.assertFalse(overlaps(first, second), (order, first, second))
+    def test_a_panel_dropped_near_the_viewport_edge_starts_a_new_column(self):
+        found = layout(default_strips())
+        stage = found.stage
+        strips = place(default_strips(), 'LAYERS', stage.x + 10, stage.y + stage.h / 2, found)
+        self.assertEqual(strips['LEFT'][-1]['items'], ['LAYERS'])
+        self.assertNotIn('LAYERS', strips['RIGHT'][0]['items'])
+        self.assertTrue(clean(layout(strips)))
 
-    def test_the_asset_browser_moves_to_the_top_and_the_column_to_the_left(self):
-        rects, _ = self.rects(ZONE_ORDER)
-        top = move_zone(ZONE_ORDER, 'SHELF', 800, 800, rects, self.bounds)
-        self.assertIn(('SHELF', 'TOP'), top)
-        moved, area = self.rects(top)
-        self.assertGreater(moved['SHELF'].y, area.stage.top - 1)
-        left = move_zone(ZONE_ORDER, 'COLUMN', 20, 400, rects, self.bounds)
-        self.assertIn(('COLUMN', 'LEFT'), left)
-        self.assertLess(self.rects(left)[0]['COLUMN'].x, 20)
+    def test_dropping_on_a_column_edge_splits_and_its_middle_joins(self):
+        found = layout(default_strips())
+        column = found.rects['LAYERS']
+        split = place(default_strips(), 'MAPS', column.x + column.w - 5, column.y + column.h / 2, found)
+        self.assertEqual(len(split['RIGHT']), 2)
+        self.assertTrue(clean(layout(split)))
+        joined = place(default_strips(), 'MAPS', column.x + column.w / 2, column.top - 5, found)
+        self.assertEqual(len(joined['RIGHT']), 1)
+        self.assertLess(joined['RIGHT'][0]['items'].index('MAPS'), joined['RIGHT'][0]['items'].index('PROPERTIES'))
 
-    def test_sections_only_dock_on_edges_that_fit_their_contents(self):
-        rects, _ = self.rects(ZONE_ORDER)
-        self.assertIn(('BAR', 'BOTTOM'), move_zone(ZONE_ORDER, 'BAR', 10, 10, rects, self.bounds))
-        self.assertIn(('DOCK', 'RIGHT'), move_zone(ZONE_ORDER, 'DOCK', 1590, 890, rects, self.bounds))
+    def test_toolbars_only_dock_in_rows_and_everything_else_can_leave_the_middle_empty(self):
+        found = layout(default_strips())
+        stage = found.stage
+        bar = place(default_strips(), 'BAR', stage.x + 5, stage.y + 5, found)
+        self.assertTrue(any('BAR' in strip['items'] for strip in bar['BOTTOM']))
+        shelf = place(default_strips(), 'SHELF', stage.x + 10, stage.y + stage.h / 2, found)
+        self.assertTrue(any('SHELF' in strip['items'] for strip in shelf['LEFT']))
+        self.assertTrue(clean(layout(shelf)))
 
-    def test_border_drags_set_sizes_within_limits(self):
-        rects, area = self.rects(ZONE_ORDER)
-        self.assertEqual(zone_size(rects['SHELF'], 'BOTTOM', 0, rects['SHELF'].y + 300), 300)
-        self.assertEqual(zone_size(rects['COLUMN'], 'RIGHT', rects['COLUMN'].x + rects['COLUMN'].w - 400, 0), 400)
-        for key, (low, high) in ZONE_LIMITS.items():
-            small = zones(self.bounds, 1.0, ZONE_ORDER, dict(ZONE_SIZES, **{key: 0}))
-            large = zones(self.bounds, 1.0, ZONE_ORDER, dict(ZONE_SIZES, **{key: 99999}))
-            thick = (lambda rect: rect.w) if ZONE_SIDES[key] == ('LEFT', 'RIGHT') else (lambda rect: rect.h)
-            self.assertEqual(thick(getattr(small, key.lower())), low)
-            self.assertLessEqual(thick(getattr(large, key.lower())), high)
+    def test_the_last_section_fills_its_column_and_collapsed_panels_keep_their_header(self):
+        found = layout(default_strips(), collapsed={'PROPERTIES'})
+        self.assertAlmostEqual(found.rects['PROPERTIES'].h, HEADER)
+        self.assertAlmostEqual(found.rects['MAPS'].y, BOUNDS.y + 8, delta=1)
+
+    def test_column_and_row_sizes_stay_within_safe_limits(self):
+        self.assertEqual(clamp_strip('LEFT', 1, ['DOCK']), 40)
+        self.assertEqual(clamp_strip('LEFT', 1, ['LAYERS']), 200)
+        self.assertEqual(clamp_strip('RIGHT', 99999, ['LAYERS']), MAX_SIZE)
+        self.assertEqual(clamp_strip('TOP', 500, ['BAR']), 96)
 
 
 if __name__ == '__main__':
