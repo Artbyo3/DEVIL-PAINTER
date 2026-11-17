@@ -5,14 +5,14 @@ name = "Devil Painter"
 tagline = "Layer-based texture painting inside Blender"
 maintainer = "Artbyo3"
 type = "add-on"
-website = "https://github.com/Artbyo3/DEVIL-PAINTER"
+website = "https://artbyo3.github.io/DEVIL-PAINTER/"
 tags = ["Paint", "3D View"]
 license = ["SPDX:GPL-3.0-or-later"]
 copyright = ["2026 Artbyo3", "2002-2026 Blender Authors"]
 blender_version_min = "5.2.0"
 
 [permissions]
-files = "Save and load texture layers, presets, and reference images"
+files = "Save and load texture layers, presets, and library assets"
 
 [build]
 paths_exclude_pattern = [
