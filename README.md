@@ -2,7 +2,7 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs-site/docs/assets/readme-logo-dark.svg">
     <source media="(prefers-color-scheme: light)" srcset="docs-site/docs/assets/readme-logo-light.svg">
-    <img alt="Devil Painter logo" src="docs-site/docs/assets/readme-logo-dark.svg" width="144">
+    <img alt="Devil Painter logo" src="docs-site/docs/assets/readme-logo-dark.svg" width="240">
   </picture>
 </p>
 
