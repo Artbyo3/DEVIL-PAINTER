@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 import bpy
 import numpy
 from . import compositing
@@ -8,6 +9,12 @@ HISTORY_LIMIT = 80
 _history = []
 _future = []
 _state = dict(redoing=False)
+
+
+@dataclass
+class Fill:
+    before: list
+    after: list
 
 
 def ensure_buffer(obj, data):
@@ -107,7 +114,9 @@ def undo():
     if _history:
         entry = _history.pop()
         _future.append(entry)
-        if entry is not None:
+        if isinstance(entry, Fill):
+            restore(entry.before)
+        elif entry is not None:
             restore(entry)
 
 
@@ -115,7 +124,10 @@ def redo():
     if not _future:
         return
     entry = _future.pop()
-    if entry is None:
+    if isinstance(entry, Fill):
+        restore(entry.after)
+        _history.append(entry)
+    elif entry is None:
         _history.append(None)
     else:
         _state['redoing'] = True

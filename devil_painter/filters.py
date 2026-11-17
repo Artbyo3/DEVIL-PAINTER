@@ -251,13 +251,15 @@ def wrap_sampling(build, effect, inner):
             relief = vector_math(build.nodes, build.links, 'ADD', vector_math(build.nodes, build.links, 'SUBTRACT', center[0], shifted[0]), (.5, .5, .5))
             value = math_node(build.nodes, build.links, 'ADD', math_node(build.nodes, build.links, 'SUBTRACT', center[1], shifted[1]), .5)
             return mixed(center, (relief, value))
-        if key in {'DILATE', 'ERODE', 'OUTLINE'}:
-            grown = extreme(build, ring(image, vector), 'LIGHTEN', 'MAXIMUM')
-            shrunk = extreme(build, ring(image, vector), 'DARKEN', 'MINIMUM')
-            if key == 'OUTLINE':
-                return mixed(center, (mix_color(build, grown[0], shrunk[0], 1.0, 'DIFFERENCE'),
-                                      math_node(build.nodes, build.links, 'SUBTRACT', grown[1], shrunk[1])))
-            return mixed(center, grown if key == 'DILATE' else shrunk)
+        if key == 'DILATE':
+            return mixed(center, extreme(build, ring(image, vector), 'LIGHTEN', 'MAXIMUM'))
+        if key == 'ERODE':
+            return mixed(center, extreme(build, ring(image, vector), 'DARKEN', 'MINIMUM'))
+        if key == 'OUTLINE':
+            taps = ring(image, vector)
+            grown, shrunk = extreme(build, taps, 'LIGHTEN', 'MAXIMUM'), extreme(build, taps, 'DARKEN', 'MINIMUM')
+            return mixed(center, (mix_color(build, grown[0], shrunk[0], 1.0, 'DIFFERENCE'),
+                                  math_node(build.nodes, build.links, 'SUBTRACT', grown[1], shrunk[1])))
         if key == 'DIRECTIONAL_BLUR':
             blurred = averaged(build, line(image, vector, math.radians(effect.angle)))
         elif key == 'RADIAL_BLUR':

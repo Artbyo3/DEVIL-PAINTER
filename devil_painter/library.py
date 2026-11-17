@@ -67,7 +67,7 @@ def settings():
     if 'settings' not in _cache:
         path = library_root() / SETTINGS_FILE
         values = json.loads(path.read_text(encoding='utf-8')) if path.is_file() else {}
-        _cache['settings'] = dict(texture_folder=values.get('texture_folder', ''), materials=values.get('materials', []))
+        _cache['settings'] = dict(values, texture_folder=values.get('texture_folder', ''), materials=values.get('materials', []))
     return _cache['settings']
 
 

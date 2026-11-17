@@ -7,7 +7,7 @@ import numpy
 import math
 import gpu
 from gpu_extras.batch import batch_for_shader
-from . import actions, brushes, compositing, exporting, library, meshmaps, painting, projects, sets, shelf, shortcuts, smart, strokes, thumbnails
+from . import actions, brushes, compositing, exporting, library, meshmaps, painting, polyfill, projects, sets, shelf, shortcuts, smart, strokes, thumbnails
 from .blending import BLEND_MODES, CHANNEL, FOLDER_BLENDS, linear_to_srgb, srgb_to_linear
 from .ui_system import ACCENT
 from .canvas import Rect
@@ -18,6 +18,7 @@ from .procedural import PATTERNS
 from .tiles import variant
 from .draw import Renderer
 from .masks import BUILDER_SLIDERS, GENERATORS
+from .polyfill import POLY_NOUN
 from .meshmaps import MESH_MAPS
 from .minimal import MENU_HEADING, FX_RANGES, effect_menu, layer_rows, FOV_RANGE, RECENT_COLORS, SHADER_SLIDERS, BRUSH_SLIDERS, BRUSH_TOGGLES, GENERATOR_SLIDERS, MAX_BRUSH_SIZE, REPLACE_TARGET, EFFECT_TARGET, SCALE_RANGE, TILING_RANGE, from_slider, painter_layout
 from .shell import MARGIN, clamp_column, clamp_split
@@ -252,6 +253,11 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         target = self.state.picking
         self.state.picking = ''
         obj, data = self.painted()
+        if target.startswith('id:'):
+            face, location = sets.hit_under(self._region, self._area.spaces.active.region_3d, obj, self.pointer)
+            if face < 0:
+                return 'Click on the model to pick an ID color.'
+            return actions.pick_id_color(context, obj, data, target.removeprefix('id:'), face, location)
         previous = tuple(painting.brush_value(self.scene, 'color'))
         bpy.ops.paint.sample_color(location=(int(self.pointer[0]), int(self.pointer[1])), merged=True, palette=False)
         picked = tuple(painting.brush_value(self.scene, 'color'))
@@ -428,6 +434,10 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             result = self.key_event(context, event)
             if result is not None:
                 return result
+        if not over and press and event.type == 'LEFTMOUSE' and self.state.poly_mode and not self.state.picking:
+            self.message = self.fill_polygons(context)
+            self._area.tag_redraw()
+            return {'RUNNING_MODAL'}
         if not over and press and event.type == 'LEFTMOUSE' and self.state.geo_pick:
             self.message = self.pick_geometry(context)
             self._area.tag_redraw()
@@ -455,7 +465,9 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         if control is not None and press and event.type == 'RIGHTMOUSE' and control.key.startswith('ITEM.'):
             item = self.shelf_item(control.key)
             index = control.key.removeprefix('ITEM.')
-            if item.user_index >= 0 and item.kind == 'SMART':
+            if item.user_index >= 0 and item.kind == 'MASK':
+                self.state.popover = Popover('MENU', control.rect, items=((f'DELETE_SMART_MASK.{item.user_index}', 'Delete smart mask', False),))
+            elif item.user_index >= 0 and item.kind == 'SMART':
                 self.state.popover = Popover('MENU', control.rect, items=((f'DELETE_SMART.{item.user_index}', 'Delete smart material', False),))
             elif item.user_index >= 0:
                 self.state.popover = Popover('MENU', control.rect, items=((f'DELETE_MATERIAL.{item.user_index}', 'Delete material', False),))
@@ -587,6 +599,14 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             return actions.paste_mask(context, obj, project, index, uids[0])
         return actions.paste_effects(context, obj, project, index, uids[0])
 
+    def fill_polygons(self, context):
+        obj, data = self.painted()
+        face, location = sets.hit_under(self._region, self._area.spaces.active.region_3d, obj, self.pointer)
+        if face < 0:
+            return 'Click on the model to fill polygons.'
+        color = strokes.rgb(tuple(painting.brush_value(self.scene, 'color')))
+        return polyfill.polygon_fill(obj, data, self.state.poly_mode, face, location, color, self.state.poly_erase)
+
     def pick_geometry(self, context):
         obj, data = self.painted()
         face = sets.face_under(self._region, self._area.spaces.active.region_3d, obj, self.pointer)
@@ -703,6 +723,9 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.state.armed = EFFECT_TARGET
             self.state.shelf_open, self.state.shelf_tab = True, 'TEXTURES'
             self.message = 'Click a texture in the shelf to fill the effect with it.'
+        elif key == 'FX_PICK_ID':
+            self.state.picking = 'id:' + data.active_effect
+            self.message = 'Click the model to pick an ID color.'
         elif key.startswith('FXCOLOR.'):
             self.open_color(control, 'fx:' + key.removeprefix('FXCOLOR.'))
         elif key.startswith(('SET_FXBLEND.', 'SET_FXFILTER.', 'SET_FXSOURCE.', 'SET_FXOTHER.', 'SET_FXCHANNEL.')):
@@ -791,6 +814,8 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         items.append(('EXPORT_LAYER', 'Export flattened', False))
         if layer.mask is not None or layer.generator != 'NONE' or layer.geo_mask or len(layer.effects):
             items.append(('EXPORT_MASK', 'Export mask', False))
+        if layer.mask is not None or layer.generator != 'NONE' or any(effect.target == 'MASK' for effect in layer.effects):
+            items.append(('SAVE_SMART_MASK', 'Save mask as smart mask', False))
         if layer.kind != 'FOLDER':
             items += [(f'INSTANCE_INTO.{index}', 'Instance into ' + item.name, False) for index, item in enumerate(project.sets) if index != project.active_set]
         if layer.mask is None:
@@ -1053,7 +1078,20 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             x = max(0.0, min(1.0, (self.pointer[0] - control.rect.x) / control.rect.w))
             y = max(0.0, min(1.0, (self.pointer[1] - control.rect.y) / control.rect.h))
             self.apply_drag(context, key, x, y, False)
+        elif key == 'QUICK_MASK':
+            self.message = actions.toggle_quick_mask(context, obj, data)
+        elif key == 'QUICK_APPLY':
+            self.message = actions.apply_quick_mask(context, obj, data)
+        elif key == 'POLYFILL':
+            self.state.poly_mode = '' if self.state.poly_mode else 'FACE'
+            self.message = 'Click the model to fill polygons.' if self.state.poly_mode else 'Polygon fill off.'
+        elif key.startswith('POLY.'):
+            self.state.poly_mode = key.removeprefix('POLY.')
+            self.message = f'Click the model to fill a {POLY_NOUN[self.state.poly_mode]}.'
+        elif key == 'POLY_ERASE':
+            self.state.poly_erase = not self.state.poly_erase
         elif key in painting.BRUSH_NAMES:
+            self.state.poly_mode = ''
             painting.activate_tool(context, key)
             painting.update_canvas(context, data)
             brushes.sync(context, data)
@@ -1167,6 +1205,10 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.message = f'Removed {library.remove_texture(self.shelf_item("ITEM." + key.removeprefix("REMOVE_TEXTURE.")).payload)} from the library.'
         elif key == 'SAVE_SMART':
             self.message = f'Saved {smart.save_smart(active_layer(data))} to the smart material shelf.'
+        elif key == 'SAVE_SMART_MASK':
+            self.message = actions.save_smart_mask(context, obj, data)
+        elif key.startswith('DELETE_SMART_MASK.'):
+            self.message = f'Deleted {smart.remove_mask(int(key.removeprefix("DELETE_SMART_MASK.")))}.'
         elif key.startswith('DELETE_SMART.'):
             self.message = f'Deleted {smart.remove_smart(int(key.removeprefix("DELETE_SMART.")))}.'
         elif key.startswith('DELETE_MATERIAL.'):
@@ -1350,6 +1392,8 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         target = armed if armed and layer is not None and layer.kind == 'FILL' else ''
         if item.kind == 'SMART':
             return actions.add_smart_material(context, obj, data, item.payload)
+        if item.kind == 'MASK' and item.user_index >= 0:
+            return actions.apply_smart_mask(context, obj, data, item.payload)
         if item.kind == 'MASK':
             if layer is None:
                 return 'Select a layer to mask.'

@@ -4,7 +4,7 @@ from . import thumbnails
 from .brushes import ALPHAS, PRESETS, alpha_path, preview_path
 from .library import BUILTIN_MATERIALS, is_managed, material, pattern, plain, scan, texture, user_materials
 from .masks import SMART_MASKS
-from .smart import BUILTIN_SMART, smart_materials
+from .smart import BUILTIN_SMART, smart_masks, smart_materials
 from .procedural import PATTERN, PATTERNS
 
 TABS = (('MATERIALS', 'Materials'), ('SMART', 'Smart'), ('TEXTURES', 'Textures'), ('PATTERNS', 'Patterns'), ('MASKS', 'Masks'), ('BRUSHES', 'Brushes'),
@@ -49,7 +49,8 @@ def items(tab):
         return ([Item(definition['name'], 'SMART', definition) for definition in BUILTIN_SMART]
                 + [Item(definition['name'], 'SMART', definition, index) for index, definition in enumerate(smart_materials())])
     if tab == 'MASKS':
-        return [Item(preset['name'], 'MASK', preset) for preset in SMART_MASKS]
+        return ([Item(preset['name'], 'MASK', preset) for preset in SMART_MASKS]
+                + [Item(definition['name'], 'MASK', definition, index, definition['preview']) for index, definition in enumerate(smart_masks())])
     if tab == 'BRUSHES':
         return [Item(preset['name'], 'BRUSH', preset, preview_file=str(preview_path(preset))) for preset in PRESETS]
     if tab == 'ALPHAS':

@@ -7,6 +7,7 @@ import bpy
 import numpy
 from mathutils import Vector
 from .baking import bake_pass, emission_tree
+from .sets import uv_island_labels
 from .signals import map_signal
 from .tiles import create, variant
 
@@ -17,6 +18,7 @@ COPY_SUFFIX = re.compile(r'\.\d+$')
 HIGH_WORDS = ('high', 'hp', 'hi')
 BORDER_SHARE = 1 / 32
 GOLDEN_RATIO = .618033988749895
+ISLAND_ATTRIBUTE = 'dp_uv_islands'
 
 
 @dataclass(frozen=True)
@@ -82,8 +84,34 @@ def id_color(name):
     return (*colorsys.hsv_to_rgb(hue, .75, .9), 1.0)
 
 
+def island_color(order):
+    return (*colorsys.hsv_to_rgb(order * GOLDEN_RATIO % 1.0, (.95, .55)[order % 2], (.95, .65)[order // 2 % 2]), 1.0)
+
+
 def emission_input(tree):
     return next(node for node in tree.nodes if node.type == 'EMISSION').inputs['Color']
+
+
+@contextmanager
+def island_colors(objects):
+    made = []
+    try:
+        for item in objects:
+            mesh = item.data
+            if not mesh.uv_layers:
+                continue
+            labels = uv_island_labels(mesh, mesh.uv_layers.active.name)
+            palette = {label: island_color(order) for order, label in enumerate(dict.fromkeys(labels.tolist()))}
+            totals = numpy.empty(len(mesh.polygons), dtype=numpy.int32)
+            mesh.polygons.foreach_get('loop_total', totals)
+            colors = numpy.array([palette[label] for label in numpy.repeat(labels, totals).tolist()], dtype=numpy.float32)
+            attribute = mesh.color_attributes.new(ISLAND_ATTRIBUTE, 'FLOAT_COLOR', 'CORNER')
+            attribute.data.foreach_set('color', colors.ravel())
+            made.append(mesh)
+        yield
+    finally:
+        for mesh in made:
+            mesh.color_attributes.remove(mesh.color_attributes[ISLAND_ATTRIBUTE])
 
 
 def id_shader(tree, mode, material_name, object_name):
@@ -96,7 +124,9 @@ def id_shader(tree, mode, material_name, object_name):
     elif mode == 'VERTEX':
         tree.links.new(tree.nodes.new('ShaderNodeVertexColor').outputs['Color'], color)
     else:
-        tree.links.new(map_signal(tree.nodes, tree.links, 'id', 1.0), color)
+        islands = tree.nodes.new('ShaderNodeVertexColor')
+        islands.layer_name = ISLAND_ATTRIBUTE
+        tree.links.new(islands.outputs['Color'], color)
 
 
 def position_shader(tree, origin, span):
@@ -251,10 +281,11 @@ def bake_key(context, obj, project, wanted, key, data, sources, size):
                          samples, normal_space='TANGENT')
     if key == 'id':
         if sources.high:
-            with source_shading(sources.high, id_source_shade(data.bake_id)):
+            with island_colors(sources.high if data.bake_id == 'ISLAND' else ()), source_shading(sources.high, id_source_shade(data.bake_id)):
                 return bake_pass(context, obj, project, wanted, black, 'EMIT', samples, sources.high, **sources.reach(distance))
-        return bake_pass(context, obj, project, wanted, lambda item: id_shader(item.material.node_tree, data.bake_id, item.name, obj.name),
-                         'EMIT', samples)
+        with island_colors((obj,) if data.bake_id == 'ISLAND' else ()):
+            return bake_pass(context, obj, project, wanted, lambda item: id_shader(item.material.node_tree, data.bake_id, item.name, obj.name),
+                             'EMIT', samples)
 
     def prepare(item):
         tree = item.material.node_tree

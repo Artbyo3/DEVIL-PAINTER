@@ -4,8 +4,10 @@ import bpy
 import numpy
 from .blending import CHANNEL
 from .document import add_slots, children, texture_set
+from .effects import EFFECT_FIELDS
 from .tiles import adopt
-from .library import BUILTIN_MATERIALS, apply_definition, apply_generator, capture, library_root, material, pattern, plain, save_settings, settings
+from .library import (BUILTIN_MATERIALS, apply_definition, apply_generator, capture, library_root, load_image, material, pattern, plain, save_settings,
+                      settings)
 from .masks import GENERATOR_FIELDS, SMART_MASKS
 
 PRESET = {item['name']: item for item in SMART_MASKS}
@@ -44,6 +46,10 @@ def write_png(image, path, data_values):
     width, height = image.size
     pixels = numpy.empty(width * height * 4, dtype=numpy.float32)
     image.pixels.foreach_get(pixels)
+    return write_pixels(pixels, width, height, path, data_values)
+
+
+def write_pixels(pixels, width, height, path, data_values):
     copy = bpy.data.images.new(path.stem, width, height, alpha=True)
     try:
         if data_values:
@@ -55,6 +61,76 @@ def write_png(image, path, data_values):
     finally:
         bpy.data.images.remove(copy)
     return str(path)
+
+
+def smart_masks():
+    return settings().setdefault('smart_masks', [])
+
+
+def plain_value(value):
+    return value if isinstance(value, (str, int, float, bool)) else list(value)
+
+
+def effect_entry(effect, folder):
+    values = {field: plain_value(getattr(effect, field)) for field in EFFECT_FIELDS if field != 'texture'}
+    values['image'] = write_png(effect.image, folder / f'{effect.uid}.png', False) if effect.image is not None else ''
+    values['texture'] = bpy.path.abspath(effect.texture.filepath) if effect.texture is not None and effect.texture.filepath else ''
+    return values
+
+
+def portable(effect):
+    return effect.kind not in {'COMPARE', 'ANCHOR'}
+
+
+def add_effects(obj, data, layer, entries):
+    for entry in entries:
+        data.serial += 1
+        effect = layer.effects.add()
+        effect.uid = f'E{data.serial}'
+        for field, value in entry.items():
+            if field not in {'image', 'texture'}:
+                setattr(effect, field, value)
+        if entry['image']:
+            effect.image = owned_image(data, entry['image'], f'DP {obj.name} {data.name} {layer.uid} {effect.uid}', False)
+        if entry['texture']:
+            effect.texture = load_image(entry['texture'], CHANNEL['roughness'])
+
+
+def unique_name(definitions, name):
+    names = {item['name'] for item in definitions}
+    base, number = name, 1
+    while name in names:
+        number += 1
+        name = f'{base} {number}'
+    return name
+
+
+def save_mask(layer, preview):
+    slug = re.sub(r'[^A-Za-z0-9]+', '_', layer.name).strip('_') or 'mask'
+    folder = library_root() / 'smart_masks' / f'{slug}_{int(time.time() * 1000)}'
+    folder.mkdir(parents=True)
+    definition = dict(name=unique_name(smart_masks(), layer.name + ' mask'), generator={field: getattr(layer, field) for field in GENERATOR_FIELDS},
+                      mask=write_png(layer.mask, folder / 'mask.png', False) if layer.mask is not None else '',
+                      effects=[effect_entry(effect, folder) for effect in layer.effects if effect.target == 'MASK' and portable(effect)],
+                      preview=write_pixels(preview.ravel(), preview.shape[1], preview.shape[0], folder / 'preview.png', True))
+    smart_masks().append(definition)
+    save_settings()
+    return definition['name']
+
+
+def remove_mask(index):
+    name = smart_masks().pop(index)['name']
+    save_settings()
+    return name
+
+
+def apply_mask(obj, data, layer, definition):
+    apply_generator(layer, definition['generator'])
+    for index in reversed(range(len(layer.effects))):
+        if layer.effects[index].target == 'MASK':
+            layer.effects.remove(index)
+    layer.mask = owned_image(data, definition['mask'], f'DP {obj.name} {layer.uid} mask', False, (1.0, 1.0, 1.0, 1.0)) if definition['mask'] else None
+    add_effects(obj, data, layer, definition['effects'])
 
 
 def subtree(layers, root):
@@ -86,6 +162,7 @@ def layer_entry(layer, folder, parent):
                 result['slots'][slot.name] = values
     if layer.mask is not None:
         result['mask'] = write_png(layer.mask, folder / f'{layer.uid}_mask.png', False)
+    result['effects'] = [effect_entry(effect, folder) for effect in layer.effects if portable(effect)]
     return result
 
 
@@ -103,11 +180,7 @@ def save_smart(layer):
     if layer.kind == 'FOLDER':
         definition['root'] = dict(opacity=layer.opacity, mask=write_png(layer.mask, folder / 'root_mask.png', False) if layer.mask else '',
                                   generator={field: getattr(layer, field) for field in GENERATOR_FIELDS})
-    names = {item['name'] for item in smart_materials()}
-    base, number = definition['name'], 1
-    while definition['name'] in names:
-        number += 1
-        definition['name'] = f'{base} {number}'
+    definition['name'] = unique_name(smart_materials(), definition['name'])
     smart_materials().append(definition)
     save_settings()
     return definition['name']
@@ -152,6 +225,7 @@ def build(obj, data, definition, root, blank):
                     slot.image = owned_image(data, slot.image.filepath, f'DP {obj.name} {uid} {slot.name}', True, (0.5, 0.5, 0.5, 1.0))
         if item['mask']:
             layer.mask = owned_image(data, item['mask'], f'DP {obj.name} {uid} mask', False, (1.0, 1.0, 1.0, 1.0))
+        add_effects(obj, data, layer, item.get('effects', ()))
         uids.append(uid)
     settings_root = definition.get('root')
     if settings_root:

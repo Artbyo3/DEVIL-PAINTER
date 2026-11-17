@@ -2,12 +2,14 @@ from .blending import NORMAL_DETAIL
 from .document import active_tile, children, geometry_attribute, linked_layer, set_channels, shown_layers, slot_value, uses_coordinates
 from .effects import EFFECT_FIELDS
 from .filters import FILTER, content_warp, filter_color, filter_value, warp_vector, wrap_sampling
-from .masks import generator_mask, write_generator
+from .masks import generator_mask, id_selection, write_generator
 from .nodes import gray, link_or_set, math_node, mix_color, mix_value, socket, vector_math
 from .procedural import contrast_range, pattern_node, set_pattern_values
 from .tiles import numbers, variant
 
 SIGNATURE_KEY = 'devil_painter_signature'
+QUICK_TINT = (1.0, .08, .15, 1.0)
+QUICK_SHOW = .6
 BUMP_DISTANCE = .05
 DISPLAY_GAMMA = 2.2
 TRIPLANAR_BLEND = .2
@@ -169,7 +171,8 @@ def signature(data):
     tiles = ','.join(str(number) for number in numbers(data))
     project = data.id_data.devil_painter
     shading = f'{data.visible}{data.shader}{project.normal_format}{project.normal_space}'
-    return f'{channels};{data.solo};{layers};{owner};{maps};{tiles};{project.uv_map};{shading}'
+    quick = data.quick_mask.name if data.quick_mask is not None else ''
+    return f'{channels};{data.solo};{layers};{owner};{maps};{tiles};{project.uv_map};{shading};{quick}'
 
 
 def stroke_over(build, image, alpha, color, x):
@@ -275,7 +278,7 @@ def mask_value(build, layer):
     if layer.mask:
         value = sample(layer.mask)[1]
     if layer.generator != 'NONE':
-        generated = generator_mask(nodes, links, layer, build)
+        generated = generator_mask(nodes, links, layer, build, sample)
         if generated is not None:
             value = math_node(nodes, links, 'MULTIPLY', value, generated)
     if layer.geo_mask and build.data is not None:
@@ -296,6 +299,8 @@ def mask_value(build, layer):
         else:
             if effect.kind == 'FILL':
                 other = fill_effect_value(build, effect)
+            elif effect.kind == 'ID_COLOR':
+                other = id_selection(build, effect, sample)
             elif effect.kind == 'COMPARE':
                 target = build.layer_map.get(effect.other)
                 other = mask_value(build, target) if target is not None and target.uid != layer.uid else None
@@ -631,6 +636,9 @@ def build_tree(build, channels, layers, solo=None, raw=False):
     results = compose(build, channels, layers, '', results, column)
     build.shaded = None
     combine_baked(build, results)
+    if not raw and not solo and build.data is not None and build.data.quick_mask is not None and 'base_color' in results:
+        stencil = build.sampler.sample(build.data.quick_mask)[1]
+        results['base_color'] = mix_color(build, results['base_color'], QUICK_TINT, math_node(nodes, links, 'MULTIPLY', stencil, QUICK_SHOW))
     end = 300 * column[0]
     output.location, shader.location = (end + 600, 0), (end + 300, 0)
     for key, name in SHADER_INPUTS.items():

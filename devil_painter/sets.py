@@ -1,7 +1,10 @@
 import numpy
 from bpy_extras import view3d_utils
+from mathutils import geometry
 from .document import active_tile
 from .tiles import FIRST_TILE, face_slots, face_tiles, numbers, slot_tiles
+
+UV_SCALE = 100000
 
 
 def uv_name(obj):
@@ -83,6 +86,55 @@ def face_under(region, view, obj, coord):
     inverse = obj.matrix_world.inverted()
     hit, _, _, face = obj.ray_cast(inverse @ origin, (inverse.to_3x3() @ direction).normalized())
     return face if hit and face < len(obj.data.polygons) else -1
+
+
+def hit_under(region, view, obj, coord):
+    origin = view3d_utils.region_2d_to_origin_3d(region, view, coord)
+    direction = view3d_utils.region_2d_to_vector_3d(region, view, coord)
+    inverse = obj.matrix_world.inverted()
+    hit, location, _, face = obj.ray_cast(inverse @ origin, (inverse.to_3x3() @ direction).normalized())
+    return (face, location) if hit and face < len(obj.data.polygons) else (-1, None)
+
+
+def triangle_at(mesh, face, location):
+    mesh.calc_loop_triangles()
+    candidates = [triangle for triangle in mesh.loop_triangles if triangle.polygon_index == face]
+    points = lambda triangle: [mesh.vertices[index].co for index in triangle.vertices]
+    return next((triangle for triangle in candidates if geometry.intersect_point_tri(location, *points(triangle)) is not None),
+                min(candidates, key=lambda triangle: (sum(points(triangle), location * 0) / 3 - location).length))
+
+
+def uv_at(mesh, uv_name, triangle, location):
+    layer = mesh.uv_layers.get(uv_name) or mesh.uv_layers.active
+    corners = [mesh.vertices[index].co for index in triangle.vertices]
+    coords = [layer.data[loop].uv.to_3d() for loop in triangle.loops]
+    return geometry.barycentric_transform(location, *corners, *coords).to_2d()
+
+
+def uv_island_labels(mesh, uv_name):
+    layer = mesh.uv_layers.get(uv_name) or mesh.uv_layers.active
+    coords = numpy.empty(len(layer.data) * 2, dtype=numpy.float64)
+    layer.data.foreach_get('uv', coords)
+    vertices = numpy.empty(len(mesh.loops), dtype=numpy.int64)
+    mesh.loops.foreach_get('vertex_index', vertices)
+    keys = numpy.column_stack((vertices, numpy.round(coords.reshape(-1, 2) * UV_SCALE).astype(numpy.int64)))
+    _, corner_ids = numpy.unique(keys, axis=0, return_inverse=True)
+    totals = numpy.empty(len(mesh.polygons), dtype=numpy.int32)
+    mesh.polygons.foreach_get('loop_total', totals)
+    owners = numpy.repeat(numpy.arange(len(mesh.polygons)), totals)
+    parent = list(range(len(mesh.polygons)))
+
+    def root(item):
+        while parent[item] != item:
+            parent[item] = parent[parent[item]]
+            item = parent[item]
+        return item
+    first = {}
+    for corner, owner in zip(corner_ids.ravel().tolist(), owners.tolist()):
+        other = first.setdefault(corner, owner)
+        if other != owner:
+            parent[root(owner)] = root(other)
+    return numpy.array([root(item) for item in range(len(parent))], dtype=numpy.int64)
 
 
 def locate(obj, project, face):

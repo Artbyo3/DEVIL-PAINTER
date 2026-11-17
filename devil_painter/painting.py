@@ -61,7 +61,7 @@ def active_tool(context):
 
 def uses_stroke_buffer(context, data):
     layer = active_layer(data)
-    return (layer is not None and layer.kind == 'PAINT' and data.target == 'CONTENT' and data.stroke is not None
+    return (layer is not None and layer.kind == 'PAINT' and data.target == 'CONTENT' and data.stroke is not None and data.quick_mask is None
             and active_tool(context) in STROKE_TOOLS)
 
 

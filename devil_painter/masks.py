@@ -97,8 +97,8 @@ def pattern(nodes, links, layer, kind):
     return output
 
 
-def term_signal(nodes, links, layer, term, build):
-    value = operate(nodes, links, 'MULTIPLY', operate(nodes, links, 'ADD', mesh_signal(build, term.map_key, term.channel), term.offset), term.gain)
+def term_signal(nodes, links, layer, term, build, sample):
+    value = operate(nodes, links, 'MULTIPLY', operate(nodes, links, 'ADD', mesh_signal(build, term.map_key, term.channel, sample), term.offset), term.gain)
     if term.absolute:
         value = operate(nodes, links, 'ABSOLUTE', value, 0.0)
     if term.weight:
@@ -106,10 +106,10 @@ def term_signal(nodes, links, layer, term, build):
     return value
 
 
-def radial_signal(nodes, links, build):
+def radial_signal(nodes, links, build, sample):
     centered = nodes.new('ShaderNodeVectorMath')
     centered.operation = 'SUBTRACT'
-    links.new(mesh_signal(build, 'position'), centered.inputs[0])
+    links.new(mesh_signal(build, 'position', None, sample), centered.inputs[0])
     centered.inputs[1].default_value = (.5, .5, .5)
     distance = nodes.new('ShaderNodeVectorMath')
     distance.operation = 'LENGTH'
@@ -117,17 +117,17 @@ def radial_signal(nodes, links, build):
     return operate(nodes, links, 'MULTIPLY', distance.outputs['Value'], 2.0)
 
 
-def generator_mask(nodes, links, layer, build):
+def generator_mask(nodes, links, layer, build, sample):
     generator = GENERATOR[layer.generator]
     if not build.live and any(key not in build.maps for key in generator.maps):
         return None
     texture = pattern(nodes, links, layer, generator.breakup)
     if generator.radial:
-        signal = radial_signal(nodes, links, build)
+        signal = radial_signal(nodes, links, build, sample)
     elif generator.terms:
-        signal = term_signal(nodes, links, layer, generator.terms[0], build)
+        signal = term_signal(nodes, links, layer, generator.terms[0], build, sample)
         for term in generator.terms[1:]:
-            signal = operate(nodes, links, 'ADD', signal, term_signal(nodes, links, layer, term, build))
+            signal = operate(nodes, links, 'ADD', signal, term_signal(nodes, links, layer, term, build, sample))
     else:
         signal = texture
     if generator.flip:
@@ -136,6 +136,20 @@ def generator_mask(nodes, links, layer, build):
     ranged = nodes.new('ShaderNodeMapRange')
     ranged.name = layer.uid + '.gen.range'
     links.new(operate(nodes, links, 'ADD', signal, breakup), ranged.inputs['Value'])
+    return ranged.outputs['Result']
+
+
+def id_selection(build, effect, sample):
+    if not build.live and 'id' not in build.maps:
+        return None
+    distance = build.nodes.new('ShaderNodeVectorMath')
+    distance.operation = 'DISTANCE'
+    build.links.new(mesh_signal(build, 'id', None, sample), distance.inputs[0])
+    distance.inputs[1].default_value = tuple(effect.color)
+    ranged = build.nodes.new('ShaderNodeMapRange')
+    build.links.new(distance.outputs['Value'], ranged.inputs['Value'])
+    tolerance = max(effect.amount, .01)
+    ranged.inputs['From Min'].default_value, ranged.inputs['From Max'].default_value = tolerance, tolerance * .5
     return ranged.outputs['Result']
 
 

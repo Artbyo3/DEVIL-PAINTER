@@ -1,9 +1,10 @@
 from .filters import FILTER
 
 EFFECT_KINDS = (('PAINT', 'Paint', ('MASK',)), ('FILL', 'Fill', ('MASK',)), ('LEVELS', 'Levels', ('MASK', 'CONTENT')),
-                ('FILTER', 'Filter', ('MASK', 'CONTENT')), ('COMPARE', 'Compare mask', ('MASK',)), ('ANCHOR', 'Anchor', ('MASK',)))
+                ('FILTER', 'Filter', ('MASK', 'CONTENT')), ('COMPARE', 'Compare mask', ('MASK',)), ('ANCHOR', 'Anchor', ('MASK',)),
+                ('ID_COLOR', 'ID color', ('MASK',)))
 EFFECT_LABEL = {key: label for key, label, _ in EFFECT_KINDS}
-EFFECT_ICONS = {'PAINT': 'PAINT', 'FILL': 'FILL', 'LEVELS': 'SETTINGS', 'FILTER': 'BLUR', 'COMPARE': 'SHAPE', 'ANCHOR': 'PIN'}
+EFFECT_ICONS = {'PAINT': 'PAINT', 'FILL': 'FILL', 'LEVELS': 'SETTINGS', 'FILTER': 'BLUR', 'COMPARE': 'SHAPE', 'ANCHOR': 'PIN', 'ID_COLOR': 'EYEDROPPER'}
 MASK_BLENDS = (('MULTIPLY', 'Multiply'), ('ADD', 'Add'), ('SUBTRACT', 'Subtract'), ('MIX', 'Replace'), ('MINIMUM', 'Darken'),
                ('MAXIMUM', 'Lighten'), ('DIFFERENCE', 'Difference'))
 EFFECT_FIELDS = ('kind', 'target', 'enabled', 'blend', 'opacity', 'source', 'value', 'pattern', 'scale', 'detail', 'contrast', 'texture',

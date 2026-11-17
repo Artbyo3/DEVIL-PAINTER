@@ -137,6 +137,7 @@ class DEVIL_PAINTER_PG_texture_set(bpy.types.PropertyGroup):
     serial: bpy.props.IntProperty(default=0)
     stroke: bpy.props.PointerProperty(type=bpy.types.Image)
     stroke_owner: bpy.props.StringProperty()
+    quick_mask: bpy.props.PointerProperty(type=bpy.types.Image)
     brush_slots: bpy.props.CollectionProperty(type=DEVIL_PAINTER_PG_slot)
     brush_opacity: bpy.props.FloatProperty(default=1.0, min=0.0, max=1.0)
     brush_flow: bpy.props.FloatProperty(default=1.0, min=0.01, max=1.0)
@@ -299,6 +300,8 @@ def active_effect(data):
 
 
 def paint_target(data):
+    if data.quick_mask is not None:
+        return data.quick_mask
     layer = active_layer(data)
     if layer is None or layer.kind == 'INSTANCE':
         return None

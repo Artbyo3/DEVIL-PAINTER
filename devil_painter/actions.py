@@ -13,7 +13,8 @@ from .document import SLOT_FIELDS, geometry_attribute, active_layer, add_set_cha
 
 KIND_NAMES = {'PAINT': 'Paint', 'FILL': 'Fill', 'FOLDER': 'Folder'}
 LAYER_FIELDS = ('kind', 'visible', 'opacity', 'projection', 'tiling', 'material', 'folder_blend', 'geo_mask', 'link_set', 'link_uid') + GENERATOR_FIELDS
-EFFECT_BLENDS = {'PAINT': 'MIX', 'FILL': 'MULTIPLY', 'COMPARE': 'MULTIPLY', 'ANCHOR': 'MULTIPLY', 'LEVELS': 'MIX', 'FILTER': 'MIX'}
+ID_TOLERANCE = .15
+EFFECT_BLENDS = {'PAINT': 'MIX', 'FILL': 'MULTIPLY', 'COMPARE': 'MULTIPLY', 'ANCHOR': 'MULTIPLY', 'LEVELS': 'MIX', 'FILTER': 'MIX', 'ID_COLOR': 'MULTIPLY'}
 
 
 def image_for(obj, data, label, opaque):
@@ -237,6 +238,8 @@ def add_effect(context, obj, data, kind, target):
         effect.filter = 'HSV'
     if kind == 'ANCHOR':
         effect.channel = 'base_color'
+    if kind == 'ID_COLOR':
+        effect.amount = ID_TOLERANCE
     data.target, data.active_effect = 'EFFECT', effect.uid
     return refresh(context, obj, data, f'{EFFECT_LABEL[kind]} effect added to the {target.lower()} of {layer.name}.')
 
@@ -532,6 +535,9 @@ def new_layer(data, kind):
     layer = data.layers[index + 1]
     data.active_uid = layer.uid
     data.target = 'CONTENT'
+    if data.quick_mask is not None:
+        layer.mask, data.quick_mask = data.quick_mask, None
+        layer.mask.name = f'DP {data.id_data.name} {data.name} {layer.uid} mask'
     return layer
 
 
@@ -776,6 +782,23 @@ def set_solo(context, obj, data, key):
     return refresh(context, obj, data, f'Viewing {CHANNEL[key].label} only.' if key else 'Viewing the full material.')
 
 
+def pick_id_color(context, obj, data, effect_uid, face, location):
+    item = data.maps.get('id')
+    if item is None or item.image is None:
+        return 'Bake the ID map first.'
+    mesh = obj.data
+    uv = sets.uv_at(mesh, obj.devil_painter.uv_map, sets.triangle_at(mesh, face, location), location)
+    tile = tiles.FIRST_TILE + int(uv.x // 1) + 10 * int(uv.y // 1)
+    image = tiles.variant(data, item.image, tile)
+    width, height = image.size
+    column, row = min(int(uv.x % 1 * width), width - 1), min(int(uv.y % 1 * height), height - 1)
+    start = (row * width + column) * 4
+    color = tuple(image.pixels[start:start + 3])
+    layer = active_layer(data)
+    find_effect(layer, effect_uid).color = color
+    return refresh(context, obj, data, f'{layer.name} keeps the picked ID color.')
+
+
 def bake_mesh_maps(context, obj, data, keys):
     project = obj.devil_painter
     failure = ''
@@ -827,6 +850,51 @@ def set_generator(context, obj, data, values):
 def set_generator_value(context, obj, data, field, value):
     setattr(active_layer(data), field, value)
     compositing.update_values(data)
+
+
+def save_smart_mask(context, obj, data):
+    layer = active_layer(data)
+    project = obj.devil_painter
+    _, baked = flatten_bake(context, obj, project, [layer], ['MASK'], layer.uid)
+    values = numpy.clip(baked[('MASK', tiles.numbers(data)[0])][..., 0], 0, 1)
+    preview = numpy.ones(values.shape + (4,), dtype=numpy.float32)
+    preview[..., :3] = values[..., None]
+    name = smart.save_mask(active_layer(data), preview)
+    return refresh(context, obj, data, f'Saved {name} to the mask shelf.')
+
+
+def apply_smart_mask(context, obj, data, definition):
+    layer = active_layer(data)
+    if layer is None or layer.kind == 'INSTANCE':
+        return 'Select a layer to mask.'
+    smart.apply_mask(obj, data, layer, definition)
+    return refresh(context, obj, data, f'{layer.name} uses the {definition["name"]} smart mask.')
+
+
+def toggle_quick_mask(context, obj, data):
+    if data.quick_mask is None:
+        data.quick_mask = image_for(obj, data, 'quick mask', False)
+        message = 'Quick mask on. Paint or fill where the next layer should show.'
+    else:
+        bpy.data.images.remove(data.quick_mask)
+        message = 'Quick mask cleared.'
+    painting.update_canvas(context, data)
+    return refresh(context, obj, data, message)
+
+
+def apply_quick_mask(context, obj, data):
+    layer = active_layer(data)
+    if layer is None or layer.kind == 'INSTANCE':
+        return 'Select a layer to mask.'
+    stencil, data.quick_mask = data.quick_mask, None
+    if layer.mask is None:
+        layer.mask = stencil
+    else:
+        data.serial += 1
+        effect = layer.effects.add()
+        effect.uid, effect.kind, effect.target, effect.blend, effect.image = f'E{data.serial}', 'PAINT', 'MASK', 'MULTIPLY', stencil
+    painting.update_canvas(context, data)
+    return refresh(context, obj, data, f'{layer.name} is masked by the quick mask.')
 
 
 def add_mask(context, obj, data, white):

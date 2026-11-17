@@ -85,11 +85,11 @@ def averaged(build, samples):
     return color, alpha
 
 
-def mesh_signal(build, key, channel=None):
+def mesh_signal(build, key, channel=None, sample=None):
     if build.live or key not in build.maps:
         source = map_signal(build.nodes, build.links, key, build.size)
     else:
-        source = build.sampler.sample(build.maps[key])[0]
+        source = (sample or build.sampler.sample)(build.maps[key])[0]
     if channel is None:
         return source
     split = build.nodes.new('ShaderNodeSeparateColor')

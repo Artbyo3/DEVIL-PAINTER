@@ -19,6 +19,7 @@ from .sets import tile_label
 from .tiles import numbers
 from .meshmaps import MESH_MAP, MESH_MAPS
 from .painting import TOOLS
+from .polyfill import POLY_MODES
 from .shell import GAP, distribute, zones
 from .ui_system import ACCENT, MinimalMetrics
 
@@ -246,12 +247,41 @@ def brush_value_control(layout, channel, slot, rect):
                       tip=f'{channel.label} the brush paints')
 
 
-def tool_strip(layout, zone, tool, brush, data):
+def quick_controls(layout, zone, y, h, data):
+    s = layout.scale
+    right = zone.x + zone.w - 8 * s
+    on = data.quick_mask is not None
+    if on:
+        right -= 132 * s
+        layout.add('QUICK_APPLY', Rect(right, y, 128 * s, h), 'CHIP', label='Mask selected layer', tip='Use the quick mask as the mask of the selected layer')
+    right -= 104 * s
+    layout.add('QUICK_MASK', Rect(right, y, 100 * s, h), 'TOGGLE', label='Quick mask', active=on,
+               tip='Paint a temporary mask; the next new layer takes it as its mask')
+    return right - 6 * s
+
+
+def poly_strip(layout, x, y, h, color, state):
+    s = layout.scale
+    layout.add('TOOL_NAME', Rect(x, y, 90 * s, h), 'NOTE', label='Polygon fill')
+    x += 92 * s
+    layout.add('BRUSH_COLOR', Rect(x, y, 30 * s, h), 'SWATCH', color=color, tip='Fill color')
+    x += 36 * s
+    for mode, label in POLY_MODES:
+        layout.add('POLY.' + mode, Rect(x, y, 78 * s, h), 'CHIP', label=label, active=state.poly_mode == mode, tip=f'Click the model to fill a whole {label.lower()}')
+        x += 82 * s
+    layout.add('POLY_ERASE', Rect(x, y, 70 * s, h), 'TOGGLE', label='Erase', active=state.poly_erase, tip='Clear the picked polygons instead of filling them')
+
+
+def tool_strip(layout, zone, tool, brush, data, state):
     s = layout.scale
     size, color = brush
     layout.cards.append((zone, ''))
     y, h = zone.y + 6 * s, zone.h - 12 * s
     x = zone.x + 12 * s
+    right = quick_controls(layout, zone, y, h, data)
+    if state.poly_mode:
+        poly_strip(layout, x, y, h, color, state)
+        return
     label = next((name for key, name, _, _ in TOOLS if key == tool), 'Brush')
     layout.add('TOOL_NAME', Rect(x, y, 60 * s, h), 'NOTE', label=label)
     x += 62 * s
@@ -269,7 +299,6 @@ def tool_strip(layout, zone, tool, brush, data):
     layout.add('BRUSH_CARD', Rect(x, y, 120 * s, h), 'DROPDOWN', label='Brush', text=data.brush_preset,
                tip='Flow, spacing, hardness, smoothing, jitter, pressure, and the channels the brush paints')
     x += 126 * s
-    right = zone.x + zone.w - 8 * s
     for channel in set_channels(data):
         slot = data.brush_slots[channel.key]
         width = (46 if channel.width == 3 else 92) * s
@@ -281,16 +310,18 @@ def tool_strip(layout, zone, tool, brush, data):
         x += width + 4 * s
 
 
-def dock_layout(layout, zone, tool):
+def dock_layout(layout, zone, tool, state):
     s = layout.scale
     button, gap = 36 * s, 6 * s
-    groups = [[(key, label, shortcut) for key, label, _, shortcut in TOOLS], [('UNDO', 'Undo', 'Ctrl Z'), ('REDO', 'Redo', 'Ctrl Shift Z')]]
+    groups = [[(key, label, shortcut, key) for key, label, _, shortcut in TOOLS], [('POLYFILL', 'Polygon fill', '', 'POLYGON')],
+              [('UNDO', 'Undo', 'Ctrl Z', 'UNDO'), ('REDO', 'Redo', 'Ctrl Shift Z', 'REDO')]]
     y = zone.top
     for group in groups:
         start = y
-        for key, label, shortcut in group:
+        for key, label, shortcut, icon in group:
             y -= button
-            layout.add(key, Rect(zone.x, y, zone.w, button), 'TOOL', icon=key, label=label, active=key == tool, tip=label, shortcut=shortcut)
+            active = bool(state.poly_mode) if key == 'POLYFILL' else key == tool and not state.poly_mode
+            layout.add(key, Rect(zone.x, y, zone.w, button), 'TOOL', icon=icon, label=label, active=active, tip=label, shortcut=shortcut)
         layout.tool_groups.append(Rect(zone.x, y, zone.w, start - y))
         y -= gap
 
@@ -465,7 +496,8 @@ def instance_section(flow, data, layer, w):
 
 EFFECT_SLIDERS = {'LEVELS': (('in_low', 'In low', 1.0), ('in_high', 'In high', 1.0), ('gamma', 'Gamma', 4.0), ('out_low', 'Out low', 1.0),
                              ('out_high', 'Out high', 1.0)),
-                  'FILL': (('scale', 'Scale', 50.0), ('detail', 'Detail', 1.0), ('contrast', 'Contrast', .98))}
+                  'FILL': (('scale', 'Scale', 50.0), ('detail', 'Detail', 1.0), ('contrast', 'Contrast', .98)),
+                  'ID_COLOR': (('amount', 'Tolerance', 1.0),)}
 FX_RANGES = {field: (top, floor) for group in (*EFFECT_SLIDERS.values(), *(item.sliders for item in FILTERS), (('opacity', 'Opacity', 1.0), ('value', 'Value', 1.0)))
              for field, _, top in group for floor in ({'gamma': .05, 'radius': 1.0, 'scale': .1}.get(field, 0.0),)}
 
@@ -530,6 +562,15 @@ def effect_section(flow, data, layer, w):
         if effect.kind == 'ANCHOR':
             flow.add('FX_CHANNEL', Rect(x + half + 4 * s, y, half, h), 'DROPDOWN', label='Channel', text=CHANNEL[effect.channel].label,
                      tip='Which channel of the anchored result to use')
+    if effect.kind == 'ID_COLOR':
+        x, y, h = flow.field()
+        flow.add('FXCOLOR.color', Rect(x, y, half, h), 'SWATCH', color=(*linear_to_srgb(numpy.array(effect.color)), 1.0), tip='The ID color this mask keeps')
+        flow.add('FX_PICK_ID', Rect(x + half + 4 * s, y, half, h), 'CHIP', label='Pick on model',
+                 tip='Click the model to pick a color from the baked ID map')
+        if 'id' not in data.maps or data.maps['id'].image is None:
+            x, y, h = flow.field()
+            flow.add('FX_ID_MISSING', Rect(x, y, w - 106 * s, h), 'NOTE', label='Needs the ID map')
+            flow.add('OPEN_BAKE', Rect(x + w - 100 * s, y, 100 * s, h), 'CHIP', label='Bake maps', tip='Open the bake card')
     slider_rows(flow, 'FX_', effect, effect_sliders(effect), w)
     colors = FILTER[effect.filter].colors if effect.kind == 'FILTER' else ()
     if colors:
@@ -543,6 +584,8 @@ def effect_lines(data):
     effect = active_effect(data)
     lines = 2 + (effect.kind in {'PAINT', 'FILL', 'FILTER', 'COMPARE', 'ANCHOR'})
     lines += (len(effect_sliders(effect)) + 1) // 2
+    if effect.kind == 'ID_COLOR':
+        lines += 1 + int('id' not in data.maps or data.maps['id'].image is None)
     return lines + int(effect.kind == 'FILTER' and bool(FILTER[effect.filter].colors))
 
 
@@ -1217,8 +1260,8 @@ def painter_layout(bounds, scale, state, data, obj_name, tool, brush, directory,
         start_layout(layout, state, bounds, obj_name, setup)
     else:
         workspace_bar(layout, layout.zones.bar, data, obj_name, state.view_2d)
-        tool_strip(layout, layout.zones.strip, tool, brush, data)
-        dock_layout(layout, layout.zones.dock, tool)
+        tool_strip(layout, layout.zones.strip, tool, brush, data, state)
+        dock_layout(layout, layout.zones.dock, tool, state)
         shelf_layout(layout, state, layout.zones.shelf)
         column_layout(layout, state, data, layout.zones.column)
     if state.popover is not None:
