@@ -48,6 +48,7 @@ class Layout:
     zones: object
     controls: list = field(default_factory=list)
     cards: list = field(default_factory=list)
+    tool_groups: list = field(default_factory=list)
     popover: Optional[Rect] = None
     popover_start: int = -1
     scroll_areas: dict = field(default_factory=dict)
@@ -61,7 +62,8 @@ class Layout:
         return next((control for control in reversed(self.controls) if control.hit(x, y)), None)
 
     def covers(self, x, y):
-        return (self.popover is not None and self.popover.contains(x, y)) or any(rect.contains(x, y) for rect, _ in self.cards)
+        return ((self.popover is not None and self.popover.contains(x, y)) or any(rect.contains(x, y) for rect, _ in self.cards)
+                or any(rect.contains(x, y) for rect in self.tool_groups))
 
     def scroll_area(self, x, y):
         return next((key for key, (rect, _) in self.scroll_areas.items() if rect.contains(x, y)), None)

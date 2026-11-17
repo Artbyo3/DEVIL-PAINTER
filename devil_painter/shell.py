@@ -11,7 +11,7 @@ ROWS_ONLY = ('BAR', 'STRIP')
 SIDES = ('TOP', 'BOTTOM', 'LEFT', 'RIGHT')
 COLUMNS = ('LEFT', 'RIGHT')
 STRIPS = dict(TOP=((36, ('BAR',)), (36, ('STRIP',))), LEFT=((40, ('DOCK',)),), RIGHT=((330, PANELS),), BOTTOM=((224, ('SHELF',)),))
-HEIGHTS = dict(BAR=36, STRIP=36, DOCK=480, SHELF=224, SETS=128, LAYERS=220, PROPERTIES=280, MAPS=100)
+HEIGHTS = dict(BAR=36, STRIP=36, DOCK=372, SHELF=224, SETS=128, LAYERS=220, PROPERTIES=280, MAPS=100)
 WIDTHS = {key: 600 for key in SECTIONS}
 MIN_PANEL = 48
 MAX_SIZE = 1400
@@ -90,9 +90,10 @@ def arrange(bounds, s, strips, heights, widths, shown, collapsed, shelf_open):
                 moving = [key for key in items if flexible(key, collapsed, shelf_open)]
                 room = max(0.0, rect.h - gap * (len(items) - 1) - sum(fixed_part(key, collapsed, shelf_open) * s for key in items))
                 fitted = dict(zip(moving, fit_heights([clamp_length(key, heights[key]) * s for key in moving], room, MIN_PANEL * s)))
-                if moving:
-                    fitted[moving[-1]] += max(0.0, room - sum(fitted.values()))
-                    tails.add(moving[-1])
+                filling = [key for key in moving if key != 'DOCK']
+                if filling:
+                    fitted[filling[-1]] += max(0.0, room - sum(fitted.values()))
+                    tails.add(filling[-1])
                 rooms[(side, index)] = room / s
                 y = rect.top
                 for key in items:

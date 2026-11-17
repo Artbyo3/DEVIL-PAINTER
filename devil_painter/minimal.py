@@ -358,22 +358,25 @@ def dock_layout(layout, zone, tool, state):
     button, gap = 36 * s, 6 * s
     groups = [[(key, label, shortcut, key) for key, label, _, shortcut in TOOLS], [('POLYFILL', 'Polygon fill', '', 'POLYGON'), ('PATH', 'Path', '', 'RULER')],
               [('UNDO', 'Undo', 'Ctrl Z', 'UNDO'), ('REDO', 'Redo', 'Ctrl Shift Z', 'REDO')]]
-    layout.cards.append((zone, ''))
-    left, top = zone.x + 2 * s, zone.top - 2 * s
-    per_row = max(1, int((zone.x + zone.w - 2 * s - left) // button))
-    size = (zone.x + zone.w - 2 * s - left) / per_row if per_row == 1 else button
-    index = 0
+    per_row = max(1, int(zone.w // button))
+    size = zone.w if per_row == 1 else button
+    top, index = zone.top, 0
     for group in groups:
+        rows = {}
         for key, label, shortcut, icon in group:
             row, column = divmod(index, per_row)
-            rect = Rect(left + column * size, top - (row + 1) * button, size, button)
+            rect = Rect(zone.x + column * size, top - (row + 1) * button, size, button)
             index += 1
             if rect.y < zone.y - .5:
                 continue
             active = bool(state.poly_mode) if key == 'POLYFILL' else bool(state.path_mode) if key == 'PATH' else key == tool and not (state.poly_mode or state.path_mode)
             layout.add(key, rect, 'TOOL', icon=icon, label=label, active=active, tip=label, shortcut=shortcut)
+            rows.setdefault(row, []).append(rect)
+        for rects in rows.values():
+            layout.tool_groups.append(Rect(rects[0].x, rects[0].y, rects[-1].x + rects[-1].w - rects[0].x, button))
         if per_row == 1:
-            top -= gap
+            top -= index * button + gap
+            index = 0
 
 
 def selection(data):
