@@ -26,8 +26,8 @@ from .privacy import masked
 from .masks import BUILDER_SLIDERS, GENERATORS
 from .polyfill import POLY_NOUN
 from .meshmaps import MESH_MAPS
-from .minimal import HEADER, MENU_HEADING, SAMPLE_TOP, EXPOSURE_RANGE, GAMMA_RANGE, PROJECTOR_RANGE, NORMAL_SLIDERS, STENCIL_SLIDERS, FX_RANGES, effect_menu, layer_rows, FOV_RANGE, RECENT_COLORS, SHADER_SLIDERS, BRUSH_SLIDERS, BRUSH_TOGGLES, GENERATOR_SLIDERS, MAX_BRUSH_SIZE, REPLACE_TARGET, EFFECT_TARGET, SCALE_RANGE, TILING_RANGE, from_slider, painter_layout
-from .shell import PANELS, ZONE_SIDES, clamp_panel, clamp_zone, move_zone, reorder, resize_panel, zone_size
+from .minimal import MENU_HEADING, SAMPLE_TOP, EXPOSURE_RANGE, GAMMA_RANGE, PROJECTOR_RANGE, NORMAL_SLIDERS, STENCIL_SLIDERS, FX_RANGES, effect_menu, layer_rows, FOV_RANGE, RECENT_COLORS, SHADER_SLIDERS, BRUSH_SLIDERS, BRUSH_TOGGLES, GENERATOR_SLIDERS, MAX_BRUSH_SIZE, REPLACE_TARGET, EFFECT_TARGET, SCALE_RANGE, TILING_RANGE, from_slider, painter_layout
+from .shell import HEADER, HEIGHTS, PANELS, ROWS_ONLY, SECTIONS, SIDES, clamp_height, clamp_width, flexible, place, resize_stack
 from .state import Popover, TextEdit, WorkspaceState
 
 TIMER_INTERVAL = .3
@@ -918,59 +918,58 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         return actions.pick_geometry(context, obj, data, face, self.state.geo_pick == 'ISLAND')
 
     def load_column(self):
-        saved, placed = library.settings().get('column', {}), library.settings().get('zones', {})
+        saved = library.settings().get('workspace', {})
         try:
-            if sorted(saved.get('order', ())) == sorted(PANELS):
-                self.state.panel_order = list(saved['order'])
-            self.state.panel_heights.update({key: clamp_panel(float(value)) for key, value in saved.get('heights', {}).items() if key in PANELS})
+            places = {side: [key for key in saved.get('places', {}).get(side, ()) if key in SECTIONS] for side in SIDES}
+            if sorted(key for side in SIDES for key in places[side]) == sorted(SECTIONS) and not any(key in ROWS_ONLY for side in ('LEFT', 'RIGHT')
+                                                                                                    for key in places[side]):
+                self.state.places = places
+            self.state.section_heights.update({key: clamp_height(key, float(value)) for key, value in saved.get('heights', {}).items() if key in SECTIONS})
+            self.state.side_widths.update({side: float(value) for side, value in saved.get('widths', {}).items() if side in ('LEFT', 'RIGHT')})
             self.state.collapsed |= {key for key in saved.get('collapsed', ()) if key in PANELS}
-            if 'width' in saved:
-                self.state.zone_sizes['COLUMN'] = clamp_zone('COLUMN', float(saved['width']))
-            order = tuple((key, side) for key, side in placed.get('order', ()))
-            if sorted(key for key, _ in order) == sorted(ZONE_SIDES) and all(side in ZONE_SIDES[key] for key, side in order):
-                self.state.zone_order = order
-            self.state.zone_sizes.update({key: clamp_zone(key, float(value)) for key, value in placed.get('sizes', {}).items() if key in ZONE_SIDES})
         except (TypeError, ValueError, AttributeError):
             return
 
     def save_column(self):
-        library.settings()['column'] = dict(order=list(self.state.panel_order), heights=dict(self.state.panel_heights),
-                                            collapsed=sorted(key for key in self.state.collapsed if key in PANELS))
-        library.settings()['zones'] = dict(order=[list(item) for item in self.state.zone_order], sizes=dict(self.state.zone_sizes))
+        library.settings()['workspace'] = dict(places={side: list(keys) for side, keys in self.state.places.items()},
+                                               heights=dict(self.state.section_heights), widths=dict(self.state.side_widths),
+                                               collapsed=sorted(key for key in self.state.collapsed if key in PANELS))
         library.save_settings()
 
-    def track_zone(self, name, release):
+    def track_section(self, name, release):
         moved = math.dist(self.pointer, self.drag_origin) > DRAG_START * self.workspace.scale
-        found = self.workspace.zones
-        rects = {key: getattr(found, key.lower()) for key in ZONE_SIDES}
-        order = move_zone(self.state.zone_order, name, *self.pointer, rects, self.bounds) if moved else None
-        self.state.drop = ('ZONE', name, order) if order is not None and not release else ()
-        if release:
-            if order is not None:
-                self.state.zone_order = order
-            self.save_column()
-
-    def track_panel(self, name, release):
-        s = self.workspace.scale
-        moved = math.dist(self.pointer, self.drag_origin) > DRAG_START * s
-        x, y = self.pointer
-        column = self.workspace.zones.column
-        nearby = [(max(card.y - y, y - card.top, 0.0), key) for key, card in self.workspace.panels.items()
-                  if key != name and column.x - 40 * s <= x <= column.x + column.w + 40 * s]
-        target = min(nearby)[1] if moved and nearby else None
-        if target is not None:
-            card = self.workspace.panels[target]
-            self.state.drop = ('PANEL_' + target, 'ABOVE' if y >= (card.y + card.top) / 2 else 'BELOW')
-        elif not moved:
-            self.state.drop = ()
+        places = place(self.state.places, name, *self.pointer, self.workspace.zones) if moved else None
+        self.state.drop = ('SECTION', name, places) if places is not None and not release else ()
         if not release:
             return
-        drop, self.state.drop = self.state.drop, ()
-        if not moved:
+        if places is not None:
+            side = next(where for where, keys in places.items() if name in keys)
+            if side in ('LEFT', 'RIGHT') and not self.state.places[side]:
+                self.state.side_widths[side] = 40.0 if name == 'DOCK' else 330.0
+            if name == 'DOCK':
+                self.state.section_heights['DOCK'] = 40.0 if side in ('TOP', 'BOTTOM') else HEIGHTS['DOCK']
+            self.state.places = places
+        elif name in PANELS:
             self.state.collapsed ^= {name}
-        elif drop:
-            self.state.panel_order = reorder(self.state.panel_order, name, drop[0].removeprefix('PANEL_'), drop[1] == 'BELOW')
         self.save_column()
+
+    def resize_section(self, name):
+        found, s = self.workspace.zones, self.workspace.scale
+        rect, side = found.rects[name], found.sides[name]
+        header = HEADER if name in PANELS else 0
+        if side in ('TOP', 'BOTTOM'):
+            size = (rect.top - self.pointer[1]) if side == 'TOP' else (self.pointer[1] - rect.y)
+            self.state.section_heights[name] = clamp_height(name, size / s - header)
+            return
+        keys = [key for key in self.state.places[side] if key in found.rects and flexible(key, self.state.collapsed, self.state.shelf_open)]
+        if name in keys:
+            want = (rect.top - self.pointer[1]) / s - header
+            self.state.section_heights = resize_stack(keys, self.state.section_heights, name, want, found.rooms[side])
+
+    def resize_side(self, side):
+        area, s = self.workspace.zones.areas[side], self.workspace.scale
+        width = (self.pointer[0] - area.x) if side == 'LEFT' else (area.x + area.w - self.pointer[0])
+        self.state.side_widths[side] = clamp_width(width / s, self.state.places[side])
 
     def drop_target(self, prefix):
         return next((control for control in self.workspace.controls if control.kind == 'ROW' and control.key.startswith(prefix)
@@ -1290,23 +1289,17 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
 
     def apply_drag(self, context, key, x, y, release):
         obj, data = self.painted()
-        if key.startswith('ZONE_EDGE.'):
-            name, found = key.removeprefix('ZONE_EDGE.'), self.workspace.zones
-            self.state.zone_sizes[name] = clamp_zone(name, zone_size(getattr(found, name.lower()), found.sides[name], *self.pointer) / self.workspace.scale)
+        if key.startswith('SIZE.'):
+            if key.removeprefix('SIZE.') in self.workspace.zones.rects:
+                self.resize_section(key.removeprefix('SIZE.'))
             if release:
                 self.save_column()
-        elif key.startswith('DRAG_ZONE.'):
-            self.track_zone(key.removeprefix('DRAG_ZONE.'), release)
-        elif key.startswith('PANEL_EDGE.'):
-            name, s = key.removeprefix('PANEL_EDGE.'), self.workspace.scale
-            shown = [panel for panel in self.workspace.panels if panel not in self.state.collapsed]
-            if name in shown:
-                want = (self.workspace.panels[name].top - HEADER * s - self.pointer[1]) / s
-                self.state.panel_heights = resize_panel(shown, self.state.panel_heights, name, want, self.workspace.panel_room)
+        elif key.startswith('WIDTH.'):
+            self.resize_side(key.removeprefix('WIDTH.'))
             if release:
                 self.save_column()
-        elif key.startswith('DRAG_PANEL.'):
-            self.track_panel(key.removeprefix('DRAG_PANEL.'), release)
+        elif key.startswith('DRAG_SECTION.'):
+            self.track_section(key.removeprefix('DRAG_SECTION.'), release)
         elif key == 'BRUSH_SIZE':
             painting.set_brush_value(self.scene, 'size', max(1, round(x * MAX_BRUSH_SIZE)))
         elif key == 'BRUSH_STRENGTH' and data is not None:
@@ -1489,10 +1482,10 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
                                          self.state.setup_normal_format, self.state.setup_normal_space, self.state.setup_unwrap)
             self.hide_regions()
         elif control.kind == 'HANDLE':
-            self.state.drag = ('DRAG_ZONE.' + key.removeprefix('ZONE_MOVE.'), control.rect)
+            self.state.drag = ('DRAG_SECTION.' + key.removeprefix('MOVE.'), control.rect)
             self.drag_origin = self.pointer
         elif control.kind == 'HEADER' and key.startswith('PANEL_'):
-            self.state.drag = ('DRAG_PANEL.' + key.removeprefix('PANEL_'), control.rect)
+            self.state.drag = ('DRAG_SECTION.' + key.removeprefix('PANEL_'), control.rect)
             self.drag_origin = self.pointer
         elif control.kind == 'GIZMO':
             self.state.drag = (key, control.rect)

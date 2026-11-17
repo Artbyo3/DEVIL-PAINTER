@@ -3,95 +3,57 @@ from .canvas import Rect
 
 MARGIN = 8
 GAP = 8
-MIN_COLUMN = 260
-MAX_COLUMN = 480
-PANELS = ('SETS', 'LAYERS', 'PROPERTIES', 'MAPS')
-PANEL_HEIGHTS = dict(SETS=128, LAYERS=220, PROPERTIES=280, MAPS=100)
-MIN_PANEL = 48
-MAX_PANEL = 1200
-SHELF_CLOSED = 34
+HEADER = 30
 HANDLE = 10
-ZONE_ORDER = (('BAR', 'TOP'), ('COLUMN', 'RIGHT'), ('STRIP', 'TOP'), ('DOCK', 'LEFT'), ('SHELF', 'BOTTOM'))
-ZONE_SIDES = dict(BAR=('TOP', 'BOTTOM'), STRIP=('TOP', 'BOTTOM'), SHELF=('TOP', 'BOTTOM'), DOCK=('LEFT', 'RIGHT'), COLUMN=('LEFT', 'RIGHT'))
-ZONE_SIZES = dict(BAR=36, STRIP=36, DOCK=40, COLUMN=330, SHELF=224)
-ZONE_LIMITS = dict(BAR=(36, 96), STRIP=(36, 96), DOCK=(40, 120), COLUMN=(MIN_COLUMN, MAX_COLUMN), SHELF=(120, 640))
+SHELF_CLOSED = 34
+PANELS = ('SETS', 'LAYERS', 'PROPERTIES', 'MAPS')
+SECTIONS = ('BAR', 'STRIP', 'DOCK', 'SHELF') + PANELS
+ROWS_ONLY = ('BAR', 'STRIP')
+SIDES = ('TOP', 'BOTTOM', 'LEFT', 'RIGHT')
+PLACES = dict(TOP=('BAR', 'STRIP'), LEFT=('DOCK',), RIGHT=PANELS, BOTTOM=('SHELF',))
+HEIGHTS = dict(BAR=36, STRIP=36, DOCK=480, SHELF=224, SETS=128, LAYERS=220, PROPERTIES=280, MAPS=100)
+WIDTHS = dict(LEFT=40, RIGHT=330)
+MIN_PANEL = 48
+MAX_SIZE = 1400
+ROW_LIMIT = 96
+DOCK_WIDTH = 40
+PANEL_WIDTH = 260
 
 
 @dataclass(frozen=True)
 class Zones:
-    bar: Rect
-    strip: Rect
-    dock: Rect
     stage: Rect
-    shelf: Rect
-    column: Rect
+    rects: dict
     sides: dict
+    areas: dict
+    rooms: dict
 
 
-def clamp_zone(key, size):
-    low, high = ZONE_LIMITS[key]
-    return max(low, min(high, size))
+def clamp_height(key, height):
+    if key in ROWS_ONLY:
+        return max(36, min(ROW_LIMIT, height))
+    return max(DOCK_WIDTH if key == 'DOCK' else MIN_PANEL, min(MAX_SIZE, height))
 
 
-def clamp_panel(height):
-    return max(MIN_PANEL, min(MAX_PANEL, height))
+def clamp_width(width, keys):
+    low = DOCK_WIDTH if all(key == 'DOCK' for key in keys) else PANEL_WIDTH
+    return max(low, min(MAX_SIZE, width))
 
 
-def zones(bounds, s, order, sizes, shelf_open=True):
-    gap = GAP * s
-    free = Rect(bounds.x + MARGIN * s, bounds.y + MARGIN * s, max(0.0, bounds.w - 2 * MARGIN * s), max(0.0, bounds.h - 2 * MARGIN * s))
-    found = {}
-    for key, side in order:
-        size = SHELF_CLOSED if key == 'SHELF' and not shelf_open else clamp_zone(key, sizes[key])
-        thick = min(size * s, max(0.0, (free.w if side in ('LEFT', 'RIGHT') else free.h) / 2))
-        if side == 'TOP':
-            found[key] = Rect(free.x, free.top - thick, free.w, thick)
-            free = Rect(free.x, free.y, free.w, max(0.0, free.h - thick - gap))
-        elif side == 'BOTTOM':
-            found[key] = Rect(free.x, free.y, free.w, thick)
-            free = Rect(free.x, free.y + thick + gap, free.w, max(0.0, free.h - thick - gap))
-        elif side == 'LEFT':
-            found[key] = Rect(free.x, free.y, thick, free.h)
-            free = Rect(free.x + thick + gap, free.y, max(0.0, free.w - thick - gap), free.h)
-        else:
-            found[key] = Rect(free.x + free.w - thick, free.y, thick, free.h)
-            free = Rect(free.x, free.y, max(0.0, free.w - thick - gap), free.h)
-    return Zones(found['BAR'], found['STRIP'], found['DOCK'], free, found['SHELF'], found['COLUMN'], dict(order))
+def fixed_part(key, collapsed, shelf_open):
+    if key in PANELS:
+        return HEADER
+    if key == 'SHELF' and not shelf_open:
+        return SHELF_CLOSED
+    return 0
 
 
-def edge_depth(rect, side, bounds):
-    if side == 'TOP':
-        return bounds.top - rect.y
-    if side == 'BOTTOM':
-        return rect.top - bounds.y
-    if side == 'LEFT':
-        return rect.x + rect.w - bounds.x
-    return bounds.x + bounds.w - rect.x
+def flexible(key, collapsed, shelf_open):
+    return not (key in PANELS and key in collapsed) and not (key == 'SHELF' and not shelf_open)
 
 
-def zone_size(rect, side, x, y):
-    if side == 'TOP':
-        return rect.top - y
-    if side == 'BOTTOM':
-        return y - rect.y
-    if side == 'LEFT':
-        return x - rect.x
-    return rect.x + rect.w - x
-
-
-def move_zone(order, key, x, y, rects, bounds):
-    vertical = ZONE_SIDES[key] == ('LEFT', 'RIGHT')
-    if vertical:
-        side = 'LEFT' if x < bounds.x + bounds.w / 2 else 'RIGHT'
-        depth = x - bounds.x if side == 'LEFT' else bounds.x + bounds.w - x
-    else:
-        side = 'TOP' if y > bounds.y + bounds.h / 2 else 'BOTTOM'
-        depth = bounds.top - y if side == 'TOP' else y - bounds.y
-    rest = [(name, where) for name, where in order if name != key]
-    deeper = [index for index, (name, where) in enumerate(rest) if where == side and depth < edge_depth(rects[name], side, bounds)]
-    same = [index for index, (_, where) in enumerate(rest) if where == side]
-    index = deeper[0] if deeper else (same[-1] + 1 if same else len(rest))
-    return tuple(rest[:index] + [(key, side)] + rest[index:])
+def thickness(key, heights, collapsed, shelf_open):
+    return fixed_part(key, collapsed, shelf_open) + (clamp_height(key, heights[key]) if flexible(key, collapsed, shelf_open) else 0)
 
 
 def fit_heights(heights, room, minimum):
@@ -108,23 +70,73 @@ def fit_heights(heights, room, minimum):
     return fitted
 
 
-def resize_panel(keys, heights, key, want, room):
+def arrange(bounds, s, places, heights, widths, shown, collapsed, shelf_open):
+    gap = GAP * s
+    free = Rect(bounds.x + MARGIN * s, bounds.y + MARGIN * s, max(0.0, bounds.w - 2 * MARGIN * s), max(0.0, bounds.h - 2 * MARGIN * s))
+    rects, sides, areas, rooms = {}, {}, {}, {}
+    top = free.top
+    for key in [key for key in places['TOP'] if key in shown]:
+        size = min(thickness(key, heights, collapsed, shelf_open) * s, max(0.0, free.h / 2))
+        rects[key], sides[key] = Rect(free.x, free.top - size, free.w, size), 'TOP'
+        free = Rect(free.x, free.y, free.w, max(0.0, free.h - size - gap))
+    areas['TOP'] = Rect(free.x, free.top, free.w, max(0.0, top - free.top))
+    for side in ('LEFT', 'RIGHT'):
+        keys = [key for key in places[side] if key in shown]
+        if not keys:
+            areas[side], rooms[side] = Rect(free.x if side == 'LEFT' else free.x + free.w, free.y, 0.0, free.h), 0.0
+            continue
+        width = min(clamp_width(widths[side], keys) * s, max(0.0, free.w / 2))
+        area = Rect(free.x, free.y, width, free.h) if side == 'LEFT' else Rect(free.x + free.w - width, free.y, width, free.h)
+        free = Rect(free.x + width + gap if side == 'LEFT' else free.x, free.y, max(0.0, free.w - width - gap), free.h)
+        moving = [key for key in keys if flexible(key, collapsed, shelf_open)]
+        room = max(0.0, area.h - gap * (len(keys) - 1) - sum(fixed_part(key, collapsed, shelf_open) * s for key in keys))
+        fitted = dict(zip(moving, fit_heights([clamp_height(key, heights[key]) * s for key in moving], room, MIN_PANEL * s)))
+        areas[side], rooms[side] = area, room / s
+        y = area.top
+        for key in keys:
+            size = fixed_part(key, collapsed, shelf_open) * s + fitted.get(key, 0.0)
+            rects[key], sides[key] = Rect(area.x, y - size, area.w, size), side
+            y -= size + gap
+    bottom = free.y
+    for key in [key for key in places['BOTTOM'] if key in shown]:
+        size = min(thickness(key, heights, collapsed, shelf_open) * s, max(0.0, free.h / 2))
+        rects[key], sides[key] = Rect(free.x, free.y, free.w, size), 'BOTTOM'
+        free = Rect(free.x, free.y + size + gap, free.w, max(0.0, free.h - size - gap))
+    areas['BOTTOM'] = Rect(free.x, bottom, free.w, max(0.0, free.y - bottom))
+    return Zones(free, rects, sides, areas, rooms)
+
+
+def place(places, key, x, y, found):
+    stage = found.stage
+    side = next((name for name in ('LEFT', 'RIGHT', 'TOP', 'BOTTOM') if found.areas[name].w > 0 and found.areas[name].h > 0
+                 and found.areas[name].contains(x, y)), None)
+    if side is None:
+        distance = dict(LEFT=x - stage.x, RIGHT=stage.x + stage.w - x, TOP=stage.top - y, BOTTOM=y - stage.y)
+        side = min(distance, key=distance.get)
+    if key in ROWS_ONLY and side in ('LEFT', 'RIGHT'):
+        side = 'TOP' if y > stage.y + stage.h / 2 else 'BOTTOM'
+    others = [name for name in places[side] if name != key]
+    middle = {name: found.rects[name].y + found.rects[name].h / 2 for name in others if name in found.rects}
+    if side == 'BOTTOM':
+        index = sum(1 for name in others if middle.get(name, y - 1) < y)
+    else:
+        index = sum(1 for name in others if middle.get(name, y + 1) > y)
+    result = {name: [item for item in places[name] if item != key] for name in SIDES}
+    result[side].insert(index, key)
+    return result
+
+
+def resize_stack(keys, heights, key, want, room):
     heights = dict(heights)
     index = keys.index(key)
     below = keys[index + 1:]
-    ceiling = room - sum(heights[name] for name in keys[:index]) - MIN_PANEL * len(below)
-    heights[key] = clamp_panel(min(want, ceiling))
-    excess = sum(heights[name] for name in keys) - room
+    ceiling = room - sum(clamp_height(name, heights[name]) for name in keys[:index]) - MIN_PANEL * len(below)
+    heights[key] = clamp_height(key, min(want, ceiling))
+    excess = sum(clamp_height(name, heights[name]) for name in keys) - room
     for name in below:
         if excess <= 0:
             break
-        cut = max(0.0, min(excess, heights[name] - MIN_PANEL))
-        heights[name] -= cut
+        cut = max(0.0, min(excess, clamp_height(name, heights[name]) - MIN_PANEL))
+        heights[name] = clamp_height(name, heights[name]) - cut
         excess -= cut
     return heights
-
-
-def reorder(order, key, target, below):
-    order = [name for name in order if name != key]
-    index = order.index(target) + (1 if below else 0)
-    return order[:index] + [key] + order[index:]

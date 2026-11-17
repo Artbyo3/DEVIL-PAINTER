@@ -52,8 +52,6 @@ class Layout:
     popover: Optional[Rect] = None
     popover_start: int = -1
     scroll_areas: dict = field(default_factory=dict)
-    panels: dict = field(default_factory=dict)
-    panel_room: float = 0.0
 
     def add(self, key, rect, kind, **values):
         control = Control(key, rect, kind, **values)
