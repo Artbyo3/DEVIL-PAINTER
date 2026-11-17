@@ -115,6 +115,11 @@ def render(path, definition):
             layer.uid, layer.kind = f'T{index}', 'FILL'
             add_slots(layer)
             apply_definition(layer, item)
+            for number, entry in enumerate(item.get('effects', ())):
+                effect = layer.effects.add()
+                effect.uid = f'T{index}E{number}'
+                for field, value in entry.items():
+                    setattr(effect, field, value)
         tree = material.node_tree
         build_tree(Build(tree.nodes, tree.links, Sampler(tree.nodes, tree.links, [1001], lambda image, number: image, ''), live=True, size=2.0),
                    CHANNELS, list(layers))

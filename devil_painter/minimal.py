@@ -10,7 +10,7 @@ from .document import (BAKE_ID_LABELS, NORMAL_FORMATS, PROJECTORS, STROKE_METHOD
                        linked_layer, set_channels, slot_value, uses_coordinates)
 from .effects import EFFECT_ICONS, EFFECT_KINDS, MASK_BLENDS, effect_label
 from .filters import FILTER, FILTERS
-from .library import capture, texture_folder
+from .library import capture, libraries as library_folders, texture_folder
 from .exporting import FORMAT_LABELS, SOURCES, TOKENS, find_template, is_custom
 from .projects import UNWRAP_MODES
 from .shortcuts import ACTIONS, bindings, key_label
@@ -33,6 +33,10 @@ MENU_HEADING = 'HEADING.'
 STROKE_LABELS = {key: label for key, label, _ in STROKE_METHODS}
 PROJECTOR_RANGE = (.05, 50.0)
 GIZMO_HANDLE = 9
+EXPOSURE_RANGE = (-5.0, 5.0)
+GAMMA_RANGE = (.2, 3.0)
+SHELF_TIPS = {'GENERATOR': 'Click to mask the selected layer with this generator', 'FILTER': 'Click to add this filter to the selected layer',
+              'ENVIRONMENT': 'Click to light the viewport with this environment'}
 THUMBNAIL = 32
 RECENT_COLORS = 8
 FOV_RANGE = (10.0, 150.0)
@@ -944,6 +948,65 @@ def shelf_header(layout, state, zone, header):
         layout.add('TEXTURE_BROWSE', Rect(x + field + 6 * s, header.y, 70 * s, header.h), 'CHIP', label='Browse', tip='Pick a texture folder')
 
 
+def shelf_query(state):
+    return state.text.text if state.text is not None and state.text.key == 'SHELF_SEARCH' else state.shelf_query
+
+
+def search_row(layout, state, zone, row):
+    s = layout.scale
+    x = zone.x + 8 * s
+    editing = state.text is not None and state.text.key == 'SHELF_SEARCH'
+    query = shelf_query(state)
+    layout.add('SHELF_SEARCH', Rect(x, row.y, 180 * s, row.h), 'FIELD', text=query if query or editing else 'Search',
+               caret=state.text.cursor if editing else -1, tip='Type to filter this shelf by name')
+    x += 186 * s
+    for scope, label in shelf.SCOPES:
+        layout.add('SCOPE.' + scope, Rect(x, row.y, 62 * s, row.h), 'CHIP', label=label, active=state.shelf_scope == scope,
+                   tip={'ALL': 'Show everything', 'BUILTIN': 'Show what ships with Devil Painter', 'MINE': 'Show your saved assets and libraries'}[scope])
+        x += 66 * s
+    right = zone.x + zone.w - 8 * s - 84 * s
+    layout.add('LIBRARIES', Rect(right, row.y, 84 * s, row.h), 'CHIP', label='Libraries', tip='Add library folders and import files')
+    if query and state.shelf_query:
+        layout.add('SAVE_SEARCH', Rect(x, row.y, 90 * s, row.h), 'CHIP', label='Save search', tip='Keep this search as a chip')
+        x += 96 * s
+    for index, entry in enumerate(shelf.saved_searches()):
+        width = min(120 * s, (len(entry['query']) * 7 + 18) * s)
+        if x + width > right - 6 * s:
+            break
+        if entry['tab'] == state.shelf_tab:
+            layout.add(f'SEARCH.{index}', Rect(x, row.y, width, row.h), 'CHIP', label=entry['query'], active=state.shelf_query == entry['query'],
+                       tip='Saved search. Right-click to delete')
+            x += width + 4 * s
+
+
+def libraries_popover(layout, state, bounds):
+    s = layout.scale
+    folders = library_folders()
+    card = place_popover(bounds, state.popover.anchor, 420 * s, ((len(folders) + 4) * LINE_HEIGHT + 20) * s, s)
+    x, w = card.x + 14 * s, card.w - 28 * s
+    y = card.top - 10 * s - LINE_HEIGHT * s
+    layout.add('LIBRARIES_TITLE', Rect(x, y, w, 24 * s), 'NOTE', label='Library folders: images, texture sets, and .blend materials')
+    for index, folder in enumerate(folders):
+        y -= LINE_HEIGHT * s
+        layout.add(f'LIBRARY.{index}', Rect(x, y, w - 30 * s, 24 * s), 'NOTE', label=folder)
+        layout.add(f'LIB_REMOVE.{index}', Rect(x + w - 24 * s, y, 24 * s, 24 * s), 'ICON', icon='CLOSE', tip='Stop browsing this folder')
+    y -= LINE_HEIGHT * s
+    editing = state.text is not None and state.text.key == 'LIBRARY_NEW'
+    layout.add('LIBRARY_NEW', Rect(x, y, w - 76 * s, 24 * s), 'FIELD', text=state.text.text if editing else 'Type a folder and press Enter',
+               caret=state.text.cursor if editing else -1, tip='Add a folder of images and .blend files to the shelf')
+    layout.add('LIBRARY_BROWSE', Rect(x + w - 70 * s, y, 70 * s, 24 * s), 'CHIP', label='Browse', tip='Pick a library folder')
+    y -= LINE_HEIGHT * s
+    layout.add('IMPORT_RESOURCES', Rect(x, y, w, 24 * s), 'CHIP', label='Import images and .blend files',
+               tip='Copy files into your Devil Painter library')
+    return card
+
+
+def drag_ghost(layout, state):
+    s = layout.scale
+    x, y, label, preview = state.ghost
+    layout.add('DRAG_GHOST', Rect(x + 8 * s, y - SHELF_TILE * s - 8 * s, SHELF_TILE * s, (SHELF_TILE + SHELF_LABEL) * s), 'TILE', label=label, preview=preview)
+
+
 def shelf_layout(layout, state, zone):
     s = layout.scale
     layout.cards.append((zone, ''))
@@ -951,10 +1014,16 @@ def shelf_layout(layout, state, zone):
     shelf_header(layout, state, zone, header)
     if not state.shelf_open:
         return
-    viewport = Rect(zone.x, zone.y + 4 * s, zone.w, max(0.0, header.y - 6 * s - zone.y - 4 * s))
-    entries = shelf.items(state.shelf_tab)
+    search = Rect(zone.x, header.y - 28 * s, zone.w, 22 * s)
+    search_row(layout, state, zone, search)
+    viewport = Rect(zone.x, zone.y + 4 * s, zone.w, max(0.0, search.y - 6 * s - zone.y - 4 * s))
+    query = shelf_query(state)
+    entries = shelf.visible(state.shelf_tab, query, state.shelf_scope)
     if not entries:
-        empty = 'Pick a folder of textures to browse them here.' if state.shelf_tab == 'TEXTURES' else 'Save a layer from its right-click menu to see it here.'
+        if query or state.shelf_scope != 'ALL':
+            empty = f'Nothing in {dict(shelf.TABS)[state.shelf_tab].lower()} matches this search.'
+        else:
+            empty = 'Pick a folder of textures to browse them here.' if state.shelf_tab == 'TEXTURES' else 'Save a layer from its right-click menu to see it here.'
         layout.add('SHELF_EMPTY', Rect(zone.x + 16 * s, viewport.top - 30 * s, viewport.w - 32 * s, 22 * s), 'NOTE', label=empty)
         return
     tile_w, tile_h = (SHELF_TILE + SHELF_GAP) * s, (SHELF_TILE + SHELF_LABEL + SHELF_GAP) * s
@@ -981,6 +1050,9 @@ def shelf_layout(layout, state, zone):
             tip = f'Click to use for {CHANNEL[state.armed].label.lower()}'
         else:
             tip = 'Click to add as a fill layer'
+        if item.kind in SHELF_TIPS:
+            tip = SHELF_TIPS[item.kind]
+        tip += '. Drag onto the layers to place it'
         if item.kind == 'TEXTURE':
             tip += '. Right-click for more'
         layout.add(f'ITEM.{index}', rect, 'TILE', label=item.label, preview=shelf.thumbnail(item), clip=viewport,
@@ -1245,9 +1317,9 @@ def project_popover(layout, state, bounds, data):
     return card
 
 
-def viewport_popover(layout, state, bounds, shading, lens, ortho):
+def viewport_popover(layout, state, bounds, shading, lens, ortho, view):
     s = layout.scale
-    card = place_popover(bounds, state.popover.anchor, 360 * s, (7 * LINE_HEIGHT + 30) * s, s)
+    card = place_popover(bounds, state.popover.anchor, 360 * s, (11 * LINE_HEIGHT + 30) * s, s)
     x, w = card.x + 14 * s, card.w - 28 * s
     y = card.top - 34 * s
     layout.add('VIEWPORT_TITLE', Rect(x, y, w, 22 * s), 'NOTE', label='Viewport')
@@ -1268,6 +1340,18 @@ def viewport_popover(layout, state, bounds, shading, lens, ortho):
                tip='Field of view of the viewport camera')
     y -= LINE_HEIGHT * s
     layout.add('CAMERA_ORTHO', Rect(x, y, w, 24 * s), 'TOGGLE', label='Orthographic', active=ortho, tip='Switch between perspective and orthographic')
+    y -= LINE_HEIGHT * s
+    layout.add('CM_VIEW', Rect(x, y, w, 24 * s), 'DROPDOWN', label='View transform', text=view.view_transform,
+               tip='How the viewport maps scene light to the display. Exports always keep the raw texture values')
+    y -= LINE_HEIGHT * s
+    layout.add('CM_LOOK', Rect(x, y, w, 24 * s), 'DROPDOWN', label='Look', text=view.look.replace(f'{view.view_transform} - ', '') or 'None',
+               tip='Contrast look applied on top of the view transform')
+    y -= LINE_HEIGHT * s
+    layout.add('CM_EXPOSURE', Rect(x, y, w, 24 * s), 'SLIDER', label='Exposure', value=(view.exposure - EXPOSURE_RANGE[0]) / (EXPOSURE_RANGE[1] - EXPOSURE_RANGE[0]),
+               text=f'{view.exposure:+.2f}')
+    y -= LINE_HEIGHT * s
+    layout.add('CM_GAMMA', Rect(x, y, w, 24 * s), 'SLIDER', label='Gamma', value=(view.gamma - GAMMA_RANGE[0]) / (GAMMA_RANGE[1] - GAMMA_RANGE[0]),
+               text=f'{view.gamma:.2f}')
     return card
 
 
@@ -1373,6 +1457,8 @@ def painter_layout(bounds, scale, state, data, obj_name, tool, brush, directory,
         dock_layout(layout, layout.zones.dock, tool, state)
         shelf_layout(layout, state, layout.zones.shelf)
         column_layout(layout, state, data, layout.zones.column)
+    if state.ghost:
+        drag_ghost(layout, state)
     if state.popover is not None:
         layout.popover_start = len(layout.controls)
         if state.popover.kind == 'COLOR':
@@ -1389,6 +1475,8 @@ def painter_layout(bounds, scale, state, data, obj_name, tool, brush, directory,
             layout.popover = shortcuts_popover(layout, state, bounds)
         elif state.popover.kind == 'BAKE' and data is not None:
             layout.popover = bake_popover(layout, state, bounds, data)
+        elif state.popover.kind == 'LIBRARIES':
+            layout.popover = libraries_popover(layout, state, bounds)
         elif state.popover.kind == 'SYMMETRY' and data is not None:
             layout.popover = symmetry_popover(layout, state, bounds, data)
         elif state.popover.kind == 'STENCIL' and data is not None:

@@ -50,6 +50,9 @@ class WorkspaceState:
     poly_mode: str = ''
     gesture: list = None
     gizmo: tuple = ()
+    shelf_query: str = ''
+    shelf_scope: str = 'ALL'
+    ghost: tuple = ()
     clone_source: tuple = None
     poly_erase: bool = False
     bake_pending: str = ''

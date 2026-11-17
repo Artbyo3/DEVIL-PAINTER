@@ -12,9 +12,9 @@ from .blending import BLEND_MODES, CHANNEL, FOLDER_BLENDS, linear_to_srgb, srgb_
 from .ui_system import ACCENT
 from .canvas import Rect
 from .document import (BAKE_ID_LABELS, PROJECTIONS, PROJECTORS, RESOLUTIONS, STROKE_METHODS, active_effect, active_layer, active_tile, find_layer,
-                       paint_target, set_channels, slot_value, texture_set, uses_coordinates)
+                       editing_mask, paint_target, set_channels, slot_value, texture_set, uses_coordinates)
 from .effects import MASK_BLENDS
-from .filters import FILTERS, GROUPS
+from .filters import FILTER, FILTERS, GROUPS
 from .procedural import PATTERNS
 from .tiles import FIRST_TILE, variant
 from bpy_extras import view3d_utils
@@ -23,12 +23,23 @@ from .draw import Renderer
 from .masks import BUILDER_SLIDERS, GENERATORS
 from .polyfill import POLY_NOUN
 from .meshmaps import MESH_MAPS
-from .minimal import MENU_HEADING, PROJECTOR_RANGE, NORMAL_SLIDERS, STENCIL_SLIDERS, FX_RANGES, effect_menu, layer_rows, FOV_RANGE, RECENT_COLORS, SHADER_SLIDERS, BRUSH_SLIDERS, BRUSH_TOGGLES, GENERATOR_SLIDERS, MAX_BRUSH_SIZE, REPLACE_TARGET, EFFECT_TARGET, SCALE_RANGE, TILING_RANGE, from_slider, painter_layout
+from .minimal import MENU_HEADING, EXPOSURE_RANGE, GAMMA_RANGE, PROJECTOR_RANGE, NORMAL_SLIDERS, STENCIL_SLIDERS, FX_RANGES, effect_menu, layer_rows, FOV_RANGE, RECENT_COLORS, SHADER_SLIDERS, BRUSH_SLIDERS, BRUSH_TOGGLES, GENERATOR_SLIDERS, MAX_BRUSH_SIZE, REPLACE_TARGET, EFFECT_TARGET, SCALE_RANGE, TILING_RANGE, from_slider, painter_layout
 from .shell import MARGIN, clamp_column, clamp_split
 from .state import Popover, TextEdit, WorkspaceState
 
 TIMER_INTERVAL = .3
 GESTURE_TOOLS = {'ERASE', 'BLUR', 'SMEAR', 'CLONE'}
+DRAG_START = 8
+ONTO_KINDS = {'MASK', 'GENERATOR', 'FILTER'}
+LAYER_KINDS = {'MATERIAL', 'SMART', 'TEXTURE', 'PATTERN'}
+
+
+def choices(view, field):
+    try:
+        setattr(view, field, '')
+    except TypeError as error:
+        return [name for name in str(error).split('(', 1)[-1].rstrip(')').replace("'", '').split(', ') if name]
+    return [getattr(view, field)]
 STROKE_LABEL = {key: label for key, label, _ in STROKE_METHODS}
 NORMAL_KEYS = {key for key, _, _, _ in NORMAL_SLIDERS}
 DRAG_FIELDS = {key: (field, top) for key, _, field, top in (*NORMAL_SLIDERS, *STENCIL_SLIDERS)}
@@ -106,6 +117,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         obj = context.view_layer.objects.active
         data = texture_set(obj)
         self.stroke_pending = False
+        self.drag_origin = (0.0, 0.0)
         self.flat_area = None
         self.saved_mask = None
         self.setup_cache = None
@@ -174,7 +186,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         brush = (painting.brush_value(self.scene, 'size'), (*painting.brush_value(self.scene, 'color'), 1.0))
         name = obj.name if obj is not None and obj.type == 'MESH' else ''
         directory = (obj.devil_painter.export_directory or default_directory(obj)) if data is not None else ''
-        viewport = (space.shading, space.lens, space.region_3d.view_perspective == 'ORTHO')
+        viewport = (space.shading, space.lens, space.region_3d.view_perspective == 'ORTHO', self.scene.view_settings)
         self.state.gizmo = self.gizmo_geometry(obj, data, space.region_3d)
         if data is not None and self.state.popover is not None and self.state.popover.kind == 'BAKE':
             self.state.bake_found = meshmaps.bake_sources(bpy.context, obj, data)
@@ -474,6 +486,9 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
                 self.state.multi.clear()
             actions.select_layer(context, obj, data, uid)
             self.open_layer_menu(control.rect, data)
+            return {'RUNNING_MODAL'}
+        if control is not None and press and event.type == 'RIGHTMOUSE' and control.key.startswith('SEARCH.'):
+            self.state.popover = Popover('MENU', control.rect, items=((f'DELETE_SEARCH.{control.key.removeprefix("SEARCH.")}', 'Delete saved search', False),))
             return {'RUNNING_MODAL'}
         if control is not None and press and event.type == 'RIGHTMOUSE' and control.key.startswith('ITEM.'):
             item = self.shelf_item(control.key)
@@ -1019,6 +1034,12 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             exporting.edit_output(obj.devil_painter.export_template, int(edit.key.removeprefix('OUT_NAME.')), name=edit.text.strip() or 'Output')
         elif edit.key == 'TEXTURE_DIR':
             library.set_texture_folder(edit.text)
+        elif edit.key == 'SHELF_SEARCH':
+            self.state.shelf_query = edit.text.strip()
+            self.state.scroll['SHELF'] = 0.0
+        elif edit.key == 'LIBRARY_NEW':
+            folder = edit.text.strip()
+            self.message = f'Added the library {folder}.' if library.add_library(folder) else f'{folder} is not a folder.'
 
     def text_event(self, context, event, pointer_event):
         edit = self.state.text
@@ -1163,6 +1184,12 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             actions.set_tiling(context, obj, data, from_slider(x, TILING_RANGE))
             if release:
                 self.message = actions.commit_value(context, obj, data, 'Tiling')
+        elif key.startswith('DRAG_ITEM.'):
+            self.track_item(context, key, release)
+        elif key == 'CM_EXPOSURE':
+            self.scene.view_settings.exposure = EXPOSURE_RANGE[0] + x * (EXPOSURE_RANGE[1] - EXPOSURE_RANGE[0])
+        elif key == 'CM_GAMMA':
+            self.scene.view_settings.gamma = GAMMA_RANGE[0] + x * (GAMMA_RANGE[1] - GAMMA_RANGE[0])
         elif key.startswith(('DRAG_ROW.', 'DRAG_FX.')):
             self.track_drop(key)
             if release:
@@ -1341,7 +1368,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.brush_changed(context, data)
             self.message = 'The brush paints plain values again.'
         elif key.startswith('PAINT_MATERIAL.'):
-            brushes.use_material(context, data, self.shelf_item('ITEM.' + key.removeprefix('PAINT_MATERIAL.')).payload)
+            brushes.use_material(context, data, shelf.resolved(self.shelf_item('ITEM.' + key.removeprefix('PAINT_MATERIAL.')).payload))
             self.brush_changed(context, data)
             self.message = f'The brush paints {data.brush_material} in every channel.'
         elif key in {'SYMMETRY', 'STENCIL_CARD'}:
@@ -1419,7 +1446,43 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         elif key == 'TEXTURE_BROWSE':
             bpy.ops.devil_painter.choose_texture_folder('INVOKE_DEFAULT')
         elif key.startswith('ITEM.'):
-            self.message = self.use_shelf_item(context, obj, data, self.shelf_item(key))
+            self.state.drag = ('DRAG_ITEM.' + key.removeprefix('ITEM.'), control.rect)
+            self.drag_origin = self.pointer
+        elif key == 'SHELF_SEARCH':
+            self.begin_text(key, self.state.shelf_query)
+        elif key.startswith('SCOPE.'):
+            self.state.shelf_scope = key.removeprefix('SCOPE.')
+            self.state.scroll['SHELF'] = 0.0
+        elif key == 'SAVE_SEARCH':
+            self.message = f'Saved the search {shelf.save_search(self.state.shelf_tab, self.state.shelf_query)}.'
+        elif key.startswith('SEARCH.'):
+            query = shelf.saved_searches()[int(key.removeprefix('SEARCH.'))]['query']
+            self.state.shelf_query = '' if self.state.shelf_query == query else query
+            self.state.scroll['SHELF'] = 0.0
+        elif key.startswith('DELETE_SEARCH.'):
+            self.message = f'Deleted the saved search {shelf.remove_search(int(key.removeprefix("DELETE_SEARCH.")))}.'
+        elif key == 'LIBRARIES':
+            self.state.popover = None if self.state.popover is not None and self.state.popover.kind == 'LIBRARIES' else Popover('LIBRARIES', control.rect)
+        elif key == 'LIBRARY_NEW':
+            self.begin_text(key, '')
+        elif key.startswith('LIB_REMOVE.'):
+            self.message = f'Removed the library {library.remove_library(int(key.removeprefix("LIB_REMOVE.")))}.'
+        elif key == 'LIBRARY_BROWSE':
+            bpy.ops.devil_painter.choose_library_folder('INVOKE_DEFAULT')
+        elif key == 'IMPORT_RESOURCES':
+            bpy.ops.devil_painter.import_textures('INVOKE_DEFAULT')
+        elif key == 'CM_VIEW':
+            self.state.popover = Popover('MENU', control.rect, items=tuple((f'SET_CM_VIEW.{name}', name, name == self.scene.view_settings.view_transform)
+                                                                           for name in choices(self.scene.view_settings, 'view_transform')))
+        elif key.startswith('SET_CM_VIEW.'):
+            self.scene.view_settings.view_transform = key.removeprefix('SET_CM_VIEW.')
+            self.message = f'The viewport shows {self.scene.view_settings.view_transform}. Exports keep the raw texture values.'
+        elif key == 'CM_LOOK':
+            self.state.popover = Popover('MENU', control.rect, items=tuple((f'SET_CM_LOOK.{name}', name, name == self.scene.view_settings.look)
+                                                                           for name in choices(self.scene.view_settings, 'look')))
+        elif key.startswith('SET_CM_LOOK.'):
+            self.scene.view_settings.look = key.removeprefix('SET_CM_LOOK.')
+            self.message = f'Look: {self.scene.view_settings.look}.'
         elif key == 'TEXTURE_IMPORT':
             bpy.ops.devil_painter.import_textures('INVOKE_DEFAULT')
         elif key.startswith('TEXTURE_FILL.'):
@@ -1614,12 +1677,46 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         return None
 
     def shelf_item(self, key):
-        return shelf.items(self.state.shelf_tab)[int(key.removeprefix('ITEM.'))]
+        return shelf.visible(self.state.shelf_tab, self.state.shelf_query, self.state.shelf_scope)[int(key.removeprefix('ITEM.'))]
+
+    def track_item(self, context, key, release):
+        item = self.shelf_item('ITEM.' + key.removeprefix('DRAG_ITEM.'))
+        moved = math.dist(self.pointer, self.drag_origin) > DRAG_START * self.workspace.scale
+        target = self.drop_target('ROW_') if moved else None
+        if target is not None:
+            obj, data = self.painted()
+            height = (self.pointer[1] - target.rect.y) / target.rect.h
+            folder = find_layer(data, target.key.removeprefix('ROW_')).kind == 'FOLDER'
+            mode = 'INTO' if item.kind in ONTO_KINDS or (folder and .33 <= height <= .66) else 'ABOVE' if height >= .5 else 'BELOW'
+            self.state.drop = (target.key, mode)
+        else:
+            self.state.drop = ()
+        self.state.ghost = (self.pointer[0], self.pointer[1], item.label, shelf.thumbnail(item)) if moved and not release else ()
+        if not release:
+            return
+        drop, self.state.drop = self.state.drop, ()
+        obj, data = self.painted()
+        if not moved:
+            self.message = self.use_shelf_item(context, obj, data, item)
+        elif drop:
+            self.message = self.drop_item(context, obj, data, item, drop[0].removeprefix('ROW_'), drop[1])
+        elif 'LAYERS' in self.workspace.scroll_areas and self.workspace.scroll_areas['LAYERS'][0].contains(*self.pointer):
+            self.message = self.use_shelf_item(context, obj, data, item)
+
+    def drop_item(self, context, obj, data, item, target_uid, mode):
+        actions.select_layer(context, obj, data, target_uid)
+        message = self.use_shelf_item(context, obj, data, item)
+        if item.kind not in LAYER_KINDS or data.active_uid == target_uid:
+            return message
+        actions.drop_layer(context, obj, data, data.active_uid, target_uid, mode)
+        return message
 
     def use_shelf_item(self, context, obj, data, item):
         armed = self.state.armed
         self.state.armed = ''
         layer = active_layer(data)
+        if item.kind == 'MATERIAL':
+            item = shelf.Item(item.label, item.kind, shelf.resolved(item.payload), item.user_index, item.preview_file, item.managed, item.mine)
         if armed == REPLACE_TARGET and item.kind == 'MATERIAL' and layer is not None and layer.kind == 'FILL':
             return actions.replace_material(context, obj, data, item.payload)
         if armed == EFFECT_TARGET and item.kind == 'TEXTURE' and active_effect(data) is not None:
@@ -1629,6 +1726,19 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         target = armed if armed and layer is not None and layer.kind == 'FILL' else ''
         if item.kind == 'SMART':
             return actions.add_smart_material(context, obj, data, item.payload)
+        if item.kind == 'GENERATOR':
+            if layer is None:
+                return 'Select a layer to mask.'
+            return actions.set_generator(context, obj, data, dict(generator=item.payload))
+        if item.kind == 'FILTER':
+            if layer is None or layer.kind == 'INSTANCE':
+                return 'Select a layer to filter.'
+            target = 'MASK' if editing_mask(data) and not FILTER[item.payload].color_only else 'CONTENT'
+            actions.add_effect(context, obj, data, 'FILTER', target)
+            return actions.edit_effect(context, obj, data, 'filter', item.payload, True)
+        if item.kind == 'ENVIRONMENT':
+            self._area.spaces.active.shading.studio_light = item.payload
+            return f'The viewport is lit by {item.label}.'
         if item.kind == 'MASK' and item.user_index >= 0:
             return actions.apply_smart_mask(context, obj, data, item.payload)
         if item.kind == 'MASK':

@@ -40,13 +40,29 @@ class DEVIL_PAINTER_OT_choose_texture_folder(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class DEVIL_PAINTER_OT_choose_library_folder(bpy.types.Operator):
+    bl_idname = 'devil_painter.choose_library_folder'
+    bl_label = 'Add Library Folder'
+    bl_description = 'Pick a folder of images and .blend files for the Devil Painter shelf'
+    directory: bpy.props.StringProperty(subtype='DIR_PATH')
+
+    def invoke(self, context, event):
+        context.window_manager.fileselect_add(self)
+        return {'RUNNING_MODAL'}
+
+    def execute(self, context):
+        library.add_library(self.directory)
+        return {'FINISHED'}
+
+
 class DEVIL_PAINTER_OT_import_textures(bpy.types.Operator):
     bl_idname = 'devil_painter.import_textures'
-    bl_label = 'Import Textures'
-    bl_description = 'Copy image files into the Devil Painter texture library'
+    bl_label = 'Import Resources'
+    bl_description = 'Copy images and .blend files into the Devil Painter library'
     directory: bpy.props.StringProperty(subtype='DIR_PATH')
     files: bpy.props.CollectionProperty(type=bpy.types.OperatorFileListElement)
     filter_image: bpy.props.BoolProperty(default=True, options={'HIDDEN'})
+    filter_blender: bpy.props.BoolProperty(default=True, options={'HIDDEN'})
     filter_folder: bpy.props.BoolProperty(default=True, options={'HIDDEN'})
 
     def invoke(self, context, event):
@@ -55,7 +71,7 @@ class DEVIL_PAINTER_OT_import_textures(bpy.types.Operator):
 
     def execute(self, context):
         count = library.import_textures(Path(self.directory) / item.name for item in self.files)
-        self.report({'INFO'}, f'Imported {count} textures into the library.')
+        self.report({'INFO'}, f'Imported {count} files into the library.')
         return {'FINISHED'}
 
 
@@ -81,5 +97,5 @@ class DEVIL_PAINTER_OT_reimport_mesh(bpy.types.Operator):
         return {'FINISHED'}
 
 
-CLASSES = (DEVIL_PAINTER_OT_choose_export_folder, DEVIL_PAINTER_OT_choose_texture_folder, DEVIL_PAINTER_OT_import_textures,
+CLASSES = (DEVIL_PAINTER_OT_choose_export_folder, DEVIL_PAINTER_OT_choose_texture_folder, DEVIL_PAINTER_OT_choose_library_folder, DEVIL_PAINTER_OT_import_textures,
            DEVIL_PAINTER_OT_reimport_mesh)

@@ -15,6 +15,9 @@ CHANNEL_WORDS = {'base_color': {'basecolor', 'albedo', 'diffuse', 'diff', 'color
                  'height': {'height', 'displacement', 'disp', 'bump'}, 'emission': {'emission', 'emissive'}, 'opacity': {'opacity', 'alpha'}}
 DIRECTX_WORDS = {'dx', 'normaldx'}
 SETTINGS_FILE = 'library.json'
+BLEND_SUFFIX = '.blend'
+BLEND_INPUTS = (('base_color', 'Base Color'), ('roughness', 'Roughness'), ('metallic', 'Metallic'), ('normal', 'Normal'),
+                ('emission', 'Emission Color'), ('opacity', 'Alpha'))
 _cache = {}
 
 
@@ -156,12 +159,17 @@ def image_files(root):
 
 def scan():
     folder = texture_folder()
-    if _cache.get('scan', (None,))[0] != folder:
+    if _cache.get('scan', (None,))[0] != folder or 'scan' not in _cache:
         managed = image_files(managed_folder())
-        browsed = [path for path in image_files(Path(folder) if folder else None) if path not in managed]
-        files = managed + browsed
-        _cache['scan'] = (folder, files, texture_sets(files))
-    return _cache['scan'][1:]
+        browsed = [path for root in library_roots() for path in image_files(root) if path not in managed]
+        files = list(dict.fromkeys(managed + browsed))
+        _cache['scan'] = (folder, files, texture_sets(files), blend_files([managed_folder(), *library_roots()]))
+    return _cache['scan'][1:3]
+
+
+def scanned_blends():
+    scan()
+    return _cache['scan'][3]
 
 
 def is_managed(path):
@@ -173,7 +181,7 @@ def import_textures(paths):
     imported = 0
     for source in paths:
         source = Path(source)
-        if source.suffix.lower() not in IMAGE_SUFFIXES or not source.is_file():
+        if source.suffix.lower() not in IMAGE_SUFFIXES | {BLEND_SUFFIX} or not source.is_file():
             continue
         target, number = folder / source.name, 1
         while target.exists():
@@ -195,6 +203,99 @@ def remove_texture(path):
 
 def rescan():
     _cache.pop('scan', None)
+
+
+def libraries():
+    return settings().setdefault('libraries', [])
+
+
+def add_library(folder):
+    folder = folder.strip()
+    if not folder or folder in libraries() or not Path(folder).is_dir():
+        return False
+    libraries().append(folder)
+    save_settings()
+    rescan()
+    return True
+
+
+def remove_library(index):
+    folder = libraries().pop(index)
+    save_settings()
+    rescan()
+    return folder
+
+
+def library_roots():
+    return [Path(folder) for folder in dict.fromkeys([texture_folder(), *libraries()]) if folder]
+
+
+def blend_files(roots):
+    found = []
+    for root in roots:
+        if root.is_dir():
+            found += [path for path in sorted(root.rglob('*' + BLEND_SUFFIX)) if path.is_file()]
+    return found[:MAX_FILES]
+
+
+def blend_materials(path):
+    key = ('blend', str(path), path.stat().st_mtime)
+    if key not in _cache:
+        with bpy.data.libraries.load(str(path)) as (source, _):
+            _cache[key] = sorted(source.materials)
+    return _cache[key]
+
+
+def upstream_image(socket, depth=4):
+    if not socket.is_linked or depth == 0:
+        return None
+    node = socket.links[0].from_node
+    if node.type == 'TEX_IMAGE':
+        return node.image
+    return next((image for item in node.inputs if (image := upstream_image(item, depth - 1)) is not None), None)
+
+
+def image_file(image):
+    path = Path(bpy.path.abspath(image.filepath)) if image.filepath else None
+    if path is not None and path.is_file():
+        return str(path)
+    folder = library_root() / 'blend_textures'
+    folder.mkdir(exist_ok=True)
+    target = folder / (re.sub(r'[^A-Za-z0-9]+', '_', image.name).strip('_') + '.png')
+    image.filepath_raw = str(target)
+    image.file_format = 'PNG'
+    image.save()
+    return str(target)
+
+
+def convert_material(item):
+    shader = next((node for node in item.node_tree.nodes if node.type == 'BSDF_PRINCIPLED'), None) if item.node_tree is not None else None
+    if shader is None:
+        return dict(base_color=plain(tuple(item.diffuse_color[:3])), roughness=plain(item.roughness), metallic=plain(item.metallic))
+    slots = {}
+    for key, name in BLEND_INPUTS:
+        socket = shader.inputs[name]
+        image = upstream_image(socket)
+        if image is not None:
+            slots[key] = texture(image_file(image))
+        elif key in {'base_color', 'roughness', 'metallic'}:
+            value = socket.default_value
+            slots[key] = plain(tuple(value[:3]) if key == 'base_color' else float(value))
+    return slots
+
+
+def blend_definition(path, name):
+    key = ('blend_definition', str(path), Path(path).stat().st_mtime, name)
+    if key not in _cache:
+        with bpy.data.libraries.load(str(path)) as (_, target):
+            target.materials = [name]
+        loaded = target.materials[0]
+        images = {node.image for node in loaded.node_tree.nodes if node.type == 'TEX_IMAGE' and node.image is not None} if loaded.node_tree else set()
+        try:
+            _cache[key] = material(name, **convert_material(loaded))
+        finally:
+            bpy.data.batch_remove([loaded, *images])
+    return _cache[key]
 
 
 def load_image(path, channel):

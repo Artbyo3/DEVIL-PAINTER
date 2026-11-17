@@ -196,6 +196,8 @@ def write(path, planes, file_format, depth, target):
     if mode == 'RGBA' and file_format != 'OPEN_EXR':
         pixels[..., :3] *= pixels[..., 3:]
     scene = bpy.data.scenes.new('DP Export')
+    view = scene.view_settings
+    view.view_transform, view.look, view.exposure, view.gamma = 'Standard', 'None', 0.0, 1.0
     image = bpy.data.images.new(path.stem, size, size, alpha=True, float_buffer=True)
     try:
         image.colorspace_settings.name = 'Non-Color'

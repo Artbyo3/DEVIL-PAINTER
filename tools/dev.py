@@ -58,7 +58,7 @@ def do_tests():
             return False
 
     print("\n=== RUNNING REAL-BLENDER IN-ENGINE GUI SUITES ===")
-    for t in ["gui_editor.py", "gui_project.py", "gui_layers.py", "gui_baking.py", "gui_masks.py", "gui_painting.py"]:
+    for t in ["gui_editor.py", "gui_project.py", "gui_layers.py", "gui_baking.py", "gui_masks.py", "gui_painting.py", "gui_shelf.py"]:
         if not run_cmd([BLENDER_PATH, "--enable-event-simulate", "--factory-startup", "--python", f"tests/{t}"],
                        desc=f"In-Engine GUI: {t}"):
             return False

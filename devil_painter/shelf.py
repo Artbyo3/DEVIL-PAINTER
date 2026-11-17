@@ -1,14 +1,21 @@
 from dataclasses import dataclass
 from pathlib import Path
+import bpy
+import numpy
 from . import thumbnails
 from .brushes import ALPHAS, PRESETS, alpha_path, preview_path, user_presets
-from .library import BUILTIN_MATERIALS, is_managed, material, pattern, plain, scan, texture, user_materials
-from .masks import SMART_MASKS
-from .smart import BUILTIN_SMART, smart_masks, smart_materials
+from .filters import FILTER, FILTERS
+from .library import (BUILTIN_MATERIALS, blend_definition, blend_materials, is_managed, library_root, material, pattern, plain, save_settings, scan,
+                      scanned_blends, settings, texture, user_materials)
+from .masks import GENERATOR, GENERATORS, SMART_MASKS
+from .smart import BUILTIN_SMART, smart_masks, smart_materials, write_pixels
 from .procedural import PATTERN, PATTERNS
 
-TABS = (('MATERIALS', 'Materials'), ('SMART', 'Smart'), ('TEXTURES', 'Textures'), ('PATTERNS', 'Patterns'), ('MASKS', 'Masks'), ('BRUSHES', 'Brushes'),
-        ('ALPHAS', 'Alphas'))
+TABS = (('MATERIALS', 'Materials'), ('SMART', 'Smart'), ('TEXTURES', 'Textures'), ('PATTERNS', 'Patterns'), ('MASKS', 'Masks'),
+        ('GENERATORS', 'Generators'), ('FILTERS', 'Filters'), ('BRUSHES', 'Brushes'), ('ALPHAS', 'Alphas'), ('ENVIRONMENTS', 'Lighting'))
+SCOPES = (('ALL', 'All'), ('BUILTIN', 'Built-in'), ('MINE', 'Mine'))
+FILTER_BASE = 'filter_base.png'
+FILTER_BASE_SIZE = 64
 
 
 @dataclass(frozen=True)
@@ -19,6 +26,7 @@ class Item:
     user_index: int = -1
     preview_file: str = ''
     managed: bool = False
+    mine: bool = False
 
 
 def pattern_definition(key):
@@ -32,6 +40,41 @@ def mask_definition(preset):
                                                   generator={key: value for key, value in preset.items() if key != 'name'})])
 
 
+def filter_base():
+    path = library_root() / 'previews' / FILTER_BASE
+    if not path.is_file():
+        path.parent.mkdir(exist_ok=True)
+        rows, columns = numpy.mgrid[0:FILTER_BASE_SIZE, 0:FILTER_BASE_SIZE] / FILTER_BASE_SIZE
+        pixels = numpy.ones((FILTER_BASE_SIZE, FILTER_BASE_SIZE, 4), dtype=numpy.float32)
+        checker = ((rows * 4).astype(int) + (columns * 4).astype(int)) % 2
+        pixels[..., 0] = .15 + .7 * checker
+        pixels[..., 1] = .2 + .6 * columns
+        pixels[..., 2] = .8 - .6 * rows
+        write_pixels(pixels.ravel(), FILTER_BASE_SIZE, FILTER_BASE_SIZE, path, False)
+    return path
+
+
+def filter_definition(key):
+    effect = dict(kind='FILTER', target='CONTENT', filter=key, enabled=True, opacity=1.0, channel='ALL')
+    return dict(material(FILTER[key].label, base_color=texture(filter_base()), roughness=plain(.5)), effects=[effect])
+
+
+def generator_definition(key):
+    return mask_definition(dict(name=GENERATOR[key].label, generator=key, gen_level=.3, gen_contrast=.6, gen_noise=.2, gen_scale=20.0, gen_invert=False))
+
+
+def environments():
+    return [light for light in bpy.context.preferences.studio_lights if light.type == 'WORLD']
+
+
+def blend_items():
+    return [Item(name, 'MATERIAL', dict(name=name, blend=str(path)), mine=True) for path in scanned_blends() for name in blend_materials(path)]
+
+
+def resolved(definition):
+    return blend_definition(definition['blend'], definition['name']) if 'blend' in definition else definition
+
+
 def texture_definition(path):
     return material(Path(path).stem, base_color=texture(path))
 
@@ -40,23 +83,54 @@ def items(tab):
     if tab == 'MATERIALS':
         _, sets = scan()
         return ([Item(definition['name'], 'MATERIAL', definition) for definition in BUILTIN_MATERIALS]
-                + [Item(definition['name'], 'MATERIAL', definition, index) for index, definition in enumerate(user_materials())]
-                + [Item(definition['name'], 'MATERIAL', definition, preview_file=definition['slots']['base_color']['image']) for definition in sets])
+                + [Item(definition['name'], 'MATERIAL', definition, index, mine=True) for index, definition in enumerate(user_materials())]
+                + [Item(definition['name'], 'MATERIAL', definition, preview_file=definition['slots']['base_color']['image'], mine=True) for definition in sets]
+                + blend_items())
     if tab == 'TEXTURES':
         files, _ = scan()
-        return [Item(path.stem, 'TEXTURE', path, managed=is_managed(path)) for path in files]
+        return [Item(path.stem, 'TEXTURE', path, managed=is_managed(path), mine=True) for path in files]
     if tab == 'SMART':
         return ([Item(definition['name'], 'SMART', definition) for definition in BUILTIN_SMART]
-                + [Item(definition['name'], 'SMART', definition, index) for index, definition in enumerate(smart_materials())])
+                + [Item(definition['name'], 'SMART', definition, index, mine=True) for index, definition in enumerate(smart_materials())])
     if tab == 'MASKS':
         return ([Item(preset['name'], 'MASK', preset) for preset in SMART_MASKS]
-                + [Item(definition['name'], 'MASK', definition, index, definition['preview']) for index, definition in enumerate(smart_masks())])
+                + [Item(definition['name'], 'MASK', definition, index, definition['preview'], mine=True) for index, definition in enumerate(smart_masks())])
+    if tab == 'GENERATORS':
+        return [Item(generator.label, 'GENERATOR', generator.key) for generator in GENERATORS]
+    if tab == 'FILTERS':
+        return [Item(item.label, 'FILTER', item.key) for item in FILTERS]
+    if tab == 'ENVIRONMENTS':
+        return [Item(light.name.rsplit('.', 1)[0], 'ENVIRONMENT', light.name, preview_file=light.path) for light in environments()]
     if tab == 'BRUSHES':
         return ([Item(preset['name'], 'BRUSH', preset, preview_file=str(preview_path(preset))) for preset in PRESETS]
-                + [Item(preset['name'], 'BRUSH', preset, index, str(preview_path(preset))) for index, preset in enumerate(user_presets())])
+                + [Item(preset['name'], 'BRUSH', preset, index, str(preview_path(preset)), mine=True) for index, preset in enumerate(user_presets())])
     if tab == 'ALPHAS':
         return [Item('No alpha', 'ALPHA', '')] + [Item(name, 'ALPHA', name, preview_file=str(alpha_path(name))) for name in ALPHAS]
     return [Item(entry.label, 'PATTERN', entry.key) for entry in PATTERNS]
+
+
+def visible(tab, query='', scope='ALL'):
+    words = query.lower().split()
+    return [item for item in items(tab) if all(word in item.label.lower() for word in words)
+            and (scope == 'ALL' or item.mine == (scope == 'MINE'))]
+
+
+def saved_searches():
+    return settings().setdefault('saved_searches', [])
+
+
+def save_search(tab, query):
+    entry = dict(tab=tab, query=query.strip())
+    if entry['query'] and entry not in saved_searches():
+        saved_searches().append(entry)
+        save_settings()
+    return entry['query']
+
+
+def remove_search(index):
+    query = saved_searches().pop(index)['query']
+    save_settings()
+    return query
 
 
 def thumbnail(item):
@@ -70,6 +144,12 @@ def thumbnail(item):
         return thumbnails.material_texture(pattern_definition(item.payload))
     if item.kind == 'MASK':
         return thumbnails.material_texture(mask_definition(item.payload))
+    if item.kind == 'GENERATOR':
+        return thumbnails.material_texture(generator_definition(item.payload))
+    if item.kind == 'FILTER':
+        return thumbnails.material_texture(filter_definition(item.payload))
+    if item.kind == 'MATERIAL':
+        return thumbnails.material_texture(resolved(item.payload))
     if item.kind == 'SMART':
         fills = [entry for entry in item.payload['layers'] if entry['kind'] == 'FILL']
         if fills:
