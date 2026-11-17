@@ -389,6 +389,8 @@ class Renderer:
             self.round_rect(Rect(rect.x - 3 * s, rect.y - 2 * s, rect.w + 6 * s, rect.h + 4 * s), BG_ELEVATED, radius=metrics.regular)
         if control.preview is None:
             self.round_rect(image, BG_WELL, radius=metrics.regular)
+            if control.icon == 'FAILED':
+                self.text(image.x + image.w / 2, image.y + image.h / 2 - 4 * s, 'Preview failed', 9, TEXT_MUTED, True, max_width=image.w - 4 * s)
         else:
             self.checker(image)
             draw_image(control.preview, image, False)
@@ -404,6 +406,19 @@ class Renderer:
             self.checker(rect)
             draw_image(control.preview, rect, False)
         self.round_rect_outline(rect, ACCENT_BORDER if hover else SURFACE_OUTLINE, radius=0)
+
+    def handle(self, control, hover, metrics):
+        rect, s = control.rect, self.s
+        color = ACCENT if hover else TEXT_MUTED
+        across = rect.w > rect.h
+        for step in range(3):
+            for line in range(2):
+                along, side = (step - 1) * 5 * s, (line - .5) * 4 * s
+                x, y = (rect.x + rect.w / 2 + along, rect.y + rect.h / 2 + side) if across else (rect.x + rect.w / 2 + side, rect.y + rect.h / 2 + along)
+                self.rect(Rect(x - s, y - s, 2 * s, 2 * s), color)
+
+    def ghost(self, control, hover, metrics):
+        self.round_rect_outline(control.rect, ACCENT, radius=metrics.regular, width=2)
 
     def grip(self, control, hover, metrics):
         if not hover:
@@ -495,4 +510,5 @@ DRAWERS = {'TOOL': Renderer.tool, 'ICON': Renderer.icon_button, 'CHIP': Renderer
            'SLIDER': Renderer.slider, 'SWATCH': Renderer.swatch, 'TOGGLE': Renderer.toggle, 'ROW': Renderer.row, 'NOTE': Renderer.note,
            'HEADER': Renderer.header, 'DROPDOWN': Renderer.dropdown, 'FIELD': Renderer.field, 'MENUITEM': Renderer.menu_item,
            'SV': Renderer.saturation_value, 'HUE': Renderer.hue, 'SCROLLBAR': Renderer.scrollbar, 'THUMB': Renderer.thumb,
-           'GRIP': Renderer.grip, 'TILE': Renderer.tile, 'SOURCE': Renderer.source, 'GIZMO': Renderer.gizmo}
+           'GRIP': Renderer.grip, 'TILE': Renderer.tile, 'SOURCE': Renderer.source, 'GIZMO': Renderer.gizmo, 'HANDLE': Renderer.handle,
+           'GHOST': Renderer.ghost}

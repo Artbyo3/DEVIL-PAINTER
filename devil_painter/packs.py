@@ -9,8 +9,8 @@ import urllib.request
 import zipfile
 from pathlib import Path, PurePosixPath
 import bpy
-import numpy
-from .library import PACK_MARKER, library_root, packs_folder, rescan
+import imbuf
+from .library import PACK_MARKER, library_folder, packs_folder, rescan
 
 CATALOG_URL = 'https://artbyo3.github.io/DEVIL-PAINTER_Asset_Library/packs.json'
 PAGES_PREFIX = 'https://artbyo3.github.io/DEVIL-PAINTER_Asset_Library/'
@@ -30,18 +30,19 @@ MAX_PREVIEW_BYTES = 1 << 20
 MAX_UNPACKED_BYTES = 8 << 30
 MAX_PREVIEW_SIDE = 4096
 DECODE_ROUNDS = 8
+PREVIEW_FETCHERS = 4
 SHA_PATTERN = re.compile(r'^[0-9a-f]{64}$')
 NAME_PATTERN = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]*$')
 TAG_PATTERN = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$')
 THUMB_PATTERN = re.compile(r'^thumbs/[A-Za-z0-9._-]+/[A-Za-z0-9][A-Za-z0-9._-]*\.webp$')
 CATALOG_FILE = 'catalog.json'
-_state = dict(catalog=None, error='', requests=0, open='', previews=None, verified=False)
+_state = dict(catalog=None, error='', requests=0, open='', previews=None, verified=False, checking=None, fetched=None)
 _preview_lock = threading.Lock()
 _jobs = {}
 _preview_queue = []
-_preview_done = []
+_preview_waiting = set()
 _preview_failed = set()
-_preview_worker = dict(thread=None)
+_preview_worker = dict(running=0)
 
 
 class GuardedRedirect(urllib.request.HTTPRedirectHandler):
@@ -151,13 +152,27 @@ def refresh():
     if not online():
         _state['error'] = 'Online access is off, so packs are unavailable.'
         return _state['error']
+    if _state['checking'] is None:
+        _state['checking'] = threading.Thread(target=fetch_catalog, args=(CATALOG_URL,), daemon=True)
+        _state['checking'].start()
+    return 'Checking for packs.'
+
+
+def fetch_catalog(url):
     try:
-        with opened(CATALOG_URL) as response:
-            data = json.loads(response.read().decode('utf-8'))
+        with opened(url) as response:
+            _state['fetched'] = ('data', json.loads(response.read().decode('utf-8')))
     except (urllib.error.URLError, OSError, ValueError) as error:
-        _state['error'] = f'Could not read the pack catalog: {getattr(error, "reason", error)}. Downloads stay off until Check for packs succeeds.'
+        _state['fetched'] = ('error', getattr(error, 'reason', error))
+
+
+def finish_refresh():
+    outcome, value = _state['fetched']
+    _state['fetched'], _state['checking'] = None, None
+    if outcome == 'error' or not online():
+        _state['error'] = f'Could not read the pack catalog: {value if outcome == "error" else "online access is off"}. Downloads stay off until Check for packs succeeds.'
         return _state['error']
-    listed = data.get('packs', []) if isinstance(data, dict) else []
+    listed = value.get('packs', []) if isinstance(value, dict) else []
     entries = [entry for entry in listed if allowed(entry)] if isinstance(listed, list) else []
     _state['catalog'], _state['error'], _state['verified'] = entries, '', True
     (packs_folder() / CATALOG_FILE).write_text(json.dumps(entries, indent=1), encoding='utf-8')
@@ -191,7 +206,7 @@ def files(entry):
 
 
 def release_tag(entry):
-    return entry['releaseTag'] if allowed(entry) else ''
+    return entry['releaseTag'] if any(item is entry for item in catalog()) or allowed(entry) else ''
 
 
 def file_url(entry, name):
@@ -398,9 +413,7 @@ def finish(job):
 
 
 def preview_folder():
-    folder = library_root() / 'pack_previews'
-    folder.mkdir(exist_ok=True)
-    return folder
+    return library_folder('pack_previews')
 
 
 def thumb_url(entry, name):
@@ -463,10 +476,13 @@ def fetch_previews():
     while True:
         with _preview_lock:
             if not _preview_queue or not online():
-                _preview_queue.clear()
-                _preview_worker['thread'] = None
+                if not online():
+                    _preview_queue.clear()
+                    _preview_waiting.clear()
+                _preview_worker['running'] -= 1
                 return
             url, webp, expected = _preview_queue.pop(0)
+            _preview_waiting.discard(str(webp))
         try:
             with opened(url) as response:
                 data = response.read(MAX_PREVIEW_BYTES + 1)
@@ -476,10 +492,13 @@ def fetch_previews():
                 raise OSError('preview does not match its checksum')
             webp.parent.mkdir(parents=True, exist_ok=True)
             webp.write_bytes(data)
-            with _preview_lock:
-                _preview_done.append(webp)
+            converted = convert_preview(webp)
         except (urllib.error.URLError, OSError, ValueError):
-            with _preview_lock:
+            converted = False
+        with _preview_lock:
+            if converted:
+                ready_previews().add(str(webp.with_suffix('.png')))
+            else:
                 _preview_failed.add(str(webp))
 
 
@@ -491,52 +510,45 @@ def request_previews(pairs):
         for entry, name in pairs:
             url, target = thumb_url(entry, name), preview_file(entry, name)
             webp = target.with_suffix('.webp')
-            if not url or str(target) in ready_previews() or str(webp) in _preview_failed or any(item[1] == webp for item in _preview_queue):
+            if not url or str(target) in ready_previews() or str(webp) in _preview_failed or str(webp) in _preview_waiting:
                 continue
             _preview_queue.append((url, webp, thumb_hash(entry, name)))
+            _preview_waiting.add(str(webp))
             queued += 1
-        if _preview_queue and _preview_worker['thread'] is None:
-            _preview_worker['thread'] = threading.Thread(target=fetch_previews, daemon=True)
-            _preview_worker['thread'].start()
+        while _preview_queue and _preview_worker['running'] < min(PREVIEW_FETCHERS, len(_preview_queue)):
+            _preview_worker['running'] += 1
+            threading.Thread(target=fetch_previews, daemon=True).start()
     return queued
 
 
-def convert_previews():
-    while True:
-        with _preview_lock:
-            if not _preview_done:
-                return
-            webp = _preview_done.pop(0)
-        target = webp.with_suffix('.png')
-        made = []
-        try:
-            if not preview_dimensions_ok(webp):
-                raise RuntimeError('preview is not a WebP within the size limit')
-            source = bpy.data.images.load(str(webp))
-            made.append(source)
-            width, height = source.size
-            if not width or not height:
-                raise RuntimeError('empty preview')
-            values = numpy.empty(width * height * 4, dtype=numpy.float32)
-            source.pixels.foreach_get(values)
-            copy = bpy.data.images.new(target.stem, width, height, alpha=True)
-            made.append(copy)
-            copy.pixels.foreach_set(values)
-            copy.filepath_raw, copy.file_format = str(target), 'PNG'
-            copy.save()
-            ready_previews().add(str(target))
-        except (RuntimeError, OSError):
-            with _preview_lock:
-                _preview_failed.add(str(webp))
-        finally:
-            for image in made:
-                bpy.data.images.remove(image)
-            webp.unlink(missing_ok=True)
+def focus_previews(pairs):
+    wanted = {str(preview_file(entry, name).with_suffix('.webp')) for entry, name in pairs if name}
+    with _preview_lock:
+        if not wanted & _preview_waiting or all(str(item[1]) in wanted for item in _preview_queue[:len(wanted & _preview_waiting)]):
+            return
+        _preview_queue.sort(key=lambda item: str(item[1]) not in wanted)
+
+
+def convert_preview(webp):
+    try:
+        if not preview_dimensions_ok(webp):
+            return False
+        buffer = imbuf.load(str(webp))
+        width, height = buffer.size
+        if not width or not height:
+            return False
+        buffer.file_type = 'PNG'
+        imbuf.write(buffer, filepath=str(webp.with_suffix('.png')))
+        buffer.free()
+        return True
+    except (OSError, ValueError, RuntimeError):
+        return False
+    finally:
+        webp.unlink(missing_ok=True)
 
 
 def poll():
-    messages = []
-    convert_previews()
+    messages = [finish_refresh()] if _state['fetched'] is not None else []
     for job in _jobs.values():
         if job['state'] == 'downloaded':
             messages.append(finish(job))
@@ -548,7 +560,12 @@ def poll():
 
 def active():
     with _preview_lock:
-        return busy() or bool(_preview_queue) or _preview_worker['thread'] is not None or bool(_preview_done)
+        return (busy() or bool(_preview_queue) or _preview_worker['running'] > 0 or _state['checking'] is not None
+                or _state['fetched'] is not None)
+
+
+def preview_failed(entry, name):
+    return bool(name) and str(preview_file(entry, name).with_suffix('.webp')) in _preview_failed
 
 
 def open_pack(entry):

@@ -207,9 +207,11 @@ def journey():
     real_catalog = packs.CATALOG_URL
     packs.CATALOG_URL = packs.PAGES_PREFIX + 'missing-catalog.json'
     click(window, region, 'PACKS_REFRESH')
-    yield 1.0
+    yield 0.2
+    check(editor._active.message == 'Checking for packs.' and packs.active(), 'Check for packs reads the catalog in the background without holding up the UI')
+    refused = yield from wait_for(lambda: 'Downloads stay off' in editor._active.message, 20)
     packs.CATALOG_URL = real_catalog
-    check('Downloads stay off' in editor._active.message and 'Check for packs first' in packs.download(forged) and not packs._jobs,
+    check(refused and 'Check for packs first' in packs.download(forged) and not packs._jobs,
           f'a failed Check for packs keeps downloads off and says so ({editor._active.message})')
     click(window, region, 'PACKS_REFRESH')
     yield 0.5
@@ -279,11 +281,13 @@ def journey():
     huge.write_bytes(b'RIFF' + (22).to_bytes(4, 'little') + b'WEBP' + b'VP8X' + (10).to_bytes(4, 'little') + bytes(4)
                      + (4999).to_bytes(3, 'little') + (4999).to_bytes(3, 'little'))
     images = len(bpy.data.images)
-    with packs._preview_lock:
-        packs._preview_done.append(huge)
-    packs.convert_previews()
-    check(str(huge) in packs._preview_failed and len(bpy.data.images) == images and not huge.exists() and not huge.with_suffix('.png').exists(),
-          'a preview claiming 5000 x 5000 pixels is refused from its header, before Blender decodes or allocates it')
+    loads = []
+    real_load = packs.imbuf.load
+    packs.imbuf.load = lambda path: loads.append(path) or real_load(path)
+    converted = packs.convert_preview(huge)
+    packs.imbuf.load = real_load
+    check(not converted and not loads and len(bpy.data.images) == images and not huge.exists() and not huge.with_suffix('.png').exists(),
+          'a preview claiming 5000 x 5000 pixels is refused from its header, before anything decodes or allocates it')
     second = entry_named('Cloth Textures Vol. 2')
     probe = packs.files(second)[7]
     second['thumbHashes'] = {probe: 'f' * 64}

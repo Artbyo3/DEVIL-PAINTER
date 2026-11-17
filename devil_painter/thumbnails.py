@@ -25,11 +25,12 @@ SAMPLES = 12
 WORLD_FILE = 'city.exr'
 WORLD_STRENGTH = .7
 JOB_POLL = .1
+RENDERERS = 3
 RENDER_SCRIPT = '; '.join(('import sys', 'sys.dont_write_bytecode = True', 'import importlib', 'from pathlib import Path',
                            "root, name, folder = sys.argv[sys.argv.index('--') + 1:]", 'sys.path.insert(0, root)',
                            "importlib.import_module(name + '.document').register()",
                            "importlib.import_module(name + '.thumbnails').serve(Path(folder))"))
-_state = dict(worker=None, depth=0, process=None)
+_state = dict(worker=None, depth=0, processes=[])
 _lock = threading.Lock()
 _idle = threading.Event()
 _idle.set()
@@ -156,6 +157,16 @@ def file_texture(path):
     return None
 
 
+def failed_file(path):
+    key = str(path)
+    return key in _textures and _textures[key] is None
+
+
+def failed_material(definition):
+    path = cache_path(definition)
+    return (path in _failed and not path.is_file()) or failed_file(path)
+
+
 def cache_path(definition):
     digest = hashlib.sha1(json.dumps(definition, sort_keys=True).encode('utf-8')).hexdigest()[:24]
     return library_root() / 'thumbnails' / f'{digest}.png'
@@ -252,28 +263,35 @@ def job_folder():
     return folder
 
 
+def rendering():
+    return [process for process in _state['processes'] if process.poll() is None]
+
+
 def renderer():
-    process = _state['process']
-    if process is not None and process.poll() is None:
-        return
+    alive = rendering()
     package = Path(__file__).resolve().parent
     flags = subprocess.CREATE_NO_WINDOW | subprocess.BELOW_NORMAL_PRIORITY_CLASS if sys.platform == 'win32' else 0
-    _state['process'] = subprocess.Popen([bpy.app.binary_path, '--background', '--factory-startup', '--python-expr', RENDER_SCRIPT, '--',
-                                          str(package.parent), package.name, str(job_folder())],
-                                         stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=flags)
+    while len(alive) < min(RENDERERS, len(_jobs)):
+        alive.append(subprocess.Popen([bpy.app.binary_path, '--background', '--factory-startup', '--python-expr', RENDER_SCRIPT, '--',
+                                       str(package.parent), package.name, str(job_folder())],
+                                      stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=flags))
+    _state['processes'] = alive
 
 
 def dispatch():
-    process = _state['process']
-    alive = process is not None and process.poll() is None
+    alive = bool(rendering())
     for key, (path, definition) in _queue.items():
+        shared = next((job for job, rendered in _jobs.values() if rendered == path), None)
+        if key not in _jobs and shared is not None:
+            _jobs[key] = (shared, path)
+            continue
         if key in _jobs and _jobs[key][1] == path:
             try:
                 os.utime(_jobs[key][0])
             except OSError:
                 pass
             continue
-        if key in _jobs:
+        if key in _jobs and not any(other != key and job == _jobs[key][0] for other, (job, _) in _jobs.items()):
             _jobs[key][0].unlink(missing_ok=True)
         job = job_folder() / f'{path.stem}.json'
         partial = job.with_suffix('.partial')
@@ -285,7 +303,7 @@ def dispatch():
         taken = job.with_suffix('.taken')
         if path.is_file():
             del _jobs[key]
-        elif not job.exists() and not (alive and taken.exists()):
+        elif not job.exists() and not (alive and taken.exists()) and not path.is_file():
             taken.unlink(missing_ok=True)
             _failed.add(path)
             del _jobs[key]
@@ -325,10 +343,11 @@ def serve(folder):
             taken.unlink(missing_ok=True)
             continue
         target = Path(entry['path'])
-        partial = target.with_name(target.stem + '.partial.png')
+        partial = target.with_name(f'{target.stem}.{os.getpid()}.partial.png')
         try:
-            render(partial, entry['definition'])
-            os.replace(partial, target)
+            if not target.is_file():
+                render(partial, entry['definition'])
+                os.replace(partial, target)
         except Exception:
             partial.unlink(missing_ok=True)
         taken.unlink(missing_ok=True)
@@ -344,7 +363,6 @@ def release():
     _jobs.clear()
     _failed.clear()
     _owned.clear()
-    process = _state['process']
-    _state['process'] = None
-    if process is not None and process.poll() is None:
+    for process in rendering():
         process.stdin.close()
+    _state['processes'] = []

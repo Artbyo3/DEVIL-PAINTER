@@ -66,7 +66,18 @@ BUILTIN_MATERIALS = (
 
 
 def library_root():
-    return Path(bpy.utils.user_resource('CONFIG', path='devil_painter', create=True))
+    if 'root' not in _cache:
+        _cache['root'] = Path(bpy.utils.user_resource('CONFIG', path='devil_painter', create=True))
+    return _cache['root']
+
+
+def library_folder(name):
+    key = 'folder ' + name
+    if key not in _cache:
+        folder = library_root() / name
+        folder.mkdir(parents=True, exist_ok=True)
+        _cache[key] = folder
+    return _cache[key]
 
 
 def settings():
@@ -144,9 +155,7 @@ def texture_sets(files):
 
 
 def managed_folder():
-    folder = library_root() / 'textures'
-    folder.mkdir(exist_ok=True)
-    return folder
+    return library_folder('textures')
 
 
 def image_files(root):
@@ -249,9 +258,7 @@ def remove_library(index):
 
 
 def packs_folder():
-    folder = library_root() / 'packs'
-    folder.mkdir(exist_ok=True)
-    return folder
+    return library_folder('packs')
 
 
 def installed_packs():

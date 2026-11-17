@@ -222,14 +222,14 @@ def journey():
     print('MEASURED SMART RENDERS EVENTS:', described(smart))
     print('MEASURED SMART RENDERS DRAW:', described(smart_draws))
     check(all(item.preview is not None for item in tiles()), f'smart material previews render in {time.perf_counter() - rendered:.1f} s')
-    check(thumbnails._state['process'] is not None, 'material previews render in a background Blender process')
+    check(thumbnails._state['processes'], 'material previews render in background Blender processes')
     check(smart['worst'] < 100 and smart_draws['worst'] < 100, f'rendering material previews never stalls the UI: events {described(smart)}')
 
     click(window, region, 'CLOSE')
     yield 0.6
     check(editor._active is None, 'Devil Painter closes')
     devil_painter.unregister()
-    check(not hasattr(bpy.types.Object, 'devil_painter') and thumbnails._state['process'] is None, 'Devil Painter unregisters and stops its preview renderer')
+    check(not hasattr(bpy.types.Object, 'devil_painter') and not thumbnails.rendering(), 'Devil Painter unregisters and stops its preview renderers')
     shutil.rmtree(folder, ignore_errors=True)
     print('ALL GUI LIBRARY CHECKS PASSED', bpy.app.version_string)
     finish(0)

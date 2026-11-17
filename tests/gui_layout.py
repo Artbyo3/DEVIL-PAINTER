@@ -14,12 +14,14 @@ import devil_painter
 from devil_painter import editor, library
 from devil_painter.minimal import HEADER
 from devil_painter.privacy import MASK, masked_path
-from devil_painter.shell import MAX_COLUMN, MIN_COLUMN, MIN_PANEL, PANELS
+from devil_painter.shell import MAX_COLUMN, MIN_COLUMN, MIN_PANEL, PANELS, ZONE_LIMITS, ZONE_SIDES
 from tools.workspace import prepare_scratch
 
 TIMEOUT = 600
 STARTED = time.time()
-EXEMPT_KINDS = {'GRIP'}
+EXEMPT_KINDS = {'GRIP', 'GHOST'}
+SECTIONS = dict(BAR='workspace bar', STRIP='tool strip', DOCK='tool dock', SHELF='asset browser', COLUMN='panel column')
+GROW = dict(TOP=(0, -1), BOTTOM=(0, 1), LEFT=(1, 0), RIGHT=(-1, 0))
 EXEMPT_KEYS = {'DROP_LINE', 'DRAG_GHOST'}
 
 
@@ -121,6 +123,29 @@ def escaped():
     return found
 
 
+def zone_rect(key):
+    return getattr(workspace().zones, key.lower())
+
+
+def thickness(key):
+    rect = zone_rect(key)
+    return rect.w if workspace().zones.sides[key] in ('LEFT', 'RIGHT') else rect.h
+
+
+def resize_zone(window, region, key, amount):
+    dx, dy = GROW[workspace().zones.sides[key]]
+    drag(window, region, 'ZONE_EDGE.' + key, dx * amount, dy * amount)
+
+
+def edge_point(region, side):
+    return dict(TOP=(region.x + region.width * .45, region.y + region.height - 18), BOTTOM=(region.x + region.width * .45, region.y + 18),
+                LEFT=(region.x + 18, region.y + region.height * .5), RIGHT=(region.x + region.width - 18, region.y + region.height * .5))[side]
+
+
+def zone_layout():
+    return {key: tuple(round(value, 2) for value in (zone_rect(key).x, zone_rect(key).y, zone_rect(key).w, zone_rect(key).h)) for key in SECTIONS}
+
+
 def column_fits():
     column = workspace().zones.column
     return all(inside(card, column) for card in workspace().panels.values())
@@ -186,7 +211,7 @@ def journey():
         yield 0.3
     smallest = {key: round(card.h - HEADER * workspace().scale, 2) for key, card in workspace().panels.items()}
     check(all(abs(value - MIN_PANEL * workspace().scale) < 1.5 for value in smallest.values()), f'every section shrinks to its safe minimum {smallest}')
-    drag(window, region, 'COLUMN_EDGE', 3000, 0)
+    drag(window, region, 'ZONE_EDGE.COLUMN', 3000, 0)
     yield 0.5
     check(abs(workspace().zones.column.w - MIN_COLUMN * workspace().scale) < 1, 'the column narrows to its minimum width')
     check(not escaped() and column_fits(), f'at minimum sizes nothing overflows {escaped()}')
@@ -199,15 +224,59 @@ def journey():
     drag(window, region, 'PANEL_EDGE.LAYERS', 0, -4000)
     yield 0.5
     check(column_fits() and not escaped(), f'a section dragged far past the column bottom stays inside the column {escaped()}')
-    drag(window, region, 'COLUMN_EDGE', -3000, 0)
+    drag(window, region, 'ZONE_EDGE.COLUMN', -3000, 0)
     yield 0.5
     check(workspace().zones.column.w <= MAX_COLUMN * workspace().scale + 1 and not escaped(), 'the column widens only to its maximum width')
     click(window, region, 'PANEL_SETS')
     yield 0.4
     check('SETS' in editor._active.state.collapsed, 'clicking a header without dragging still collapses the section')
 
+    inventory = {key: set() for key in SECTIONS}
+    s = workspace().scale
+    for key, name in SECTIONS.items():
+        low, high = ZONE_LIMITS[key]
+        resize_zone(window, region, key, 5000)
+        yield 0.4
+        largest = thickness(key)
+        check(largest > low * s + 20 and largest <= high * s + 1 and not escaped(), f'the {name} grows by its border up to its safe maximum ({largest:.0f} px) {escaped()}')
+        resize_zone(window, region, key, -60)
+        yield 0.4
+        check(abs(thickness(key) - (largest - 60)) < 3 or thickness(key) <= largest - 40, f'dragging the {name} border back makes it smaller ({thickness(key):.0f} px)')
+        resize_zone(window, region, key, -5000)
+        yield 0.4
+        check(abs(thickness(key) - low * s) < 1.5 and not escaped(), f'the {name} shrinks only to its safe minimum ({thickness(key):.0f} px) {escaped()}')
+        saved = json.loads(settings_file.read_text(encoding='utf-8'))['zones']['sizes'][key]
+        check(abs(saved - low) < .5, f'the {name} size is saved')
+        inventory[key].add('resized')
+    for key, name in SECTIONS.items():
+        side = workspace().zones.sides[key]
+        other = next(item for item in ZONE_SIDES[key] if item != side)
+        x, y = spot(region, 'ZONE_MOVE.' + key)
+        target = edge_point(region, other)
+        drag(window, region, 'ZONE_MOVE.' + key, target[0] - x, target[1] - y)
+        yield 0.5
+        rect = zone_rect(key)
+        at_edge = dict(TOP=rect.top > region.height - 20 * s, BOTTOM=rect.y < 20 * s, LEFT=rect.x < 20 * s, RIGHT=rect.x + rect.w > region.width - 20 * s)[other]
+        check(workspace().zones.sides[key] == other and at_edge and not escaped() and not has('ZONE_GHOST'),
+              f'dragging the {name} handle moves it from the {side.lower()} edge to the {other.lower()} edge and the layout adapts {escaped()}')
+        inventory[key].add('rearranged')
+    stage = workspace().zones.stage
+    check(stage.w > 0 and stage.h > 0 and all(not (zone_rect(key).x < stage.x + stage.w and stage.x < zone_rect(key).x + zone_rect(key).w
+                                                     and zone_rect(key).y < stage.top and stage.y < zone_rect(key).top) for key in SECTIONS),
+          'with every section moved, the free viewport stays clear of all of them')
+    resize_zone(window, region, 'SHELF', 140)
+    yield 0.4
+    check(thickness('SHELF') > ZONE_LIMITS['SHELF'][0] * s + 100 and workspace().zones.sides['SHELF'] == 'TOP' and not escaped(),
+          f'the asset browser is resized by its border in its new place at the top {escaped()}')
+    check(all(inventory[key] == {'resized', 'rearranged'} for key in SECTIONS),
+          'inventory: ' + '; '.join(f'{SECTIONS[key]} {sorted(inventory[key])}' for key in SECTIONS) + '; column panels Texture sets, Layers, Properties, Mesh maps rearranged and resized above')
+    check(json.loads(settings_file.read_text(encoding='utf-8'))['zones']['order'] == [list(item) for item in editor._active.state.zone_order],
+          'the arrangement is saved')
+
     layout_before = {key: (round(card.x, 2), round(card.y, 2), round(card.w, 2), round(card.h, 2)) for key, card in workspace().panels.items()}
+    zones_before = zone_layout()
     saved_before = json.loads(settings_file.read_text(encoding='utf-8'))['column']
+    placed_before = json.loads(settings_file.read_text(encoding='utf-8'))['zones']
     click(window, region, 'CLOSE')
     yield 0.6
     devil_painter.unregister()
@@ -222,8 +291,11 @@ def journey():
           f'after a restart the column comes back exactly as the user left it {layout_before} {layout_after}')
     check(json.loads(settings_file.read_text(encoding='utf-8'))['column'] == saved_before and 'SETS' in editor._active.state.collapsed,
           'order, sizes, width, and collapsed sections persist in the library settings')
+    check(zone_layout() == zones_before and json.loads(settings_file.read_text(encoding='utf-8'))['zones'] == placed_before,
+          f'after a restart every workspace section is back exactly where and how big the user left it {zones_before} {zone_layout()}')
+    check(not escaped(), f'the restored arrangement has no overflow {escaped()}')
 
-    drag(window, region, 'COLUMN_EDGE', 3000, 0)
+    resize_zone(window, region, 'COLUMN', -3000)
     yield 0.4
     texture_dir = scratch / 'Private Textures'
     texture_dir.mkdir(exist_ok=True)

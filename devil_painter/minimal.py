@@ -24,7 +24,7 @@ from .meshmaps import MESH_MAP, MESH_MAPS
 from .painting import TOOLS
 from .polyfill import POLY_MODES
 from .privacy import masked, masked_path
-from .shell import GAP, MIN_PANEL, fit_heights, zones
+from .shell import GAP, HANDLE, MIN_PANEL, ZONE_SIDES, fit_heights, zones
 from .ui_system import ACCENT, MinimalMetrics
 
 MAX_BRUSH_SIZE = 500
@@ -55,6 +55,7 @@ BAR_MENU_WIDTH = 150
 SHELF_TILE = 72
 SHELF_LABEL = 18
 SHELF_GAP = 8
+PREFETCH_SCREENS = 2
 REPLACE_TARGET = '@material'
 EFFECT_TARGET = '@effect'
 BAKE_TIPS = {'normal': 'Tangent normal from the high-poly, or this mesh with rounded edges when there is none',
@@ -216,7 +217,8 @@ def view_label(data):
 def workspace_bar(layout, zone, data, obj_name, view_2d):
     s = layout.scale
     layout.cards.append((zone, ''))
-    y, h = zone.y + 6 * s, zone.h - 12 * s
+    h = min(zone.h - 12 * s, 24 * s)
+    y = zone.y + (zone.h - h) / 2
     right = zone.x + zone.w - 8 * s
     layout.add('CLOSE', Rect(right - 24 * s, y, 24 * s, h), 'ICON', icon='CLOSE', tip='Close Devil Painter', shortcut='Ctrl Alt P')
     export = Rect(right - 186 * s, y, 150 * s, h)
@@ -309,7 +311,8 @@ def tool_strip(layout, zone, tool, brush, data, state):
     s = layout.scale
     size, color = brush
     layout.cards.append((zone, ''))
-    y, h = zone.y + 6 * s, zone.h - 12 * s
+    h = min(zone.h - 12 * s, 24 * s)
+    y = zone.y + (zone.h - h) / 2
     x = zone.x + 12 * s
     right = quick_controls(layout, zone, y, h, data)
     if state.poly_mode:
@@ -355,7 +358,7 @@ def dock_layout(layout, zone, tool, state):
     button, gap = 36 * s, 6 * s
     groups = [[(key, label, shortcut, key) for key, label, _, shortcut in TOOLS], [('POLYFILL', 'Polygon fill', '', 'POLYGON'), ('PATH', 'Path', '', 'RULER')],
               [('UNDO', 'Undo', 'Ctrl Z', 'UNDO'), ('REDO', 'Redo', 'Ctrl Shift Z', 'REDO')]]
-    y = zone.top
+    y = zone.top - HANDLE * s
     for group in groups:
         start = y
         for key, label, shortcut, icon in group:
@@ -888,7 +891,7 @@ def fill_maps(layout, state, data, flow):
 def maps_panel(layout, state, data):
     s = layout.scale
     count = len(baked_maps(data))
-    columns = max(1, int((state.column_width - 24) // (MAP_TILE + 6)))
+    columns = max(1, int((state.zone_sizes['COLUMN'] - 24) // (MAP_TILE + 6)))
     rows = math.ceil(count / columns) if count else 0
     return ColumnPanel('MAPS', 'Mesh maps', (rows * (MAP_TILE + 20) + 12) * s if rows else (LINE_HEIGHT + 12) * s, fill_maps, 10 * s)
 
@@ -934,12 +937,11 @@ def column_layout(layout, state, data, zone):
     s = layout.scale
     builders = dict(SETS=sets_panel, LAYERS=layers_panel, PROPERTIES=properties_panel, MAPS=maps_panel)
     panels = [builders[key](layout, state, data) for key in state.panel_order if key != 'PROPERTIES' or data.layers]
-    room = max(0.0, zone.h - len(panels) * HEADER * s - (len(panels) - 1) * GAP * s)
+    room = max(0.0, zone.h - HANDLE * s - len(panels) * HEADER * s - (len(panels) - 1) * GAP * s)
     opened = [spec.key for spec in panels if spec.key not in state.collapsed]
     views = dict(zip(opened, fit_heights([state.panel_heights[key] * s for key in opened], room, MIN_PANEL * s)))
     layout.panel_room = room / s
-    layout.add('COLUMN_EDGE', Rect(zone.x - 6 * s, zone.y, 6 * s, zone.h), 'GRIP', tip='Drag to resize the column')
-    top = zone.top
+    top = zone.top - HANDLE * s
     for spec in panels:
         if top - HEADER * s < zone.y - .5:
             break
@@ -958,7 +960,7 @@ def column_layout(layout, state, data, zone):
 
 def shelf_header(layout, state, zone, header):
     s = layout.scale
-    x = zone.x + 8 * s
+    x = zone.x + 12 * s
     tab_w = max(40 * s, min(76 * s, (zone.w - 46 * s) / len(shelf.TABS) - 4 * s))
     for tab, label in shelf.TABS:
         layout.add('SHELF_TAB.' + tab, Rect(x, header.y, tab_w, header.h), 'CHIP', label=label, active=state.shelf_open and tab == state.shelf_tab,
@@ -1095,12 +1097,22 @@ def shelf_layout(layout, state, zone):
         layout.scroll_areas['SHELF'] = (viewport, overflow)
         layout.add('SCROLL_SHELF', Rect(zone.x + zone.w - 6 * s, viewport.y + 2 * s, 3 * s, viewport.h - 4 * s), 'SCROLLBAR',
                    value=scroll / overflow, second=viewport.h / body)
-    for index, item in enumerate(entries):
+    first_row = max(0, int((scroll - SHELF_GAP * s) // tile_h))
+    rows = int(viewport.h // tile_h) + 2
+    for item in entries[(first_row + rows) * columns:(first_row + rows * (PREFETCH_SCREENS + 1)) * columns]:
+        shelf.prefetch(item)
+    shown = entries[first_row * columns:(first_row + rows) * columns]
+    if state.shelf_tab == 'PACKS':
+        packs.request_previews([shelf.pack_preview(item) for item in shown])
+        packs.focus_previews([shelf.pack_preview(item) for item in shown if not item.preview_file])
+    for index, item in enumerate(shown, first_row * columns):
         row, column = divmod(index, columns)
         top = viewport.top + scroll - SHELF_GAP * s - row * tile_h
         rect = Rect(viewport.x + SHELF_GAP * s + column * tile_w, top - tile_h + SHELF_GAP * s, SHELF_TILE * s, tile_h - SHELF_GAP * s)
         if rect.top < viewport.y or rect.y > viewport.top:
             continue
+        preview = shelf.thumbnail(item)
+        icon = 'FAILED' if preview is None and shelf.failed(item) else ''
         if state.armed == REPLACE_TARGET and item.kind == 'MATERIAL':
             tip = 'Click to put this material into the selected layer'
         elif state.armed == EFFECT_TARGET and item.kind == 'TEXTURE':
@@ -1112,20 +1124,20 @@ def shelf_layout(layout, state, zone):
         if item.kind == 'PACK':
             state_text = packs.status(item.payload)
             tip = f'{item.payload.get("description", "")} {state_text}. Click to browse its files. Right-click to remove'
-            layout.add(f'ITEM.{index}', rect, 'TILE', label=f'{item.label} · {state_text}', preview=shelf.thumbnail(item), clip=viewport, tip=tip)
+            layout.add(f'ITEM.{index}', rect, 'TILE', label=f'{item.label} · {state_text}', preview=preview, icon=icon, clip=viewport, tip=tip)
             continue
         if item.kind == 'PACKFILE':
             state_text = packs.file_status(*item.payload)
             label = f'{item.label} · {state_text}' if state_text else item.label
             tip = 'Installed: click to use it' if state_text == 'Installed' else 'Click to download only this file'
-            layout.add(f'ITEM.{index}', rect, 'TILE', label=label, preview=shelf.thumbnail(item), clip=viewport, tip=tip)
+            layout.add(f'ITEM.{index}', rect, 'TILE', label=label, preview=preview, icon=icon, clip=viewport, tip=tip)
             continue
         if item.kind in SHELF_TIPS:
             tip = SHELF_TIPS[item.kind]
         tip += '. Drag onto the layers to place it'
         if item.kind == 'TEXTURE':
             tip += '. Right-click for more'
-        layout.add(f'ITEM.{index}', rect, 'TILE', label=item.label, preview=shelf.thumbnail(item), clip=viewport,
+        layout.add(f'ITEM.{index}', rect, 'TILE', label=item.label, preview=preview, icon=icon, clip=viewport,
                    tip=tip + ('. Right-click to delete' if item.user_index >= 0 else ''))
 
 
@@ -1585,8 +1597,30 @@ def gizmo_layout(layout, gizmo):
     layout.add('GIZMO_SIZE', Rect(corner[0] - handle, corner[1] - handle, handle * 2, handle * 2), 'GIZMO', tip='Drag to resize the projection')
 
 
+ZONE_NAMES = dict(BAR='workspace bar', STRIP='tool strip', DOCK='tool dock', SHELF='asset browser', COLUMN='panel column')
+
+
+def zone_controls(layout, state, bounds):
+    s, found = layout.scale, layout.zones
+    for key in ZONE_SIDES:
+        rect, side = getattr(found, key.lower()), found.sides[key]
+        if side in ('LEFT', 'RIGHT'):
+            layout.cards.append((Rect(rect.x, rect.top - HANDLE * s, rect.w, HANDLE * s), ''))
+            handle = Rect(rect.x + 4 * s, rect.top - (HANDLE - 2) * s, max(0.0, rect.w - 8 * s), 6 * s)
+        else:
+            handle = Rect(rect.x + 2 * s, rect.y + 4 * s, 6 * s, max(0.0, rect.h - 8 * s))
+        layout.add('ZONE_MOVE.' + key, handle, 'HANDLE', tip=f'Drag to move the {ZONE_NAMES[key]} to another edge')
+        if key != 'SHELF' or state.shelf_open:
+            edge = dict(TOP=Rect(rect.x, rect.y - 6 * s, rect.w, 6 * s), BOTTOM=Rect(rect.x, rect.top, rect.w, 6 * s),
+                        LEFT=Rect(rect.x + rect.w, rect.y, 6 * s, rect.h), RIGHT=Rect(rect.x - 6 * s, rect.y, 6 * s, rect.h))[side]
+            layout.add('ZONE_EDGE.' + key, edge, 'GRIP', tip=f'Drag to resize the {ZONE_NAMES[key]}')
+    if state.drop and state.drop[0] == 'ZONE':
+        moved = zones(bounds, s, state.drop[2], state.zone_sizes, state.shelf_open)
+        layout.add('ZONE_GHOST', getattr(moved, state.drop[1].lower()), 'GHOST')
+
+
 def painter_layout(bounds, scale, state, data, obj_name, tool, brush, directory, setup, viewport):
-    layout = Layout(scale, MinimalMetrics.resolve(), zones(bounds, scale, state.column_width, state.shelf_open))
+    layout = Layout(scale, MinimalMetrics.resolve(), zones(bounds, scale, state.zone_order, state.zone_sizes, state.shelf_open))
     if data is not None and state.gizmo:
         gizmo_layout(layout, state.gizmo)
     if data is not None and state.path_mode and state.path_points:
@@ -1599,6 +1633,7 @@ def painter_layout(bounds, scale, state, data, obj_name, tool, brush, directory,
         dock_layout(layout, layout.zones.dock, tool, state)
         shelf_layout(layout, state, layout.zones.shelf)
         column_layout(layout, state, data, layout.zones.column)
+        zone_controls(layout, state, bounds)
     if state.ghost:
         drag_ghost(layout, state)
     if state.popover is not None:

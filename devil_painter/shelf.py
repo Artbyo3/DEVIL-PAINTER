@@ -143,29 +143,51 @@ def remove_search(index):
     return query
 
 
-def thumbnail(item):
+def preview_source(item):
     if item.kind == 'TEXTURE':
-        return thumbnails.file_texture(item.payload)
+        return 'FILE', item.payload
     if item.preview_file:
-        return thumbnails.file_texture(item.preview_file)
-    if item.kind == 'ALPHA':
+        return 'FILE', item.preview_file
+    if item.kind in {'ALPHA', 'PACK', 'PACKFILE'}:
         return None
     if item.kind == 'PATTERN':
-        return thumbnails.material_texture(pattern_definition(item.payload))
+        return 'MATERIAL', pattern_definition(item.payload)
     if item.kind == 'MASK':
-        return thumbnails.material_texture(mask_definition(item.payload))
-    if item.kind in {'PACK', 'PACKFILE'}:
-        return thumbnails.file_texture(item.preview_file) if item.preview_file else None
+        return 'MATERIAL', mask_definition(item.payload)
     if item.kind == 'GENERATOR':
-        return thumbnails.material_texture(generator_definition(item.payload))
+        return 'MATERIAL', generator_definition(item.payload)
     if item.kind == 'FILTER':
-        return thumbnails.material_texture(filter_definition(item.payload))
+        return 'MATERIAL', filter_definition(item.payload)
     if item.kind == 'MATERIAL':
-        return thumbnails.material_texture(resolved(item.payload))
+        return 'MATERIAL', resolved(item.payload)
     if item.kind == 'SMART':
-        fills = [entry for entry in item.payload['layers'] if entry['kind'] == 'FILL']
-        if fills:
-            return thumbnails.material_texture(item.payload)
+        if any(entry['kind'] == 'FILL' for entry in item.payload['layers']):
+            return 'MATERIAL', item.payload
         paints = [entry['paint'] for entry in item.payload['layers'] if entry['paint']]
-        return thumbnails.file_texture(paints[0]) if paints else None
-    return thumbnails.material_texture(item.payload)
+        return ('FILE', paints[0]) if paints else None
+    return 'MATERIAL', item.payload
+
+
+def thumbnail(item):
+    source = preview_source(item)
+    if source is None:
+        return None
+    return thumbnails.file_texture(source[1]) if source[0] == 'FILE' else thumbnails.material_texture(source[1])
+
+
+def prefetch(item):
+    if item.kind not in {'PACK', 'PACKFILE'}:
+        thumbnail(item)
+
+
+def pack_preview(item):
+    return (item.payload, packs.first_file(item.payload)) if item.kind == 'PACK' else item.payload
+
+
+def failed(item):
+    if item.kind in {'PACK', 'PACKFILE'}:
+        return packs.preview_failed(*pack_preview(item))
+    source = preview_source(item)
+    if source is None:
+        return False
+    return thumbnails.failed_file(source[1]) if source[0] == 'FILE' else thumbnails.failed_material(source[1])

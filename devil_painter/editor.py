@@ -27,7 +27,7 @@ from .masks import BUILDER_SLIDERS, GENERATORS
 from .polyfill import POLY_NOUN
 from .meshmaps import MESH_MAPS
 from .minimal import HEADER, MENU_HEADING, SAMPLE_TOP, EXPOSURE_RANGE, GAMMA_RANGE, PROJECTOR_RANGE, NORMAL_SLIDERS, STENCIL_SLIDERS, FX_RANGES, effect_menu, layer_rows, FOV_RANGE, RECENT_COLORS, SHADER_SLIDERS, BRUSH_SLIDERS, BRUSH_TOGGLES, GENERATOR_SLIDERS, MAX_BRUSH_SIZE, REPLACE_TARGET, EFFECT_TARGET, SCALE_RANGE, TILING_RANGE, from_slider, painter_layout
-from .shell import MARGIN, PANELS, clamp_column, clamp_panel, reorder, resize_panel
+from .shell import PANELS, ZONE_SIDES, clamp_panel, clamp_zone, move_zone, reorder, resize_panel, zone_size
 from .state import Popover, TextEdit, WorkspaceState
 
 TIMER_INTERVAL = .3
@@ -918,20 +918,37 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         return actions.pick_geometry(context, obj, data, face, self.state.geo_pick == 'ISLAND')
 
     def load_column(self):
-        saved = library.settings().get('column', {})
+        saved, placed = library.settings().get('column', {}), library.settings().get('zones', {})
         try:
             if sorted(saved.get('order', ())) == sorted(PANELS):
                 self.state.panel_order = list(saved['order'])
             self.state.panel_heights.update({key: clamp_panel(float(value)) for key, value in saved.get('heights', {}).items() if key in PANELS})
-            self.state.column_width = clamp_column(float(saved.get('width', self.state.column_width)))
             self.state.collapsed |= {key for key in saved.get('collapsed', ()) if key in PANELS}
+            if 'width' in saved:
+                self.state.zone_sizes['COLUMN'] = clamp_zone('COLUMN', float(saved['width']))
+            order = tuple((key, side) for key, side in placed.get('order', ()))
+            if sorted(key for key, _ in order) == sorted(ZONE_SIDES) and all(side in ZONE_SIDES[key] for key, side in order):
+                self.state.zone_order = order
+            self.state.zone_sizes.update({key: clamp_zone(key, float(value)) for key, value in placed.get('sizes', {}).items() if key in ZONE_SIDES})
         except (TypeError, ValueError, AttributeError):
             return
 
     def save_column(self):
-        library.settings()['column'] = dict(width=self.state.column_width, order=list(self.state.panel_order), heights=dict(self.state.panel_heights),
+        library.settings()['column'] = dict(order=list(self.state.panel_order), heights=dict(self.state.panel_heights),
                                             collapsed=sorted(key for key in self.state.collapsed if key in PANELS))
+        library.settings()['zones'] = dict(order=[list(item) for item in self.state.zone_order], sizes=dict(self.state.zone_sizes))
         library.save_settings()
+
+    def track_zone(self, name, release):
+        moved = math.dist(self.pointer, self.drag_origin) > DRAG_START * self.workspace.scale
+        found = self.workspace.zones
+        rects = {key: getattr(found, key.lower()) for key in ZONE_SIDES}
+        order = move_zone(self.state.zone_order, name, *self.pointer, rects, self.bounds) if moved else None
+        self.state.drop = ('ZONE', name, order) if order is not None and not release else ()
+        if release:
+            if order is not None:
+                self.state.zone_order = order
+            self.save_column()
 
     def track_panel(self, name, release):
         s = self.workspace.scale
@@ -1273,10 +1290,13 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
 
     def apply_drag(self, context, key, x, y, release):
         obj, data = self.painted()
-        if key == 'COLUMN_EDGE':
-            self.state.column_width = clamp_column((self.bounds.x + self.bounds.w - MARGIN * self.workspace.scale - self.pointer[0]) / self.workspace.scale)
+        if key.startswith('ZONE_EDGE.'):
+            name, found = key.removeprefix('ZONE_EDGE.'), self.workspace.zones
+            self.state.zone_sizes[name] = clamp_zone(name, zone_size(getattr(found, name.lower()), found.sides[name], *self.pointer) / self.workspace.scale)
             if release:
                 self.save_column()
+        elif key.startswith('DRAG_ZONE.'):
+            self.track_zone(key.removeprefix('DRAG_ZONE.'), release)
         elif key.startswith('PANEL_EDGE.'):
             name, s = key.removeprefix('PANEL_EDGE.'), self.workspace.scale
             shown = [panel for panel in self.workspace.panels if panel not in self.state.collapsed]
@@ -1468,6 +1488,9 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.message = actions.start(context, obj, resolutions, found and self.state.setup_udim, self.state.setup_template,
                                          self.state.setup_normal_format, self.state.setup_normal_space, self.state.setup_unwrap)
             self.hide_regions()
+        elif control.kind == 'HANDLE':
+            self.state.drag = ('DRAG_ZONE.' + key.removeprefix('ZONE_MOVE.'), control.rect)
+            self.drag_origin = self.pointer
         elif control.kind == 'HEADER' and key.startswith('PANEL_'):
             self.state.drag = ('DRAG_PANEL.' + key.removeprefix('PANEL_'), control.rect)
             self.drag_origin = self.pointer

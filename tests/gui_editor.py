@@ -931,7 +931,7 @@ def journey():
         yield 0.2
     check('LAYERS' in editor._active.workspace.scroll_areas, 'a long layer stack becomes scrollable')
     width = control('PANEL_LAYERS').rect.w
-    drag(window, region, 'COLUMN_EDGE', -80, 0)
+    drag(window, region, 'ZONE_EDGE.COLUMN', -80, 0)
     yield 0.4
     check(control('PANEL_LAYERS').rect.w > width + 40, 'dragging the column edge widens the right column')
     check(has('PANEL_EDGE.LAYERS'), 'the layers panel has a border to resize it')

@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Optional
-from .shell import PANEL_HEIGHTS, PANELS
+from .shell import PANEL_HEIGHTS, PANELS, ZONE_ORDER, ZONE_SIZES
 
 
 @dataclass
@@ -27,7 +27,8 @@ class WorkspaceState:
     text: Optional[TextEdit] = None
     drag: Optional[tuple] = None
     hsv: tuple = (0.0, 0.0, 0.0)
-    column_width: float = 330.0
+    zone_order: tuple = ZONE_ORDER
+    zone_sizes: dict = field(default_factory=lambda: dict(ZONE_SIZES))
     panel_order: list = field(default_factory=lambda: list(PANELS))
     panel_heights: dict = field(default_factory=lambda: dict(PANEL_HEIGHTS))
     shelf_open: bool = True
