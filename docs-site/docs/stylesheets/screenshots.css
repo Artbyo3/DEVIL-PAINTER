@@ -1,0 +1,96 @@
+.md-typeset figure.dp-shot {
+  display: block;
+  width: 100%;
+  margin: 1.4rem 0;
+}
+
+.dp-shot__frame {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.65rem;
+  width: 100%;
+  box-sizing: border-box;
+  background-color: var(--dp-surface);
+  border: 1px solid var(--dp-border);
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+
+.dp-shot[data-shot-framing="full-editor"] .dp-shot__frame {
+  aspect-ratio: 16 / 9;
+}
+
+.dp-shot[data-shot-framing="close-up"] .dp-shot__frame {
+  aspect-ratio: 4 / 3;
+}
+
+.md-typeset .dp-shot .dp-shot__frame > img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+}
+
+.dp-shot__icon {
+  position: relative;
+  display: block;
+  width: 34px;
+  height: 26px;
+  box-sizing: border-box;
+  border: 2px solid var(--dp-accent);
+  border-radius: 4px;
+  overflow: hidden;
+  opacity: 0.75;
+}
+
+.dp-shot__icon::before {
+  content: "";
+  position: absolute;
+  top: 4px;
+  right: 5px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background-color: var(--dp-accent);
+}
+
+.dp-shot__icon::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 3px;
+  width: 0;
+  height: 0;
+  border-left: 9px solid transparent;
+  border-right: 9px solid transparent;
+  border-bottom: 11px solid var(--dp-accent);
+}
+
+.dp-shot__label {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--dp-muted);
+}
+
+.md-typeset figure.dp-shot figcaption {
+  display: block;
+  max-width: 100%;
+  margin: 0.65rem 0 0;
+  text-align: left;
+  color: var(--dp-muted);
+  font-size: 0.75rem;
+  line-height: 1.55;
+  overflow-wrap: break-word;
+  word-break: normal;
+}

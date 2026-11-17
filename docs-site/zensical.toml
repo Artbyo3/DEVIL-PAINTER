@@ -1,0 +1,61 @@
+[project]
+site_url = "https://artbyo3.github.io/DEVIL-PAINTER/"
+site_name = "Devil Painter"
+site_description = "Devil Painter add-on for Blender."
+site_author = "Artbyo3"
+extra_css = ["stylesheets/extra.css", "stylesheets/landing.css", "stylesheets/guides.css", "stylesheets/screenshots.css"]
+
+nav = [
+  { "Install" = "install.md" },
+  { "Quickstart" = "quickstart.md" },
+  { "Guide" = "guide.md" },
+  { "Reference" = "reference.md" },
+  { "FAQ" = "faq.md" },
+  { "For developers" = "https://github.com/Artbyo3/DEVIL-PAINTER" },
+]
+
+[project.extra]
+version = "v0.1.0"
+
+[project.theme]
+language = "en"
+custom_dir = "overrides"
+favicon = "assets/favicon.svg"
+features = [
+  "content.code.copy",
+  "navigation.instant",
+  "navigation.instant.prefetch",
+  "navigation.sections",
+  "search.highlight",
+]
+
+[project.theme.palette]
+scheme = "slate"
+
+[project.markdown_extensions]
+abbr = {}
+admonition = {}
+attr_list = {}
+def_list = {}
+footnotes = {}
+md_in_html = {}
+toc.permalink = true
+pymdownx.arithmatex.generic = true
+pymdownx.betterem = {}
+pymdownx.caret = {}
+pymdownx.details = {}
+pymdownx.highlight.anchor_linenums = true
+pymdownx.highlight.line_spans = "__span"
+pymdownx.highlight.pygments_lang_class = true
+pymdownx.inlinehilite = {}
+pymdownx.keys = {}
+pymdownx.magiclink = {}
+pymdownx.mark = {}
+pymdownx.smartsymbols = {}
+pymdownx.superfences.custom_fences = [
+  { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" },
+]
+pymdownx.tabbed.alternate_style = true
+pymdownx.tabbed.combine_header_slug = true
+pymdownx.tasklist.custom_checkbox = true
+pymdownx.tilde = {}

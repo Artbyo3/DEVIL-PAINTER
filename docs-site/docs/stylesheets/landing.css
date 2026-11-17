@@ -1,0 +1,494 @@
+html:has(.dp-landing-container),
+body:has(.dp-landing-container) {
+  height: 100%;
+  scrollbar-gutter: auto;
+  overflow: hidden !important;
+}
+
+body:has(.dp-landing-container) {
+  --dp-home-header: 76px;
+  height: 100dvh !important;
+  max-height: 100dvh !important;
+}
+
+body:has(.dp-landing-container) .md-header {
+  display: block !important;
+  position: fixed;
+  inset: 0 0 auto;
+  z-index: 110;
+  box-shadow: none;
+}
+
+body:has(.dp-landing-container) .md-header__inner {
+  max-width: 1200px;
+  padding-inline: 24px;
+}
+
+body:has(.dp-landing-container) .md-header__button,
+body:has(.dp-landing-container) .md-search {
+  display: none !important;
+}
+
+body:has(.dp-landing-container) .md-header__title {
+  margin: 0;
+}
+
+body:has(.dp-landing-container) .md-header__source {
+  display: block;
+  width: auto;
+  margin-left: auto;
+}
+
+body:has(.dp-landing-container) .md-content__inner {
+  animation: none;
+  will-change: auto;
+}
+
+.dp-landing-container {
+  top: var(--dp-home-header);
+  width: 100%;
+  height: calc(100dvh - var(--dp-home-header));
+  padding: 24px 32px 16px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto 64px;
+  justify-items: center;
+  align-items: center;
+  gap: 20px;
+}
+
+.dp-video-slot {
+  position: relative;
+  inset: auto;
+  min-height: 0;
+  max-width: 1080px;
+  border: 1px solid var(--dp-border);
+  border-radius: 12px;
+  background: var(--dp-well);
+}
+
+.dp-video-slot::after {
+  background: none;
+}
+
+.dp-video-slot > img,
+.dp-video-slot > video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center;
+  opacity: 1;
+  display: block;
+}
+
+.dp-landing-content {
+  width: 100%;
+  max-width: 640px;
+  padding: 0;
+  margin: 0;
+  animation: none;
+  will-change: auto;
+}
+
+.md-typeset .dp-landing-title {
+  margin: 0 0 8px;
+  font-size: clamp(26px, 2.5vw, 34px);
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.035em;
+  color: var(--dp-text);
+}
+
+.md-typeset .dp-landing-tagline {
+  max-width: 520px;
+  margin: 0 0 20px;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--dp-text-secondary);
+}
+
+.dp-install-card {
+  display: grid;
+  grid-template-areas: "install-card";
+  justify-items: center;
+  align-items: start;
+  width: min(100%, 280px);
+  min-width: 0;
+  padding: 0;
+  margin: 0 auto 16px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  position: relative;
+  text-decoration: none !important;
+}
+
+.dp-install-card:hover {
+  transform: none;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+.dp-install-btn-primary,
+.dp-install-drag-group {
+  grid-area: install-card;
+  width: 100%;
+  transition: opacity 200ms cubic-bezier(0.16, 1, 0.3, 1), transform 200ms cubic-bezier(0.16, 1, 0.3, 1), visibility 200ms cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: opacity, transform;
+}
+
+.dp-install-card:not(.is-active) .dp-install-btn-primary {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.dp-install-card:not(.is-active) .dp-install-drag-group {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(4px);
+}
+
+.dp-install-card.is-active .dp-install-btn-primary {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(-4px);
+}
+
+.dp-install-card.is-active .dp-install-drag-group {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.dp-install-drag-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+
+.dp-install-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 20px;
+  background: var(--dp-accent);
+  color: var(--dp-accent-fg) !important;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  border-radius: 8px;
+  border: 1px solid var(--dp-accent-hover);
+  box-shadow: 0 2px 10px rgba(213, 112, 129, 0.22);
+  text-decoration: none !important;
+  cursor: pointer;
+  user-select: none;
+  transition: opacity 200ms cubic-bezier(0.16, 1, 0.3, 1), transform 200ms cubic-bezier(0.16, 1, 0.3, 1), visibility 200ms cubic-bezier(0.16, 1, 0.3, 1), background-color 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.dp-install-btn-primary:hover {
+  background: var(--dp-accent-hover);
+  border-color: var(--dp-accent-hover);
+  box-shadow: 0 4px 18px rgba(213, 112, 129, 0.35);
+  transform: translateY(-1px);
+}
+
+.dp-install-btn-primary:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 8px rgba(213, 112, 129, 0.25);
+}
+
+.dp-install-drag-zone {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 16px;
+  background: var(--dp-accent-bg);
+  border: 1.5px dashed var(--dp-accent-border);
+  border-radius: 8px;
+  color: var(--dp-text-secondary) !important;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.3;
+  letter-spacing: 0.005em;
+  text-decoration: none !important;
+  cursor: default;
+  user-select: none;
+  transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease, box-shadow 160ms ease;
+}
+
+.dp-install-drag-zone:hover {
+  border-color: var(--dp-accent);
+  background: var(--dp-elevated);
+  color: var(--dp-text) !important;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.25);
+}
+
+.dp-install-drag-icon {
+  flex-shrink: 0;
+  color: var(--dp-accent);
+  transition: transform 160ms ease;
+}
+
+.dp-install-drag-zone:hover .dp-install-drag-icon {
+  transform: scale(1.1);
+}
+
+.dp-install-fallback {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--dp-muted);
+  letter-spacing: 0.01em;
+  text-align: center;
+  user-select: none;
+}
+
+.dp-install-fallback-link {
+  color: var(--dp-text-secondary) !important;
+  text-decoration: underline !important;
+  text-underline-offset: 2px;
+  transition: color 140ms ease;
+}
+
+.dp-install-fallback-link:hover {
+  color: var(--dp-accent-hover) !important;
+}
+
+.dp-landing-nav {
+  width: 100%;
+  gap: 8px;
+  flex-wrap: nowrap;
+}
+
+.md-typeset .dp-landing-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 16px;
+  border-color: var(--dp-outline);
+  border-radius: 7px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.3;
+  color: var(--dp-text-secondary);
+  background: var(--dp-surface);
+}
+
+.md-typeset .dp-landing-btn--primary {
+  border-color: var(--dp-accent-border);
+  color: var(--dp-accent) !important;
+  background: var(--dp-accent-bg);
+}
+
+.md-typeset .dp-landing-btn:hover {
+  border-color: var(--dp-accent);
+  color: var(--dp-accent-hover) !important;
+  background: var(--dp-elevated);
+}
+
+body:has(.dp-landing-container) a:focus-visible {
+  outline: 2px solid var(--dp-accent);
+  outline-offset: 4px;
+}
+
+.dp-contributors-container {
+  position: relative;
+  inset: auto;
+  min-width: 0;
+  width: calc(100% + 64px);
+  align-self: end;
+  gap: 8px;
+}
+
+.dp-contributors-label {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.4;
+  letter-spacing: 0.16em;
+}
+
+.dp-contributors-stripe {
+  width: 100%;
+  height: 32px;
+  mask-image: linear-gradient(to right, transparent, #000 8%, #000 92%, transparent);
+}
+
+.dp-contributor-item {
+  gap: 10px;
+  margin-right: 88px;
+}
+
+.dp-contributor-avatar {
+  width: 24px;
+  height: 24px;
+  border-color: var(--dp-outline);
+}
+
+.dp-contributor-name {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--dp-muted);
+}
+
+@media (max-width: 600px) {
+  body:has(.dp-landing-container) {
+    --dp-home-header: 64px;
+  }
+
+  body:has(.dp-landing-container) .md-header,
+  body:has(.dp-landing-container) .md-header__inner {
+    min-height: var(--dp-home-header);
+  }
+
+  body:has(.dp-landing-container) .md-header__inner {
+    padding-inline: 16px;
+  }
+
+  body:has(.dp-landing-container) .md-header__title {
+    font-size: 16px;
+    min-height: 48px;
+    overflow: visible;
+  }
+
+  body:has(.dp-landing-container) .dp-title-logo {
+    width: 40px;
+    height: 40px;
+  }
+
+  body:has(.dp-landing-container) .md-source {
+    padding: 0 4px;
+  }
+
+  body:has(.dp-landing-container) .md-source__icon {
+    width: 22px;
+    margin-right: 6px;
+  }
+
+  body:has(.dp-landing-container) .dp-source-name {
+    font-size: 12px;
+  }
+
+  body:has(.dp-landing-container) .md-source__facts {
+    font-size: 10px;
+  }
+
+  .dp-landing-container {
+    padding: 16px 20px max(16px, env(safe-area-inset-bottom));
+    gap: 20px;
+    grid-template-rows: minmax(0, 1fr) auto 56px;
+  }
+
+  .dp-video-slot {
+    border-radius: 8px;
+  }
+
+  .md-typeset .dp-landing-tagline {
+    max-width: 330px;
+    font-size: 14px;
+    margin-bottom: 18px;
+  }
+
+  .dp-install-card {
+    width: 100%;
+    max-width: 280px;
+    padding: 0;
+    margin-bottom: 14px;
+  }
+
+  .dp-install-btn-primary {
+    min-height: 42px;
+    font-size: 13.5px;
+  }
+
+  .dp-install-drag-zone {
+    min-height: 42px;
+    font-size: 12.5px;
+  }
+
+  .dp-install-drag-group {
+    gap: 5px;
+  }
+
+  .dp-install-fallback {
+    font-size: 10.5px;
+  }
+
+  .md-typeset .dp-landing-btn {
+    padding-inline: 12px;
+    font-size: 12px;
+  }
+
+  .dp-contributors-container {
+    width: calc(100% + 40px);
+  }
+}
+
+@media (max-height: 650px) {
+  .dp-landing-container {
+    padding-block: 12px;
+    gap: 12px;
+    grid-template-rows: minmax(0, 1fr) auto 48px;
+  }
+
+  .md-typeset .dp-landing-title {
+    font-size: 24px;
+  }
+
+  .md-typeset .dp-landing-tagline {
+    margin-bottom: 12px;
+  }
+
+  .dp-install-card {
+    padding: 0;
+    margin-bottom: 8px;
+  }
+
+  .dp-install-drag-group {
+    gap: 4px;
+  }
+
+  .dp-install-btn-primary {
+    min-height: 38px;
+    font-size: 13px;
+  }
+
+  .dp-install-drag-zone {
+    min-height: 38px;
+    font-size: 12px;
+  }
+
+  .dp-install-fallback {
+    font-size: 10px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dp-contributors-track {
+    animation: none;
+  }
+
+  .dp-install-card,
+  .dp-install-btn-primary,
+  .dp-install-drag-group,
+  .dp-install-drag-zone,
+  .dp-landing-btn {
+    transition: none !important;
+  }
+}
