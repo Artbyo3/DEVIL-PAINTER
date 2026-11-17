@@ -11,6 +11,7 @@ from pathlib import Path, PurePosixPath
 import bpy
 import imbuf
 from .library import PACK_MARKER, library_folder, packs_folder, rescan
+from .thumbnails import wait_idle
 
 CATALOG_URL = 'https://artbyo3.github.io/DEVIL-PAINTER_Asset_Library/packs.json'
 PAGES_PREFIX = 'https://artbyo3.github.io/DEVIL-PAINTER_Asset_Library/'
@@ -533,6 +534,7 @@ def convert_preview(webp):
     try:
         if not preview_dimensions_ok(webp):
             return False
+        wait_idle()
         buffer = imbuf.load(str(webp))
         width, height = buffer.size
         if not width or not height:

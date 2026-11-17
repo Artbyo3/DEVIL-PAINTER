@@ -116,6 +116,7 @@ def make_library(folder):
         bpy.data.images.remove(image)
     for index in range(4, COUNT):
         shutil.copyfile(folder / f'cloth_{index % 4:04d}.png', folder / f'cloth_{index:04d}.png')
+    (folder / 'aaa_broken.png').write_bytes(b'not an image')
 
 
 def scroll_while_loading(window, region, seconds):
@@ -139,7 +140,7 @@ def wait_full(seconds):
     end = time.perf_counter() + seconds
     while time.perf_counter() < end:
         current = tiles()
-        if current and all(item.preview is not None for item in current):
+        if current and all(item.preview is not None or item.icon == 'FAILED' for item in current):
             return True
         yield 0.1
     return False
@@ -172,6 +173,14 @@ def journey():
     click(window, region, 'SHELF_TAB.TEXTURES')
     yield 0.2
     check(len(shelf.visible('TEXTURES')) >= COUNT, f'the Textures section lists all {COUNT} library textures')
+    broken = next((item for item in tiles() if item.label == 'aaa_broken'), None)
+    for _ in range(60):
+        broken = next((item for item in tiles() if item.label == 'aaa_broken'), None)
+        if broken is not None and broken.icon == 'FAILED':
+            break
+        move(window, *middle)
+        yield 0.1
+    check(broken is not None and broken.preview is None and broken.icon == 'FAILED', 'a texture whose preview cannot be decoded says Preview failed on its tile')
     check(thumbnails.waiting() and any(item.preview is None for item in tiles()), 'previews are still loading in the background when the section opens')
     layers = len(data.layers)
     click(window, region, 'ADD_PAINT')
@@ -214,7 +223,7 @@ def journey():
     while time.perf_counter() < end:
         move(window, *middle)
         current = tiles()
-        if current and all(item.preview is not None for item in current):
+        if current and all(item.preview is not None or item.icon == 'FAILED' for item in current):
             break
         yield 0.1
     smart = summary(EVENTS, rendered)

@@ -25,6 +25,7 @@ SAMPLES = 12
 WORLD_FILE = 'city.exr'
 WORLD_STRENGTH = .7
 JOB_POLL = .1
+LOST_ATTEMPTS = 3
 RENDERERS = 3
 RENDER_SCRIPT = '; '.join(('import sys', 'sys.dont_write_bytecode = True', 'import importlib', 'from pathlib import Path',
                            "root, name, folder = sys.argv[sys.argv.index('--') + 1:]", 'sys.path.insert(0, root)',
@@ -55,6 +56,10 @@ def foreground():
         _state['depth'] -= 1
         if not _state['depth']:
             _idle.set()
+
+
+def wait_idle():
+    _idle.wait()
 
 
 def begin_frame():
@@ -278,12 +283,17 @@ def renderer():
     _state['processes'] = alive
 
 
+def write_job(job, path, definition):
+    partial = job.with_suffix('.partial')
+    partial.write_text(json.dumps(dict(path=str(path), definition=definition)), encoding='utf-8')
+    os.replace(partial, job)
+
+
 def dispatch():
-    alive = bool(rendering())
     for key, (path, definition) in _queue.items():
-        shared = next((job for job, rendered in _jobs.values() if rendered == path), None)
+        shared = next((job for job, rendered, _, _ in _jobs.values() if rendered == path), None)
         if key not in _jobs and shared is not None:
-            _jobs[key] = (shared, path)
+            _jobs[key] = (shared, path, definition, 0)
             continue
         if key in _jobs and _jobs[key][1] == path:
             try:
@@ -291,22 +301,23 @@ def dispatch():
             except OSError:
                 pass
             continue
-        if key in _jobs and not any(other != key and job == _jobs[key][0] for other, (job, _) in _jobs.items()):
+        if key in _jobs and not any(other != key and entry[0] == _jobs[key][0] for other, entry in _jobs.items()):
             _jobs[key][0].unlink(missing_ok=True)
         job = job_folder() / f'{path.stem}.json'
-        partial = job.with_suffix('.partial')
-        partial.write_text(json.dumps(dict(path=str(path), definition=definition)), encoding='utf-8')
-        os.replace(partial, job)
-        _jobs[key] = (job, path)
+        write_job(job, path, definition)
+        _jobs[key] = (job, path, definition, 0)
     _queue.clear()
-    for key, (job, path) in list(_jobs.items()):
-        taken = job.with_suffix('.taken')
+    for key, (job, path, definition, attempts) in list(_jobs.items()):
+        failed = job.with_suffix('.failed')
         if path.is_file():
             del _jobs[key]
-        elif not job.exists() and not (alive and taken.exists()) and not path.is_file():
-            taken.unlink(missing_ok=True)
+        elif failed.exists() or attempts >= LOST_ATTEMPTS:
+            failed.unlink(missing_ok=True)
             _failed.add(path)
             del _jobs[key]
+        elif not job.exists() and not job.with_suffix('.taken').exists() and not path.is_file():
+            write_job(job, path, definition)
+            _jobs[key] = (job, path, definition, attempts + 1)
     if _jobs:
         renderer()
 
@@ -326,6 +337,26 @@ def leave_with_parent():
     os._exit(0)
 
 
+def discard(path):
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def claim(job):
+    taken = job.with_suffix('.taken')
+    try:
+        os.replace(job, taken)
+    except OSError:
+        return None, None
+    try:
+        return taken, json.loads(taken.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        discard(taken)
+        return None, None
+
+
 def serve(folder):
     if hasattr(os, 'nice'):
         os.nice(10)
@@ -335,12 +366,8 @@ def serve(folder):
         if job is None:
             time.sleep(JOB_POLL)
             continue
-        taken = job.with_suffix('.taken')
-        try:
-            os.replace(job, taken)
-            entry = json.loads(taken.read_text(encoding='utf-8'))
-        except (OSError, ValueError):
-            taken.unlink(missing_ok=True)
+        taken, entry = claim(job)
+        if taken is None:
             continue
         target = Path(entry['path'])
         partial = target.with_name(f'{target.stem}.{os.getpid()}.partial.png')
@@ -349,8 +376,10 @@ def serve(folder):
                 render(partial, entry['definition'])
                 os.replace(partial, target)
         except Exception:
-            partial.unlink(missing_ok=True)
-        taken.unlink(missing_ok=True)
+            discard(partial)
+            if not target.is_file():
+                taken.with_suffix('.failed').write_text(target.name, encoding='utf-8')
+        discard(taken)
 
 
 def release():
