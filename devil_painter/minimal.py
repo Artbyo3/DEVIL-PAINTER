@@ -1124,7 +1124,7 @@ def stencil_popover(layout, state, bounds, data):
             layout.add(key, Rect(x, y + 2 * s, w, 24 * s), 'SLIDER', label=label, value=value / top, text=text)
     y -= LINE_HEIGHT * s
     layout.add('STENCIL_TIP', Rect(x, y + 2 * s, w, 24 * s), 'NOTE', label='Paint through it, or project it in one click')
-    layout.add('PROJECT', Rect(x, card.y + 12 * s, w, 28 * s), 'PRIMARY', icon='PLAY', label='Project through the view',
+    layout.add('STENCIL_PROJECT', Rect(x, card.y + 12 * s, w, 28 * s), 'PRIMARY', icon='PLAY', label='Project through the view',
                tip='Project the stencil image and the brush channels onto the model as seen from here')
     return card
 

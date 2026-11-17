@@ -386,6 +386,8 @@ def journey():
           'Erase without base color clears roughness and keeps the color')
     press(window, 'Z', *middle, ctrl=True)
     yield 0.8
+    cube = bpy.data.objects['Cube']
+    data = cube.devil_painter.sets[0]
     check(image_at(canvas('roughness'), spot[right])[3] > .5, 'Ctrl+Z restores the erased channel')
     yield from card_click(window, region, 'BRUSH_CARD', 'BRUSHUSE.base_color', 'BRUSH')
     yield from close_cards(window, middle)
@@ -436,11 +438,12 @@ def journey():
     click(window, region, 'TEXTURE_DIR')
     yield 0.2
     type_text(window, str(textures), *spot_of(region, 'TEXTURE_DIR'))
+    wanted = {'decal', 'brick_basecolor', 'brick_roughness'}
     for _ in range(15):
         yield 0.2
-        if len(keys('ITEM.')) >= 3:
+        if wanted <= {control(key).label for key in keys('ITEM.')}:
             break
-    check(len(keys('ITEM.')) == 3, 'the texture folder lists the decal and the brick textures')
+    check(wanted <= {control(key).label for key in keys('ITEM.')}, 'the texture folder lists the decal and the brick textures')
     click(window, region, 'SHELF_TAB.MATERIALS')
     yield 0.4
     labels = {control(key).label: key for key in keys('ITEM.')}
@@ -523,7 +526,7 @@ def journey():
     click(window, region, 'ADD_PAINT')
     yield 0.8
     decal_uid = active_layer(data).uid
-    yield from card_click(window, region, 'STENCIL_CARD', 'PROJECT', 'STENCIL')
+    yield from card_click(window, region, 'STENCIL_CARD', 'STENCIL_PROJECT', 'STENCIL')
     yield 1.5
     projected = image_pixels(find_layer(data, decal_uid).image)
     reds = (projected[..., 3] > .5) & (projected[..., 0] > .8) & (projected[..., 1] < .2)
@@ -532,6 +535,8 @@ def journey():
           'the projection also writes the brush channels')
     press(window, 'Z', *middle, ctrl=True)
     yield 0.8
+    cube = bpy.data.objects['Cube']
+    data = cube.devil_painter.sets[0]
     check(int((image_pixels(find_layer(data, decal_uid).image)[..., 3] > .5).sum()) == 0, 'Ctrl+Z undoes the projection')
     drag(window, middle[0], middle[1], 6, 3)
     yield 1.2

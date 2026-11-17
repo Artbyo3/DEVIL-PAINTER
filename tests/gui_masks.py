@@ -461,6 +461,9 @@ def journey():
     check(message.startswith('Filled face: 1 face') and .8 * front_area < face_count < 2.5 * front_area + 400, 'Face fills exactly the clicked face')
     press(window, 'Z', *middle, ctrl=True)
     yield 0.8
+    cube = bpy.data.objects['Cube']
+    project = cube.devil_painter
+    data = project.sets[0]
     check(covered() == 0, 'Ctrl+Z undoes a polygon fill')
     click(window, region, 'POLY.TRIANGLE')
     yield 0.2

@@ -959,8 +959,8 @@ def journey():
           'the opacity slider caps what one stroke can cover')
     click(window, region, 'ERASE')
     yield 0.5
-    check(control('ERASE').active and bpy.context.scene.tool_settings.image_paint.canvas == next(layer for layer in data.layers if layer.uid == data.active_uid).image
-          and abs(painting.brush_value(bpy.context.scene, 'strength') - .25) < .03, 'the eraser works on the layer itself at the brush opacity')
+    check(control('ERASE').active and bpy.context.scene.tool_settings.image_paint.canvas == data.stroke and data.stroke_tool == 'ERASE'
+          and abs(painting.brush_value(bpy.context.scene, 'strength') - .25) < .03, 'the eraser collects its stroke in the buffer at the brush opacity')
 
     area_count = len(window.screen.areas)
     click(window, region, 'VIEW2D')

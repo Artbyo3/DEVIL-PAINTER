@@ -1360,7 +1360,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         elif key == 'STENCIL_CLEAR':
             data.brush_stencil = None
             self.brush_changed(context, data)
-        elif key == 'PROJECT':
+        elif key == 'STENCIL_PROJECT':
             self.state.popover = None
             if data.brush_stencil is None:
                 self.message = 'Pick a stencil first.'
