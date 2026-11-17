@@ -109,7 +109,7 @@ def decode(source, cached):
     buffer.convert_buffer_type('BYTE')
     width, height = buffer.size
     with buffer.with_buffer() as view:
-        values = numpy.asarray(view, dtype=numpy.uint8).reshape(height, width, -1)
+        values = numpy.array(view, dtype=numpy.uint8, copy=True).reshape(height, width, -1)
     buffer.free()
     pixels = numpy.ones((height, width, 4), dtype=numpy.float32)
     channels = values.shape[2]
