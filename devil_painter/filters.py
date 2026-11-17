@@ -516,4 +516,3 @@ def filter_value(build, value, effect):
 def content_warp(effects):
     return next((effect for effect in effects if effect.enabled and effect.target == 'CONTENT' and effect.kind == 'FILTER'
                  and effect.filter == 'WARP'), None)
-
