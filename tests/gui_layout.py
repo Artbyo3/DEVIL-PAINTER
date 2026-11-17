@@ -12,15 +12,15 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, str(ROOT))
 import devil_painter
 from devil_painter import editor, library
-from devil_painter.minimal import HEADER
 from devil_painter.privacy import MASK, masked_path
-from devil_painter.shell import MAX_COLUMN, MIN_COLUMN, MIN_PANEL, PANELS, ZONE_LIMITS, ZONE_SIDES
+from devil_painter.shell import COLUMNS, MAX_SIZE, PANELS, SECTIONS
 from tools.workspace import prepare_scratch
 
 TIMEOUT = 600
 STARTED = time.time()
 EXEMPT_KINDS = {'GRIP', 'GHOST'}
-SECTIONS = dict(BAR='workspace bar', STRIP='tool strip', DOCK='tool dock', SHELF='asset browser', COLUMN='panel column')
+NAMES = dict(BAR='workspace bar', STRIP='tool strip', DOCK='tool dock', SHELF='asset browser', SETS='Texture sets panel',
+             LAYERS='Layers panel', PROPERTIES='Properties panel', MAPS='Mesh maps panel')
 GROW = dict(TOP=(0, -1), BOTTOM=(0, 1), LEFT=(1, 0), RIGHT=(-1, 0))
 EXEMPT_KEYS = {'DROP_LINE', 'DRAG_GHOST'}
 
@@ -110,7 +110,7 @@ def visible_part(item):
 def escaped():
     layout = workspace()
     zones = layout.zones
-    boxes = [rect for rect, _ in layout.cards] + list(layout.tool_groups) + [zones.bar, zones.strip, zones.dock, zones.shelf]
+    boxes = [rect for rect, _ in layout.cards] + list(layout.tool_groups) + list(zones.rects.values())
     if layout.popover is not None:
         boxes.append(layout.popover)
     found = []
@@ -123,32 +123,64 @@ def escaped():
     return found
 
 
-def zone_rect(key):
-    return getattr(workspace().zones, key.lower())
+def rect(key):
+    return workspace().zones.rects[key]
 
 
-def thickness(key):
-    rect = zone_rect(key)
-    return rect.w if workspace().zones.sides[key] in ('LEFT', 'RIGHT') else rect.h
+def strip_of(key):
+    side, index = workspace().zones.places[key]
+    return side, index, next(found for where, number, found in workspace().zones.strips if where == side and number == index)
 
 
-def resize_zone(window, region, key, amount):
-    dx, dy = GROW[workspace().zones.sides[key]]
-    drag(window, region, 'ZONE_EDGE.' + key, dx * amount, dy * amount)
+def extent(key):
+    found = rect(key)
+    return found.w * found.h
 
 
-def edge_point(region, side):
-    return dict(TOP=(region.x + region.width * .45, region.y + region.height - 18), BOTTOM=(region.x + region.width * .45, region.y + 18),
-                LEFT=(region.x + 18, region.y + region.height * .5), RIGHT=(region.x + region.width - 18, region.y + region.height * .5))[side]
+def grab_point(region, key):
+    layout, found = workspace(), rect(key)
+    if key in PANELS:
+        header = control('PANEL_' + key).rect
+        return region.x + header.x + 30, region.y + header.y + header.h / 2
+    for step in range(1, int(found.h // 2)):
+        for fraction in (.5, .1, .9, .3, .7):
+            x, y = found.x + found.w * fraction, found.top - 2 * step
+            if layout.hit(x, y) is None and (key == 'DOCK' or layout.covers(x, y)):
+                return region.x + x, region.y + y
+    raise AssertionError(f'no empty spot to grab the {NAMES[key]}')
 
 
-def zone_layout():
-    return {key: tuple(round(value, 2) for value in (zone_rect(key).x, zone_rect(key).y, zone_rect(key).w, zone_rect(key).h)) for key in SECTIONS}
+def move_section(window, region, key, x, y):
+    start = grab_point(region, key)
+    move(window, *start)
+    window.event_simulate(type='LEFTMOUSE', value='PRESS', x=int(start[0]), y=int(start[1]))
+    for step in range(1, 9):
+        move(window, start[0] + (x - start[0]) * step / 8, start[1] + (y - start[1]) * step / 8)
+    window.event_simulate(type='LEFTMOUSE', value='RELEASE', x=int(x), y=int(y))
 
 
-def column_fits():
-    column = workspace().zones.column
-    return all(inside(card, column) for card in workspace().panels.values())
+def resize_section(window, region, key, amount):
+    side, index, _ = strip_of(key)
+    if has('SIZE.' + key):
+        dx, dy = (0, -1) if side in COLUMNS else (1, 0)
+        drag(window, region, 'SIZE.' + key, dx * amount, dy * amount)
+    else:
+        dx, dy = GROW[side]
+        drag(window, region, f'STRIP.{side}.{index}', dx * amount, dy * amount)
+
+
+def stage_point(region, side):
+    stage = workspace().zones.stage
+    return dict(TOP=(region.x + stage.x + stage.w / 2, region.y + stage.top - 10), BOTTOM=(region.x + stage.x + stage.w / 2, region.y + stage.y + 10),
+                LEFT=(region.x + stage.x + 10, region.y + stage.y + stage.h / 2), RIGHT=(region.x + stage.x + stage.w - 10, region.y + stage.y + stage.h / 2))[side]
+
+
+def snapshot():
+    return {key: tuple(round(value, 2) for value in (found.x, found.y, found.w, found.h)) for key, found in workspace().zones.rects.items()}
+
+
+def saved_workspace(settings_file):
+    return json.loads(settings_file.read_text(encoding='utf-8'))['workspace']
 
 
 def journey():
@@ -170,113 +202,102 @@ def journey():
     data = cube.devil_painter.sets[0]
     check(not escaped(), f'nothing spills out of its shell in the default layout {escaped()}')
 
-    layers = workspace().panels['LAYERS']
+    layers = rect('LAYERS')
     sizes = set()
     for _ in range(24):
         click(window, region, 'ADD_PAINT')
         yield 0.15
-        sizes.add((round(workspace().panels['LAYERS'].h, 3), round(workspace().panels['LAYERS'].y, 3)))
+        sizes.add((round(rect('LAYERS').h, 3), round(rect('LAYERS').y, 3)))
     check(len(data.layers) >= 25 and sizes == {(round(layers.h, 3), round(layers.y, 3))},
           f'adding 24 layers leaves the Layers shell at exactly the same size {sizes} {layers}')
     check('LAYERS' in workspace().scroll_areas, 'the layer rows scroll inside the fixed Layers shell')
     check(not escaped(), f'a long layer stack stays inside its shell {escaped()}')
+    column = editor._active.state.strips['RIGHT'][0]['items']
+    check(column == list(PANELS), f'the right column holds the four panels in the default order {column}')
 
-    shown = [key for key in workspace().panels]
-    check(shown == [key for key in PANELS if key in shown] and len(shown) == 4, f'the column shows its four sections in the default order {shown}')
-    before = workspace().panels['LAYERS'].h
-    drag(window, region, 'PANEL_EDGE.LAYERS', 0, -70)
+    before = rect('LAYERS').h
+    drag(window, region, 'SIZE.LAYERS', 0, -70)
     yield 0.5
-    grown = workspace().panels['LAYERS'].h
+    grown = rect('LAYERS').h
     check(grown > before + 40, f'dragging the Layers bottom border makes the section taller {before} {grown}')
-    drag(window, region, 'PANEL_EDGE.LAYERS', 0, 40)
+    drag(window, region, 'SIZE.LAYERS', 0, 40)
     yield 0.5
-    check(abs(workspace().panels['LAYERS'].h - (grown - 40)) < 6, 'dragging the border back up makes it shorter')
-    saved = json.loads(settings_file.read_text(encoding='utf-8'))['column']
-    check(abs(saved['heights']['LAYERS'] * workspace().scale - (workspace().panels['LAYERS'].h - HEADER * workspace().scale)) < 1, 'the new size is saved to the library settings')
+    check(rect('LAYERS').h < grown - 30, 'dragging the border back up makes it shorter')
+    check(abs(saved_workspace(settings_file)['heights']['LAYERS'] - editor._active.state.section_heights['LAYERS']) < .01, 'the new size is saved to the library settings')
 
-    sets_top = workspace().panels['SETS'].top
-    drag(window, region, 'PANEL_MAPS', 0, sets_top + 12 - control('PANEL_MAPS').rect.y, fx=.3, fy=0.0)
+    sets = rect('SETS')
+    move_section(window, region, 'MAPS', region.x + sets.x + sets.w / 2, region.y + sets.y + sets.h * .8)
     yield 0.5
-    order = list(workspace().panels)
-    check(order[0] == 'MAPS' and abs(workspace().panels['MAPS'].top - sets_top) < 1, f'dragging the Mesh maps header to the top moves the section there {order}')
-    drag(window, region, 'PANEL_SETS', 0, workspace().panels['PROPERTIES'].y + 6 - control('PANEL_SETS').rect.y, fx=.3)
-    yield 0.5
-    order = list(workspace().panels)
-    check(order == ['MAPS', 'LAYERS', 'PROPERTIES', 'SETS'], f'dragging Texture sets below Properties rearranges the column {order}')
-    check(not escaped() and column_fits(), f'the rearranged column has no overflow {escaped()}')
-    check(json.loads(settings_file.read_text(encoding='utf-8'))['column']['order'] == order, 'the new order is saved')
+    column = editor._active.state.strips['RIGHT'][0]['items']
+    check(column[0] == 'MAPS' and not escaped(), f'dragging the Mesh maps title onto the top of the column moves it there {column}')
+    click(window, region, 'PANEL_SETS', fx=.15)
+    yield 0.4
+    check('SETS' in editor._active.state.collapsed, 'clicking a panel title without dragging still collapses it')
+    click(window, region, 'PANEL_SETS', fx=.15)
+    yield 0.4
 
-    for key in list(workspace().panels):
-        drag(window, region, 'PANEL_EDGE.' + key, 0, 2000)
-        yield 0.3
-    smallest = {key: round(card.h - HEADER * workspace().scale, 2) for key, card in workspace().panels.items()}
-    check(all(abs(value - MIN_PANEL * workspace().scale) < 1.5 for value in smallest.values()), f'every section shrinks to its safe minimum {smallest}')
-    drag(window, region, 'ZONE_EDGE.COLUMN', 3000, 0)
+    inventory = {key: set() for key in SECTIONS}
+    for key in SECTIONS:
+        resize_section(window, region, key, -60)
+        yield 0.4
+        low = extent(key)
+        resize_section(window, region, key, 60)
+        yield 0.4
+        high = extent(key)
+        resize_section(window, region, key, -60)
+        yield 0.4
+        check(high > low and extent(key) < high and not escaped(), f'the {NAMES[key]} grows and shrinks by its border ({low:.0f} < {high:.0f} > {extent(key):.0f}) {escaped()}')
+        inventory[key].add('resized')
+    for key in ('BAR', 'STRIP'):
+        for target in ('BOTTOM', 'TOP'):
+            move_section(window, region, key, *stage_point(region, target))
+            yield 0.5
+            check(workspace().zones.places[key][0] == target and not escaped(),
+                  f'dragging the {NAMES[key]} to the {target.lower()} edge of the viewport moves it there {escaped()}')
+        inventory[key].add('rearranged')
+    right = strip_of('LAYERS')[2]
+    move_section(window, region, 'PROPERTIES', region.x + right.x + right.w - 8, region.y + right.y + right.h / 2)
     yield 0.5
-    check(abs(workspace().zones.column.w - MIN_COLUMN * workspace().scale) < 1, 'the column narrows to its minimum width')
-    check(not escaped() and column_fits(), f'at minimum sizes nothing overflows {escaped()}')
+    check(len(editor._active.state.strips['RIGHT']) == 2 and editor._active.state.strips['RIGHT'][0]['items'] == ['PROPERTIES'] and not escaped(),
+          f'dropping Properties on the outer edge of the column splits it into its own column {editor._active.state.strips["RIGHT"]} {escaped()}')
+    targets = dict(SHELF='LEFT', SETS='LEFT', LAYERS='LEFT', PROPERTIES='RIGHT', MAPS='RIGHT')
+    for key in targets:
+        before = strip_of(key)[0]
+        move_section(window, region, key, *stage_point(region, targets[key]))
+        yield 0.5
+        side = workspace().zones.places[key][0]
+        check(side == targets[key] and not escaped() and not has('SECTION_GHOST'),
+              f'dragging the {NAMES[key]} to the {targets[key].lower()} edge of the viewport moves it there (from {before.lower()}) {escaped()}')
+        inventory[key].add('rearranged')
+    check(all(inventory[key] == ({'resized'} if key == 'DOCK' else {'rearranged', 'resized'}) for key in SECTIONS),
+          'inventory: ' + '; '.join(f'{NAMES[key]} {sorted(inventory[key])}' for key in SECTIONS))
+    stage = workspace().zones.stage
+    check(stage.w > 0 and stage.h > 0 and not any(found.x < stage.x + stage.w and stage.x < found.x + found.w and found.y < stage.top and stage.y < found.top
+                                                   for found in workspace().zones.rects.values()),
+          'with every section moved, the free viewport stays clear of all of them')
+
+    for key in SECTIONS:
+        if key != 'SHELF':
+            resize_section(window, region, key, -5000)
+            yield 0.3
+    check(not escaped(), f'at minimum sizes nothing overflows {escaped()}')
     click(window, region, 'EXPORT')
     yield 0.4
     check(not escaped(), f'the export card fits at minimum sizes {escaped()}')
     press(window, 'ESC', *middle)
     yield 0.3
-
-    drag(window, region, 'PANEL_EDGE.LAYERS', 0, -4000)
-    yield 0.5
-    check(column_fits() and not escaped(), f'a section dragged far past the column bottom stays inside the column {escaped()}')
-    drag(window, region, 'ZONE_EDGE.COLUMN', -3000, 0)
-    yield 0.5
-    check(workspace().zones.column.w <= MAX_COLUMN * workspace().scale + 1 and not escaped(), 'the column widens only to its maximum width')
-    click(window, region, 'PANEL_SETS')
+    resize_section(window, region, 'LAYERS', 5000)
     yield 0.4
-    check('SETS' in editor._active.state.collapsed, 'clicking a header without dragging still collapses the section')
+    side, index, _ = strip_of('LAYERS')
+    bounds = editor._active.bounds
+    check(not escaped() and editor._active.state.strips[side][index]['size'] <= MAX_SIZE
+          and all(found.x >= bounds.x and found.y >= bounds.y and found.x + found.w <= bounds.x + bounds.w and found.top <= bounds.top
+                  for found in workspace().zones.rects.values()),
+          f'a section dragged far past its limit stays within its safe maximum and inside the workspace {escaped()}')
+    check(saved_workspace(settings_file)['strips'] == editor._active.state.strips, 'the arrangement is saved')
 
-    inventory = {key: set() for key in SECTIONS}
-    s = workspace().scale
-    for key, name in SECTIONS.items():
-        low, high = ZONE_LIMITS[key]
-        resize_zone(window, region, key, 5000)
-        yield 0.4
-        largest = thickness(key)
-        check(largest > low * s + 20 and largest <= high * s + 1 and not escaped(), f'the {name} grows by its border up to its safe maximum ({largest:.0f} px) {escaped()}')
-        resize_zone(window, region, key, -60)
-        yield 0.4
-        check(abs(thickness(key) - (largest - 60)) < 3 or thickness(key) <= largest - 40, f'dragging the {name} border back makes it smaller ({thickness(key):.0f} px)')
-        resize_zone(window, region, key, -5000)
-        yield 0.4
-        check(abs(thickness(key) - low * s) < 1.5 and not escaped(), f'the {name} shrinks only to its safe minimum ({thickness(key):.0f} px) {escaped()}')
-        saved = json.loads(settings_file.read_text(encoding='utf-8'))['zones']['sizes'][key]
-        check(abs(saved - low) < .5, f'the {name} size is saved')
-        inventory[key].add('resized')
-    for key, name in SECTIONS.items():
-        side = workspace().zones.sides[key]
-        other = next(item for item in ZONE_SIDES[key] if item != side)
-        x, y = spot(region, 'ZONE_MOVE.' + key)
-        target = edge_point(region, other)
-        drag(window, region, 'ZONE_MOVE.' + key, target[0] - x, target[1] - y)
-        yield 0.5
-        rect = zone_rect(key)
-        at_edge = dict(TOP=rect.top > region.height - 20 * s, BOTTOM=rect.y < 20 * s, LEFT=rect.x < 20 * s, RIGHT=rect.x + rect.w > region.width - 20 * s)[other]
-        check(workspace().zones.sides[key] == other and at_edge and not escaped() and not has('ZONE_GHOST'),
-              f'dragging the {name} handle moves it from the {side.lower()} edge to the {other.lower()} edge and the layout adapts {escaped()}')
-        inventory[key].add('rearranged')
-    stage = workspace().zones.stage
-    check(stage.w > 0 and stage.h > 0 and all(not (zone_rect(key).x < stage.x + stage.w and stage.x < zone_rect(key).x + zone_rect(key).w
-                                                     and zone_rect(key).y < stage.top and stage.y < zone_rect(key).top) for key in SECTIONS),
-          'with every section moved, the free viewport stays clear of all of them')
-    resize_zone(window, region, 'SHELF', 140)
-    yield 0.4
-    check(thickness('SHELF') > ZONE_LIMITS['SHELF'][0] * s + 100 and workspace().zones.sides['SHELF'] == 'TOP' and not escaped(),
-          f'the asset browser is resized by its border in its new place at the top {escaped()}')
-    check(all(inventory[key] == {'resized', 'rearranged'} for key in SECTIONS),
-          'inventory: ' + '; '.join(f'{SECTIONS[key]} {sorted(inventory[key])}' for key in SECTIONS) + '; column panels Texture sets, Layers, Properties, Mesh maps rearranged and resized above')
-    check(json.loads(settings_file.read_text(encoding='utf-8'))['zones']['order'] == [list(item) for item in editor._active.state.zone_order],
-          'the arrangement is saved')
-
-    layout_before = {key: (round(card.x, 2), round(card.y, 2), round(card.w, 2), round(card.h, 2)) for key, card in workspace().panels.items()}
-    zones_before = zone_layout()
-    saved_before = json.loads(settings_file.read_text(encoding='utf-8'))['column']
-    placed_before = json.loads(settings_file.read_text(encoding='utf-8'))['zones']
+    zones_before = snapshot()
+    saved_before = saved_workspace(settings_file)
     click(window, region, 'CLOSE')
     yield 0.6
     devil_painter.unregister()
@@ -286,17 +307,17 @@ def journey():
     yield 0.5
     press(window, 'P', *middle, ctrl=True, alt=True)
     yield 1.0
-    layout_after = {key: (round(card.x, 2), round(card.y, 2), round(card.w, 2), round(card.h, 2)) for key, card in workspace().panels.items()}
-    check(layout_after == layout_before and list(layout_after) == list(layout_before),
-          f'after a restart the column comes back exactly as the user left it {layout_before} {layout_after}')
-    check(json.loads(settings_file.read_text(encoding='utf-8'))['column'] == saved_before and 'SETS' in editor._active.state.collapsed,
-          'order, sizes, width, and collapsed sections persist in the library settings')
-    check(zone_layout() == zones_before and json.loads(settings_file.read_text(encoding='utf-8'))['zones'] == placed_before,
-          f'after a restart every workspace section is back exactly where and how big the user left it {zones_before} {zone_layout()}')
+    check(snapshot() == zones_before and saved_workspace(settings_file) == saved_before,
+          f'after a restart every section is back exactly where and how big the user left it {zones_before} {snapshot()}')
     check(not escaped(), f'the restored arrangement has no overflow {escaped()}')
 
-    resize_zone(window, region, 'COLUMN', -3000)
-    yield 0.4
+    x, y = grab_point(region, 'BAR')
+    press(window, 'RIGHTMOUSE', x, y)
+    yield 0.3
+    click(window, region, 'RESET_LAYOUT')
+    yield 0.5
+    check(editor._active.state.strips['RIGHT'][0]['items'] == list(PANELS) and workspace().zones.places['SHELF'][0] == 'BOTTOM'
+          and workspace().zones.places['DOCK'][0] == 'LEFT' and not escaped(), 'Reset layout from the right-click menu brings back the default arrangement')
     texture_dir = scratch / 'Private Textures'
     texture_dir.mkdir(exist_ok=True)
     library.set_texture_folder(str(texture_dir))

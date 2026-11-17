@@ -79,6 +79,10 @@ def drag(window, region, key, dx, dy):
     window.event_simulate(type='LEFTMOUSE', value='RELEASE', x=int(x + dx), y=int(y + dy))
 
 
+def right_column(zones):
+    return next(rect for side, index, rect in zones.strips if side == 'RIGHT' and index == 0)
+
+
 def overlaps(a, b):
     return a.x < b.x + b.w and b.x < a.x + a.w and a.y < b.top and b.y < a.top
 
@@ -207,11 +211,11 @@ def journey():
     check(has('PANEL_LAYERS') and has('PANEL_PROPERTIES'), 'the right column shows the layers and properties panels')
     check(control('SET_NAME').label.startswith('Cube'), 'the workspace bar names the texture set')
     zones = editor._active.workspace.zones
-    check(not any(overlaps(a, b) for a, b in ((zones.bar, zones.strip), (zones.bar, zones.column), (zones.strip, zones.column),
-                                               (zones.dock, zones.column), (zones.dock, zones.stage), (zones.stage, zones.column))),
+    bar, strip, dock, column = zones.rects['BAR'], zones.rects['STRIP'], zones.rects['DOCK'], right_column(zones)
+    check(not any(overlaps(a, b) for a, b in ((bar, strip), (bar, column), (strip, column), (dock, column), (dock, zones.stage), (zones.stage, column))),
           'the workspace bar, tool strip, dock, stage and column never overlap')
     size_rect = control('BRUSH_SIZE').rect
-    check(zones.strip.contains(size_rect.x + 1, size_rect.y + 1) and zones.strip.y < zones.bar.y, 'brush settings sit in the tool strip under the workspace bar')
+    check(strip.contains(size_rect.x + 1, size_rect.y + 1) and strip.y < bar.y, 'brush settings sit in the tool strip under the workspace bar')
     check(not space.show_region_tool_header, 'the tool header stays hidden after a brush is activated')
 
     stroke(window, region)
@@ -503,8 +507,8 @@ def journey():
     check(all(layer.image is None or layer.image.packed_file is not None for layer in data.layers), 'saving packs the painted layers into the .blend')
 
     check(has('SHELF_TAB.MATERIALS') and control('SHELF_TAB.MATERIALS').active and has('ITEM.0'), 'the material shelf shows material tiles')
-    check(not any(overlaps(editor._active.workspace.zones.shelf, zone) for zone in (zones.dock, zones.column, editor._active.workspace.zones.stage)),
-          'the shelf sits in its own zone under the stage')
+    shelf_zone = editor._active.workspace.zones.rects['SHELF']
+    check(not any(overlaps(shelf_zone, zone) for zone in (dock, column, editor._active.workspace.zones.stage)), 'the shelf sits in its own zone under the stage')
     first = library.BUILTIN_MATERIALS[0]
     for _ in range(60):
         if thumbnails.cache_path(first).is_file() and control('ITEM.0').preview is not None:
@@ -931,14 +935,14 @@ def journey():
         yield 0.2
     check('LAYERS' in editor._active.workspace.scroll_areas, 'a long layer stack becomes scrollable')
     width = control('PANEL_LAYERS').rect.w
-    drag(window, region, 'ZONE_EDGE.COLUMN', -80, 0)
+    drag(window, region, 'STRIP.RIGHT.0', -80, 0)
     yield 0.4
     check(control('PANEL_LAYERS').rect.w > width + 40, 'dragging the column edge widens the right column')
-    check(has('PANEL_EDGE.LAYERS'), 'the layers panel has a border to resize it')
-    layers_height = editor._active.workspace.panels['LAYERS'].h
-    drag(window, region, 'PANEL_EDGE.LAYERS', 0, -60)
+    check(has('SIZE.LAYERS'), 'the layers panel has a border to resize it')
+    layers_height = editor._active.workspace.zones.rects['LAYERS'].h
+    drag(window, region, 'SIZE.LAYERS', 0, -60)
     yield 0.4
-    check(editor._active.workspace.panels['LAYERS'].h > layers_height + 30, 'dragging the layers border gives the layers more room')
+    check(editor._active.workspace.zones.rects['LAYERS'].h > layers_height + 30, 'dragging the layers border gives the layers more room')
     for _ in range(4):
         click(window, region, 'ADD_PAINT')
         yield 0.2
@@ -951,11 +955,14 @@ def journey():
 
     rows = sum(item.key.startswith('ROW_') for item in editor._active.workspace.controls)
     check(rows < len(data.layers), 'layer rows scrolled out of view are not built or drawn')
-    layers_card = editor._active.workspace.panels['LAYERS']
+    layers_card = editor._active.workspace.zones.rects['LAYERS']
+    layers_size = editor._active.state.section_heights['LAYERS']
     click(window, region, 'PANEL_PROPERTIES')
     yield 0.3
     check('PROPERTIES' in editor._active.state.collapsed and not has('OPACITY'), 'clicking a panel header collapses it')
-    check(editor._active.workspace.panels['LAYERS'] == layers_card, 'collapsing properties leaves the layers panel at the size the user set')
+    layers_now = editor._active.workspace.zones.rects['LAYERS']
+    check(editor._active.state.section_heights['LAYERS'] == layers_size and layers_card.h - .5 <= layers_now.h <= (layers_size + 30) * editor._active.workspace.scale + .5,
+          'collapsing properties keeps the layers panel at the size the user set, never growing past it')
     click(window, region, 'PANEL_PROPERTIES')
     yield 0.3
     check(has('OPACITY'), 'clicking it again expands it')
@@ -982,7 +989,8 @@ def journey():
     check(flat.spaces.active.image == (current.image if current.kind == 'PAINT' else current.mask) and not flat.spaces.active.show_region_header,
           'the 2D view shows the selected canvas without Blender headers')
     zones = editor._active.workspace.zones
-    check(not any(overlaps(a, b) for a, b in ((zones.bar, zones.column), (zones.strip, zones.column), (zones.stage, zones.column), (zones.shelf, zones.column))),
+    column = right_column(zones)
+    check(not any(overlaps(zones.rects[key], column) for key in ('BAR', 'STRIP', 'SHELF')) and not overlaps(zones.stage, column),
           'the workspace still fits beside the 2D view')
     click(window, region, 'ADD_PAINT')
     yield 0.6
@@ -1061,6 +1069,10 @@ def journey():
     click(window, region, 'SHELF_TAB.MATERIALS')
     yield 0.3
     wood = f'ITEM.{shelf_index("Wood")}'
+    shelf_height = editor._active.workspace.zones.rects['SHELF'].h
+    drag(window, region, 'STRIP.BOTTOM.0', 0, 200)
+    yield 0.4
+    check(editor._active.workspace.zones.rects['SHELF'].h > shelf_height, 'dragging the shelf border makes the narrow shelf taller')
     yield from reveal(window, region, wood, 'SHELF')
     click(window, region, wood)
     yield 0.8
