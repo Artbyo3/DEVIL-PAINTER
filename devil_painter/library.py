@@ -247,7 +247,8 @@ def installed_packs():
 
 
 def pack_texture_roots():
-    return [folder / 'Textures' if (folder / 'Textures').is_dir() else folder for folder in installed_packs()]
+    return [folder / 'Textures' if (folder / 'Textures').is_dir() else folder for folder in installed_packs()
+            if (folder / 'Textures').is_dir() or not (folder / 'Alphas').is_dir()]
 
 
 def pack_alphas():

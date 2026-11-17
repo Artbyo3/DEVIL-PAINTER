@@ -252,6 +252,8 @@ def journey():
     yield 0.4
     check(data.brush_alpha is not None and brush.mask_texture is not None and brush.mask_texture.image == data.brush_alpha,
           'clicking an alpha stamps the brush with it')
+    move(window, region.x + 4, region.y + 4)
+    yield 0.3
     check(control('BRUSH_ALPHA').preview == data.brush_alpha, 'the tool strip shows the brush alpha')
     click(window, region, f'ITEM.{shelf_index("No alpha")}')
     yield 0.4

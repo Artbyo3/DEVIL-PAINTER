@@ -95,8 +95,16 @@ def labels():
     return {control(key).label: key for key in keys('ITEM.')}
 
 
-def pack_tile():
-    return next((key for key in keys('ITEM.') if control(key).label.startswith('Cloth & Apparel Vol. 1')), None)
+TEXTURE_PACK = 'Cloth Textures Vol. 1'
+ALPHA_PACK = 'Alphas Vol. 1'
+
+
+def pack_tile(name=TEXTURE_PACK):
+    return next((key for key in keys('ITEM.') if control(key).label.startswith(name + ' ')), None)
+
+
+def entry_named(name):
+    return next(item for item in packs.catalog() if item['name'] == name)
 
 
 def set_online(enabled):
@@ -166,9 +174,11 @@ def journey():
     yield 0.4
     click(window, region, 'PACKS_REFRESH')
     yield 0.5
-    shown = yield from wait_for(lambda: pack_tile() is not None, 20)
-    check(shown and packs.requests() == 1, 'Check for packs reads the real catalog and lists Cloth & Apparel Vol. 1')
-    entry = packs.catalog()[0]
+    shown = yield from wait_for(lambda: pack_tile() is not None and pack_tile(ALPHA_PACK) is not None, 20)
+    check(shown and packs.requests() == 1, f'Check for packs reads the real catalog and lists the packs ({editor._active.message} | requests {packs.requests()} | catalog {len(packs.catalog())} | tab {editor._active.state.shelf_tab} | items {[control(key).label for key in keys("ITEM.")][:3]} | scope {editor._active.state.shelf_scope} | query {editor._active.state.shelf_query!r})')
+    entry = entry_named(TEXTURE_PACK)
+    check(all(packs.allowed(item) for item in packs.catalog()) and any('thumbs' in item or 'fileTags' in item for item in packs.catalog()),
+          'every catalog entry is allowed and extra catalog fields are tolerated')
     check(entry['downloadUrl'].startswith(packs.RELEASE_PREFIX) and len(entry['sha256']) == 64, 'the catalog entry points at the asset library releases with a SHA-256')
     check(not packs.allowed(dict(entry, downloadUrl='https://example.com/pack.zip')) and not packs.allowed(dict(entry, sha256='')),
           'entries from another host or without a checksum are not allowed')
@@ -190,8 +200,7 @@ def journey():
     yield 0.5
     installed = yield from wait_for(lambda: packs.installed(entry), 240)
     check(installed and 'Installed' in editor._active.message, 'the real pack downloads, passes its checksum, and installs')
-    check(len(list((folder / 'Textures').glob('*.png'))) == 164 and len(list((folder / 'Alphas').glob('*.png'))) == 16 and not any(staging.glob('*.zip')),
-          'the pack unpacks its 164 textures and 16 alphas into the library')
+    check(len(list((folder / 'Textures').glob('*.png'))) == 164 and not any(staging.glob('*.zip')), 'the pack unpacks its 164 textures into the library')
     move(window, *middle)
     yield 0.3
     check(control(pack_tile()).label.endswith('Installed'), 'the shelf marks the pack as installed')
@@ -206,13 +215,24 @@ def journey():
     check(fabric.slots['base_color'].source == 'IMAGE' and fabric.slots['base_color'].image.name.startswith('boucle-tweed-01')
           and any(node.type == 'TEX_IMAGE' and node.image == fabric.slots['base_color'].image for node in data.material.node_tree.nodes),
           'a pack texture becomes a fill layer on the model')
+    click(window, region, 'SHELF_TAB.PACKS')
+    yield 0.4
+    alphas_entry = entry_named(ALPHA_PACK)
+    click(window, region, pack_tile(ALPHA_PACK))
+    yield 0.5
+    done = yield from wait_for(lambda: packs.installed(alphas_entry), 120)
+    alpha_folder = packs.folder_of(alphas_entry)
+    check(done and len(list((alpha_folder / 'Alphas').glob('*.png'))) == 115, 'the alphas pack downloads, passes its checksum, and installs 115 alphas')
+    click(window, region, 'SHELF_TAB.TEXTURES')
+    yield 0.6
+    check('belt-buckle-01' not in labels(), 'alphas from a pack do not show up as textures')
     click(window, region, 'SHELF_TAB.ALPHAS')
     yield 0.6
     names = labels()
-    check('blanket-stitch-seam' in names, 'the pack alphas appear in the alphas shelf')
-    click(window, region, names['blanket-stitch-seam'])
+    check('belt-buckle-01' in names, 'the pack alphas appear in the alphas shelf')
+    click(window, region, names['belt-buckle-01'])
     yield 0.4
-    check(data.brush_alpha is not None and data.brush_alpha.name.startswith('blanket-stitch-seam'), 'a pack alpha becomes the brush alpha')
+    check(data.brush_alpha is not None and data.brush_alpha.name.startswith('belt-buckle-01'), 'a pack alpha becomes the brush alpha')
     click(window, region, 'ADD_PAINT')
     yield 0.8
     stitched_uid = active_layer(data).uid
