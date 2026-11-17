@@ -1,5 +1,6 @@
 import bpy
-from .blending import BLEND_MODES, CHANNEL, CHANNELS
+from .blending import BLEND_MODES, CHANNEL, CHANNELS, FOLDER_BLENDS
+from .effects import EFFECT_KINDS, FILTERS, MASK_BLENDS
 from .masks import GENERATORS
 from .procedural import PATTERNS
 
@@ -7,7 +8,7 @@ RESOLUTIONS = (1024, 2048, 4096)
 SOURCES = (('VALUE', 'Value', ''), ('IMAGE', 'Texture', ''), ('PATTERN', 'Pattern', ''))
 PROJECTIONS = (('UV', 'UV', ''), ('TRIPLANAR', 'Tri-planar', ''))
 SLOT_FIELDS = ('enabled', 'source', 'color', 'value', 'color_b', 'value_b', 'blend', 'opacity', 'pattern', 'scale', 'detail', 'contrast')
-LAYER_KINDS = (('PAINT', 'Paint', ''), ('FILL', 'Fill', ''), ('FOLDER', 'Folder', ''))
+LAYER_KINDS = (('PAINT', 'Paint', ''), ('FILL', 'Fill', ''), ('FOLDER', 'Folder', ''), ('INSTANCE', 'Instance', ''))
 NORMAL_FORMATS = (('OPENGL', 'OpenGL', ''), ('DIRECTX', 'DirectX', ''))
 NORMAL_SPACES = (('TANGENT', 'Tangent', ''), ('OBJECT', 'Object', ''))
 SHADERS = (('PRINCIPLED', 'Principled PBR', ''), ('UNLIT', 'Unlit', ''))
@@ -51,6 +52,39 @@ def is_mesh(self, obj):
     return obj.type == 'MESH'
 
 
+class DEVIL_PAINTER_PG_effect(bpy.types.PropertyGroup):
+    uid: bpy.props.StringProperty()
+    kind: bpy.props.EnumProperty(items=[(key, label, '') for key, label, _ in EFFECT_KINDS])
+    target: bpy.props.EnumProperty(items=(('MASK', 'Mask', ''), ('CONTENT', 'Content', '')))
+    enabled: bpy.props.BoolProperty(default=True)
+    blend: bpy.props.EnumProperty(items=[(key, label, '') for key, label in MASK_BLENDS])
+    opacity: bpy.props.FloatProperty(default=1.0, min=0.0, max=1.0)
+    image: bpy.props.PointerProperty(type=bpy.types.Image)
+    source: bpy.props.EnumProperty(items=SOURCES)
+    value: bpy.props.FloatProperty(default=1.0, min=0.0, max=1.0)
+    pattern: bpy.props.EnumProperty(items=[(pattern.key, pattern.label, '') for pattern in PATTERNS])
+    scale: bpy.props.FloatProperty(default=8.0, min=0.1, max=1024.0)
+    detail: bpy.props.FloatProperty(default=0.5, min=0.0, max=1.0)
+    contrast: bpy.props.FloatProperty(default=0.3, min=0.0, max=0.98)
+    texture: bpy.props.PointerProperty(type=bpy.types.Image)
+    in_low: bpy.props.FloatProperty(default=0.0, min=0.0, max=1.0)
+    in_high: bpy.props.FloatProperty(default=1.0, min=0.0, max=1.0)
+    gamma: bpy.props.FloatProperty(default=1.0, min=0.1, max=10.0)
+    out_low: bpy.props.FloatProperty(default=0.0, min=0.0, max=1.0)
+    out_high: bpy.props.FloatProperty(default=1.0, min=0.0, max=1.0)
+    filter: bpy.props.EnumProperty(items=[(item.key, item.label, '') for item in FILTERS])
+    amount: bpy.props.FloatProperty(default=0.5, min=0.0, max=1.0)
+    radius: bpy.props.FloatProperty(default=4.0, min=0.0, max=64.0)
+    angle: bpy.props.FloatProperty(default=0.0, min=0.0, max=360.0)
+    hue: bpy.props.FloatProperty(default=0.5, min=0.0, max=1.0)
+    saturation: bpy.props.FloatProperty(default=1.0, min=0.0, max=2.0)
+    brightness: bpy.props.FloatProperty(default=1.0, min=0.0, max=2.0)
+    color: bpy.props.FloatVectorProperty(size=3, default=(1.0, 1.0, 1.0), min=0.0, max=1.0)
+    color_b: bpy.props.FloatVectorProperty(size=3, default=(0.0, 0.0, 0.0), min=0.0, max=1.0)
+    other: bpy.props.StringProperty()
+    channel: bpy.props.StringProperty(default='ALL')
+
+
 class DEVIL_PAINTER_PG_layer(bpy.types.PropertyGroup):
     uid: bpy.props.StringProperty()
     kind: bpy.props.EnumProperty(items=LAYER_KINDS)
@@ -69,6 +103,11 @@ class DEVIL_PAINTER_PG_layer(bpy.types.PropertyGroup):
     slots: bpy.props.CollectionProperty(type=DEVIL_PAINTER_PG_slot)
     image: bpy.props.PointerProperty(type=bpy.types.Image)
     mask: bpy.props.PointerProperty(type=bpy.types.Image)
+    effects: bpy.props.CollectionProperty(type=DEVIL_PAINTER_PG_effect)
+    folder_blend: bpy.props.EnumProperty(items=[(key, label, '') for key, label in FOLDER_BLENDS])
+    geo_mask: bpy.props.BoolProperty(default=False)
+    link_set: bpy.props.StringProperty()
+    link_uid: bpy.props.StringProperty()
 
 
 class DEVIL_PAINTER_PG_texture_set(bpy.types.PropertyGroup):
@@ -85,7 +124,8 @@ class DEVIL_PAINTER_PG_texture_set(bpy.types.PropertyGroup):
     channels: bpy.props.CollectionProperty(type=DEVIL_PAINTER_PG_channel)
     layers: bpy.props.CollectionProperty(type=DEVIL_PAINTER_PG_layer)
     active_uid: bpy.props.StringProperty()
-    target: bpy.props.EnumProperty(items=(('CONTENT', 'Content', ''), ('MASK', 'Mask', '')))
+    target: bpy.props.EnumProperty(items=(('CONTENT', 'Content', ''), ('MASK', 'Mask', ''), ('EFFECT', 'Effect', '')))
+    active_effect: bpy.props.StringProperty()
     solo: bpy.props.StringProperty()
     material: bpy.props.PointerProperty(type=bpy.types.Material)
     serial: bpy.props.IntProperty(default=0)
@@ -130,7 +170,7 @@ class DEVIL_PAINTER_PG_project(bpy.types.PropertyGroup):
 
 
 CLASSES = (DEVIL_PAINTER_PG_slot, DEVIL_PAINTER_PG_channel, DEVIL_PAINTER_PG_map, DEVIL_PAINTER_PG_tile, DEVIL_PAINTER_PG_tile_image,
-           DEVIL_PAINTER_PG_layer, DEVIL_PAINTER_PG_texture_set, DEVIL_PAINTER_PG_project)
+           DEVIL_PAINTER_PG_effect, DEVIL_PAINTER_PG_layer, DEVIL_PAINTER_PG_texture_set, DEVIL_PAINTER_PG_project)
 
 
 def project_of(obj):
@@ -239,13 +279,35 @@ def editing_mask(data):
     return layer is not None and data.target == 'MASK' and layer.mask is not None
 
 
+def active_effect(data):
+    layer = active_layer(data)
+    if layer is None or data.target != 'EFFECT':
+        return None
+    return next((effect for effect in layer.effects if effect.uid == data.active_effect), None)
+
+
 def paint_target(data):
     layer = active_layer(data)
-    if layer is None:
+    if layer is None or layer.kind == 'INSTANCE':
         return None
+    effect = active_effect(data)
+    if effect is not None:
+        return effect.image if effect.kind == 'PAINT' else None
     if editing_mask(data) or layer.kind != 'PAINT':
         return layer.mask
     return layer.image
+
+
+def geometry_attribute(data, layer):
+    return f'dp_geo_{data.slot}_{layer.uid}'
+
+
+def linked_layer(layer):
+    project = layer.id_data.devil_painter
+    source = next((item for item in project.sets if item.name == layer.link_set), None)
+    if source is None:
+        return None
+    return next((item for item in source.layers if item.uid == layer.link_uid and item.kind not in {'FOLDER', 'INSTANCE'}), None)
 
 
 def register():

@@ -59,6 +59,24 @@ def mask_faces(obj, project):
     mesh.update()
 
 
+def island_of(mesh, face):
+    starts = numpy.empty(len(mesh.polygons), dtype=numpy.int32)
+    totals = numpy.empty(len(mesh.polygons), dtype=numpy.int32)
+    mesh.polygons.foreach_get('loop_start', starts)
+    mesh.polygons.foreach_get('loop_total', totals)
+    corners = numpy.empty(len(mesh.loops), dtype=numpy.int32)
+    mesh.loops.foreach_get('vertex_index', corners)
+    owners = numpy.repeat(numpy.arange(len(mesh.polygons)), totals)
+    reached = {face}
+    frontier = {face}
+    while frontier:
+        vertices = numpy.unique(numpy.concatenate([corners[starts[item]:starts[item] + totals[item]] for item in frontier]))
+        touching = set(numpy.unique(owners[numpy.isin(corners, vertices)]).tolist())
+        frontier = touching - reached
+        reached |= frontier
+    return sorted(reached)
+
+
 def face_under(region, view, obj, coord):
     origin = view3d_utils.region_2d_to_origin_3d(region, view, coord)
     direction = view3d_utils.region_2d_to_vector_3d(region, view, coord)

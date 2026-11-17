@@ -41,4 +41,8 @@ class WorkspaceState:
     recent_colors: list = field(default_factory=list)
     picking: str = ''
     binding: str = ''
+    multi: set = field(default_factory=set)
+    clipboard: tuple = ()
+    drop: tuple = ()
+    geo_pick: str = ''
     bake_keys: set = field(default_factory=lambda: {'ao', 'curvature', 'thickness', 'position', 'world_normal', 'id'})

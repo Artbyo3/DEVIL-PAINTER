@@ -52,6 +52,7 @@ def owned_keys(data):
     keys = [item.image for item in data.maps if item.image is not None]
     for layer in data.layers:
         keys += [image for image in (layer.image, layer.mask) if image is not None]
+        keys += [effect.image for effect in layer.effects if effect.kind == 'PAINT' and effect.image is not None]
         if layer.kind == 'PAINT':
             keys += [slot.image for slot in layer.slots if slot.source == 'IMAGE' and slot.image is not None]
     return keys

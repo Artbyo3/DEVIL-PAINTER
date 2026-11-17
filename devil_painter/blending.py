@@ -1,7 +1,13 @@
 from dataclasses import dataclass
 import numpy
 
-BLEND_MODES = (('MIX', 'Normal'), ('MULTIPLY', 'Multiply'), ('SCREEN', 'Screen'), ('OVERLAY', 'Overlay'), ('ADD', 'Add'))
+BLEND_MODES = (('MIX', 'Normal'), ('DARKEN', 'Darken'), ('MULTIPLY', 'Multiply'), ('BURN', 'Color burn'), ('LIGHTEN', 'Lighten'),
+               ('SCREEN', 'Screen'), ('DODGE', 'Color dodge'), ('ADD', 'Linear dodge (Add)'), ('OVERLAY', 'Overlay'), ('SOFT_LIGHT', 'Soft light'),
+               ('LINEAR_LIGHT', 'Linear light'), ('DIFFERENCE', 'Difference'), ('EXCLUSION', 'Exclusion'), ('SUBTRACT', 'Subtract'),
+               ('DIVIDE', 'Divide'), ('HUE', 'Hue'), ('SATURATION', 'Saturation'), ('COLOR', 'Color'), ('VALUE', 'Value'),
+               ('NORMAL_DETAIL', 'Normal map detail'))
+NORMAL_DETAIL = 'NORMAL_DETAIL'
+FOLDER_BLENDS = (('PASSTHROUGH', 'Passthrough'),) + tuple(item for item in BLEND_MODES if item[0] != NORMAL_DETAIL)
 
 
 @dataclass(frozen=True)

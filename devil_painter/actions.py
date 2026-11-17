@@ -1,14 +1,19 @@
 import json
+from pathlib import Path
 import bpy
-from . import brushes, compositing, exporting, library, meshmaps, painting, projects, sets, smart, strokes, tiles
+import numpy
+from . import baking, brushes, compositing, exporting, library, meshmaps, painting, projects, sets, smart, strokes, tiles
+from .blending import linear_to_srgb
+from .effects import EFFECT_LABEL, copy_effect, find_effect, mask_effects
 from .masks import GENERATOR, GENERATOR_FIELDS
 from .meshmaps import MESH_MAP
 from .blending import BLEND_MODES, CHANNEL
 from .procedural import PATTERN
-from .document import SLOT_FIELDS, active_layer, add_set_channels, add_slots, children, descendants, fill_slots, find_layer, layer_index, set_slot_value
+from .document import SLOT_FIELDS, geometry_attribute, active_layer, add_set_channels, add_slots, children, descendants, fill_slots, find_layer, layer_index, set_slot_value
 
 KIND_NAMES = {'PAINT': 'Paint', 'FILL': 'Fill', 'FOLDER': 'Folder'}
-LAYER_FIELDS = ('kind', 'visible', 'opacity', 'projection', 'tiling', 'material') + GENERATOR_FIELDS
+LAYER_FIELDS = ('kind', 'visible', 'opacity', 'projection', 'tiling', 'material', 'folder_blend', 'geo_mask', 'link_set', 'link_uid') + GENERATOR_FIELDS
+EFFECT_BLENDS = {'PAINT': 'MIX', 'FILL': 'MULTIPLY', 'COMPARE': 'MULTIPLY', 'ANCHOR': 'MULTIPLY', 'LEVELS': 'MIX', 'FILTER': 'MIX'}
 
 
 def image_for(obj, data, label, opaque):
@@ -21,7 +26,8 @@ def has_uvs(obj):
 
 def refresh(context, obj, data, message):
     strokes.ensure_canvases(obj, data)
-    compositing.sync(data)
+    for item in obj.devil_painter.sets:
+        compositing.sync(item)
     painting.update_canvas(context, data)
     bpy.ops.ed.undo_push(message='Devil Painter: ' + message)
     strokes.record(None)
@@ -32,7 +38,7 @@ def prepare(obj, data):
     fill_slots(data.brush_slots)
     add_set_channels(data)
     for layer in data.layers:
-        if layer.kind != 'FOLDER':
+        if layer.kind in {'PAINT', 'FILL'}:
             fill_slots(layer.slots)
     strokes.ensure_buffer(obj, data)
 
@@ -135,8 +141,8 @@ def carry(obj, source, target, key, name):
     created = None
     for number in tiles.numbers(target):
         origin = tiles.variant(source, key, number) if number in tiles.numbers(source) else None
-        image = origin.copy() if origin is not None else tiles.blank(name, target.resolution, (0.0, 0.0, 0.0, 0.0), key.colorspace_settings.is_data)
-        image.name = name if created is None else f'{name} {number}'
+        label = name if created is None else f'{name} {number}'
+        image = tiles.duplicate(origin, label) if origin is not None else tiles.blank(label, target.resolution, (0.0, 0.0, 0.0, 0.0), key.colorspace_settings.is_data)
         if tuple(image.size) != (target.resolution, target.resolution):
             image.scale(target.resolution, target.resolution)
         image.pack()
@@ -167,9 +173,20 @@ def transfer(obj, source, target, layer, parent):
         copy.image = carry(obj, source, target, layer.image, base)
     if layer.mask is not None:
         copy.mask = carry(obj, source, target, layer.mask, base + ' mask')
+    copy_effects(obj, source, target, layer.effects, copy)
     for child in children(source.layers, layer.uid):
         transfer(obj, source, target, child, uid)
     return uid
+
+
+def copy_effects(obj, source, target, effects, copy):
+    for effect in effects:
+        target.serial += 1
+        item = copy.effects.add()
+        copy_effect(effect, item)
+        item.uid = f'E{target.serial}'
+        if effect.kind == 'PAINT' and effect.image is not None:
+            item.image = carry(obj, source, target, effect.image, f'DP {obj.name} {target.name} {copy.uid} {item.uid}')
 
 
 def move_to_set(context, obj, project, index):
@@ -204,6 +221,291 @@ def reimport_mesh(context, obj, project, mesh):
     painting.enter_paint_mode(context, obj)
     sets.mask_faces(obj, project)
     return refresh(context, obj, project.sets[project.active_set], f'Reimported the mesh. {kept} texture sets kept their layers.')
+
+
+def add_effect(context, obj, data, kind, target):
+    layer = active_layer(data)
+    data.serial += 1
+    effect = layer.effects.add()
+    effect.uid, effect.kind, effect.target = f'E{data.serial}', kind, target
+    effect.blend = EFFECT_BLENDS[kind]
+    if kind == 'PAINT':
+        effect.image = tiles.create(data, f'DP {obj.name} {data.name} {layer.uid} {effect.uid}', (0.0, 0.0, 0.0, 0.0))
+    if kind == 'FILL':
+        effect.source = 'PATTERN'
+    if kind == 'FILTER' and target == 'CONTENT':
+        effect.filter = 'HSV'
+    if kind == 'ANCHOR':
+        effect.channel = 'base_color'
+    data.target, data.active_effect = 'EFFECT', effect.uid
+    return refresh(context, obj, data, f'{EFFECT_LABEL[kind]} effect added to the {target.lower()} of {layer.name}.')
+
+
+def select_effect(context, obj, data, uid, effect_uid):
+    data.active_uid, data.target, data.active_effect = uid, 'EFFECT', effect_uid
+    painting.update_canvas(context, data)
+    return 'Effect selected.'
+
+
+def edit_effect(context, obj, data, field, value, commit):
+    layer = active_layer(data)
+    setattr(find_effect(layer, data.active_effect), field, value)
+    if commit:
+        return refresh(context, obj, data, f'{layer.name} effect updated.')
+    compositing.sync(data)
+    return ''
+
+
+def toggle_effect(context, obj, data, uid, effect_uid):
+    effect = find_effect(find_layer(data, uid), effect_uid)
+    effect.enabled = not effect.enabled
+    return refresh(context, obj, data, f'Effect {"enabled" if effect.enabled else "disabled"}.')
+
+
+def delete_effect(context, obj, data):
+    layer = active_layer(data)
+    index = next(position for position, effect in enumerate(layer.effects) if effect.uid == data.active_effect)
+    image = layer.effects[index].image
+    layer.effects.remove(index)
+    if image is not None and image.name.startswith('DP '):
+        tiles.remove(data, image)
+    data.target, data.active_effect = 'CONTENT', ''
+    return refresh(context, obj, data, 'Effect deleted.')
+
+
+def move_effect(context, obj, data, uid, effect_uid, index):
+    layer = find_layer(data, uid)
+    current = next(position for position, effect in enumerate(layer.effects) if effect.uid == effect_uid)
+    layer.effects.move(current, max(0, min(len(layer.effects) - 1, index)))
+    return refresh(context, obj, data, 'Effect reordered.')
+
+
+def drop_layer(context, obj, data, uid, target_uid, mode):
+    if uid == target_uid or target_uid in descendants(data.layers, uid):
+        return 'A layer cannot move into itself.'
+    layer, target = find_layer(data, uid), find_layer(data, target_uid)
+    name = layer.name
+    if mode == 'INTO':
+        if target.kind != 'FOLDER':
+            return 'Layers can only be dropped into folders.'
+        layer.parent = target.uid
+        return refresh(context, obj, data, f'Moved {name} into {target.name}.')
+    layer.parent = target.parent
+    source, destination = layer_index(data, uid), layer_index(data, target_uid)
+    if mode == 'ABOVE':
+        destination = destination + 1 if source > destination else destination
+    else:
+        destination = destination if source > destination else destination - 1
+    data.layers.move(source, max(0, destination))
+    return refresh(context, obj, data, f'Moved {name}.')
+
+
+def group_layers(context, obj, data, uids):
+    ordered = [layer for layer in data.layers if layer.uid in uids]
+    data.active_uid = ordered[-1].uid
+    folder = new_layer(data, 'FOLDER')
+    folder.name = f'Folder {sum(1 for item in data.layers if item.kind == "FOLDER")}'
+    folder.parent = ordered[-1].parent
+    folder_uid = folder.uid
+    nested = {child for uid in uids for child in descendants(data.layers, uid)}
+    for uid in uids:
+        if uid not in nested:
+            find_layer(data, uid).parent = folder_uid
+    data.active_uid = folder_uid
+    return refresh(context, obj, data, f'Grouped {len(uids)} layers into a folder.')
+
+
+def remove_layers(data, uids):
+    doomed = set(uids)
+    for uid in uids:
+        doomed |= set(descendants(data.layers, uid))
+    for position in range(len(data.layers) - 1, -1, -1):
+        if data.layers[position].uid in doomed:
+            remove_images(data, data.layers[position])
+            data.layers.remove(position)
+    data.active_uid = data.layers[-1].uid if data.layers else ''
+    data.target = 'CONTENT'
+
+
+def set_layers_visible(context, obj, data, uids, visible):
+    for uid in uids:
+        find_layer(data, uid).visible = visible
+    return refresh(context, obj, data, f'{len(uids)} layers {"shown" if visible else "hidden"}.')
+
+
+def delete_layers(context, obj, data, uids):
+    remove_layers(data, uids)
+    return refresh(context, obj, data, f'Deleted {len(uids)} layers.')
+
+
+def duplicate_layers(context, obj, data, uids):
+    for uid in [layer.uid for layer in data.layers if layer.uid in uids]:
+        source = find_layer(data, uid)
+        copy_layer(obj, data, source, source.parent, layer_index(data, uid) + 1)
+    return refresh(context, obj, data, f'Duplicated {len(uids)} layers.')
+
+
+def paste_layers(context, obj, project, source_index, uids):
+    source, target = project.sets[source_index], project.sets[project.active_set]
+    pasted = []
+    for uid in uids:
+        layer = find_layer(source, uid)
+        if layer is not None:
+            pasted.append(transfer(obj, source, target, layer, ''))
+    target.active_uid = pasted[-1] if pasted else target.active_uid
+    prepare(obj, target)
+    return refresh(context, obj, target, f'Pasted {len(pasted)} layers.')
+
+
+def paste_mask(context, obj, project, source_index, uid):
+    source, target = project.sets[source_index], project.sets[project.active_set]
+    origin, layer = find_layer(source, uid), active_layer(target)
+    if origin.mask is not None:
+        if layer.mask is not None:
+            tiles.remove(target, layer.mask)
+        layer.mask = carry(obj, source, target, origin.mask, f'DP {obj.name} {target.name} {layer.uid} mask')
+    for field in GENERATOR_FIELDS + ('geo_mask',):
+        setattr(layer, field, getattr(origin, field))
+    copy_effects(obj, source, target, mask_effects(origin), layer)
+    return refresh(context, obj, target, f'Pasted the mask of {origin.name} onto {layer.name}.')
+
+
+def paste_effects(context, obj, project, source_index, uid):
+    source, target = project.sets[source_index], project.sets[project.active_set]
+    origin, layer = find_layer(source, uid), active_layer(target)
+    copy_effects(obj, source, target, list(origin.effects), layer)
+    return refresh(context, obj, target, f'Pasted {len(origin.effects)} effects onto {layer.name}.')
+
+
+def instance_into(context, obj, project, index):
+    source = project.sets[project.active_set]
+    layer = active_layer(source)
+    target = project.sets[index]
+    target.serial += 1
+    link = target.layers.add()
+    link.uid, link.kind, link.name = f'L{target.serial}', 'INSTANCE', layer.name
+    link.link_set, link.link_uid = source.name, layer.uid
+    return refresh(context, obj, source, f'{layer.name} is now instanced in {target.name}.')
+
+
+def geometry_values(obj, data, layer):
+    mesh = obj.data
+    name = geometry_attribute(data, layer)
+    attribute = mesh.attributes.get(name) or mesh.attributes.new(name, 'FLOAT', 'FACE')
+    values = numpy.zeros(len(mesh.polygons), dtype=numpy.float32)
+    attribute.data.foreach_get('value', values)
+    return attribute, values
+
+
+def set_geometry(obj, data, layer, values):
+    attribute, _ = geometry_values(obj, data, layer)
+    attribute.data.foreach_set('value', values)
+    obj.data.update()
+
+
+def toggle_geometry_mask(context, obj, data):
+    layer = active_layer(data)
+    layer.geo_mask = not layer.geo_mask
+    if layer.geo_mask:
+        geometry_values(obj, data, layer)
+    return refresh(context, obj, data, f'Geometry mask {"on" if layer.geo_mask else "off"} for {layer.name}.')
+
+
+def pick_geometry(context, obj, data, face, island):
+    layer = active_layer(data)
+    _, values = geometry_values(obj, data, layer)
+    faces = sets.island_of(obj.data, face) if island else [face]
+    values[faces] = 0.0 if values[face] > .5 else 1.0
+    set_geometry(obj, data, layer, values)
+    bpy.ops.ed.undo_push(message='Devil Painter: geometry mask')
+    strokes.record(None)
+    return f'{int(values.sum())} faces in the geometry mask of {layer.name}.'
+
+
+def edit_geometry(context, obj, data, operation):
+    layer = active_layer(data)
+    _, values = geometry_values(obj, data, layer)
+    values = numpy.zeros_like(values) if operation == 'CLEAR' else 1.0 - values
+    set_geometry(obj, data, layer, values)
+    return refresh(context, obj, data, f'Geometry mask {"cleared" if operation == "CLEAR" else "inverted"}.')
+
+
+def set_layer_field(context, obj, data, field, value):
+    layer = active_layer(data)
+    setattr(layer, field, value)
+    return refresh(context, obj, data, f'{layer.name} updated.')
+
+
+def flatten_bake(context, obj, project, roots, keys, mask_uid=''):
+    data = project.sets[project.active_set]
+    results = {}
+    for key in keys:
+        def isolate(item, key=key):
+            compositing.isolated_tree(item, item.material.node_tree, roots, key, mask_uid)
+        for (index, number), pixels in baking.bake_pass(context, obj, project, [project.active_set], isolate).items():
+            results[(key, number)] = pixels
+    painting.enter_paint_mode(context, obj)
+    sets.mask_faces(obj, project)
+    return data, results
+
+
+def flatten_layers(context, obj, project, uids):
+    data = project.sets[project.active_set]
+    roots = [layer for layer in data.layers if layer.uid in uids]
+    channels = [channel.key for channel in compositing.set_channels(data)]
+    data, baked = flatten_bake(context, obj, project, roots, channels + ['ALPHA'])
+    root_uids, name, parent = [root.uid for root in roots], roots[-1].name, roots[-1].parent
+    data.active_uid = root_uids[-1]
+    layer = new_layer(data, 'PAINT')
+    layer.name = 'Flattened ' + name
+    layer.parent = parent
+    add_slots(layer)
+    for slot in layer.slots:
+        slot.enabled = slot.name in channels
+    layer.image = image_for(obj, data, layer.uid, False)
+    strokes.ensure_canvases(obj, data)
+    for number in tiles.numbers(data):
+        alpha = baked[('ALPHA', number)][..., 0]
+        color = numpy.ones(alpha.shape + (4,), dtype=numpy.float32)
+        color[..., :3] = linear_to_srgb(baked[('base_color', number)][..., :3]) if 'base_color' in channels else 0.0
+        color[..., 3] = numpy.clip(alpha, 0, 1)
+        strokes.write(tiles.variant(data, layer.image, number), color)
+        for slot in layer.slots:
+            if slot.name != 'base_color' and slot.enabled and slot.image is not None:
+                values = numpy.ones(alpha.shape + (4,), dtype=numpy.float32)
+                values[..., :3] = baked[(slot.name, number)][..., :3]
+                strokes.write(tiles.variant(data, slot.image, number), values)
+    flattened = layer.uid
+    remove_layers(data, root_uids)
+    data.active_uid = flattened
+    return refresh(context, obj, data, f'Flattened {len(root_uids)} layers into one paint layer.')
+
+
+def export_layer(context, obj, project, uids, directory, mask=False):
+    data = project.sets[project.active_set]
+    roots = [layer for layer in data.layers if layer.uid in uids]
+    channels = [channel for channel in compositing.set_channels(data)]
+    keys = ['MASK'] if mask else [channel.key for channel in channels] + ['ALPHA']
+    data, baked = flatten_bake(context, obj, project, roots, keys, roots[0].uid if mask else '')
+    folder = Path(directory)
+    written = []
+    stem = bpy.path.clean_name(roots[-1].name)
+    for number in tiles.numbers(data):
+        suffix = f'.{number}' if len(tiles.numbers(data)) > 1 else ''
+        if mask:
+            path = folder / f'{stem}_Mask{suffix}.png'
+            exporting.write(path, [numpy.clip(baked[('MASK', number)][..., 0], 0, 1)], 'PNG', '8', 0)
+            written.append(path)
+            continue
+        alpha = numpy.clip(baked[('ALPHA', number)][..., 0], 0, 1)
+        for channel in channels:
+            values = baked[(channel.key, number)][..., :channel.width]
+            values = linear_to_srgb(values) if channel.srgb else numpy.clip(values, 0, 1)
+            planes = [values[..., index] for index in range(channel.width)] + [alpha]
+            path = folder / f'{stem}_{channel.suffix}{suffix}.png'
+            exporting.write(path, planes if channel.width == 3 else [planes[0], planes[0], planes[0], alpha], 'PNG', '8', 0)
+            written.append(path)
+    return f'Exported {len(written)} files of {roots[-1].name} to {directory}.'
 
 
 def set_resolution(context, obj, data, size):
@@ -280,7 +582,8 @@ def reset_material(context, obj, data):
 
 def owned_images(layer):
     canvases = [slot.image for slot in layer.slots if slot.source == 'IMAGE'] if layer.kind == 'PAINT' else []
-    return [image for image in (layer.image, layer.mask, *canvases) if image is not None]
+    painted = [effect.image for effect in layer.effects if effect.kind == 'PAINT']
+    return [image for image in (layer.image, layer.mask, *canvases, *painted) if image is not None]
 
 
 def remove_images(data, layer):
@@ -389,6 +692,7 @@ def copy_layer(obj, data, source, parent, position):
     for key, image in images.items():
         if image is not None:
             setattr(layer, key, tiles.copy(data, image, f'DP {obj.name} {data.name} {layer.uid}' + (' mask' if key == 'mask' else '')))
+    copy_effects(obj, data, data, list(source.effects), layer)
     new_uid = layer.uid
     if position is not None:
         data.layers.move(len(data.layers) - 1, position)

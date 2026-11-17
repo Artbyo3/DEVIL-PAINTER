@@ -1,4 +1,7 @@
-from .document import active_tile, children, set_channels, shown_layers, slot_value, uses_coordinates
+import math
+from .blending import NORMAL_DETAIL
+from .document import active_tile, children, geometry_attribute, linked_layer, set_channels, shown_layers, slot_value, uses_coordinates
+from .effects import EFFECT_FIELDS, FILTER
 from .masks import generator_mask, write_generator
 from .procedural import contrast_range, pattern_node, set_pattern_values
 from .tiles import numbers, variant
@@ -7,6 +10,10 @@ SIGNATURE_KEY = 'devil_painter_signature'
 BUMP_DISTANCE = .05
 DISPLAY_GAMMA = 2.2
 TRIPLANAR_BLEND = .2
+BLUR_TAPS = 8
+WARP_REACH = .1
+POSTERIZE_STEPS = 14
+LIGHT_SLOPE = 1.0
 SHADER_INPUTS = {'base_color': 'Base Color', 'roughness': 'Roughness', 'metallic': 'Metallic', 'emission': 'Emission Color',
                  'opacity': 'Alpha'}
 
@@ -82,7 +89,7 @@ class Sampler:
             return node.outputs['Color'], node.outputs['Alpha']
         color = alpha = None
         for index, (number, tile) in enumerate(tiles):
-            node = self.texture(tile, None, (location[0], location[1] - 120 * index))
+            node = self.texture(tile, vector, (location[0], location[1] - 120 * index))
             if color is None:
                 color, alpha = node.outputs['Color'], node.outputs['Alpha']
                 continue
@@ -101,11 +108,57 @@ class Sampler:
 
 
 class Build:
-    def __init__(self, nodes, links, sampler, stroke=None, maps=None, live=False, size=1.0, active=1001, shading=None):
+    def __init__(self, nodes, links, sampler, stroke=None, maps=None, live=False, size=1.0, active=1001, shading=None, data=None, resolution=1024):
         self.nodes, self.links, self.sampler, self.stroke = nodes, links, sampler, stroke
         self.maps, self.live, self.size, self.active = maps or {}, live, size, active
         self.shading = shading or dict(shader='PRINCIPLED', normal_format='OPENGL', normal_space='TANGENT')
         self.shaded = None
+        self.data, self.resolution = data, resolution
+        self.masks, self.anchors, self.layer_map = {}, {}, {}
+
+
+class Instance:
+    def __init__(self, link, source):
+        self.link, self.source = link, source
+
+    def __getattr__(self, name):
+        return getattr(self.source, name)
+
+    @property
+    def uid(self):
+        return self.link.uid
+
+    @property
+    def parent(self):
+        return self.link.parent
+
+    @property
+    def visible(self):
+        return self.link.visible
+
+    @property
+    def opacity(self):
+        return self.link.opacity
+
+    @property
+    def name(self):
+        return self.link.name
+
+    @property
+    def geo_mask(self):
+        return False
+
+
+def resolved(layers):
+    result = []
+    for layer in layers:
+        if layer.kind != 'INSTANCE':
+            result.append(layer)
+            continue
+        source = linked_layer(layer)
+        if source is not None:
+            result.append(Instance(layer, source))
+    return result
 
 
 def slot_signature(slot):
@@ -117,12 +170,21 @@ def slot_signature(slot):
     return slot.name + slot.blend + source
 
 
+def effect_signature(effect):
+    values = '/'.join(str(getattr(effect, field)) if field not in {'texture'} else (effect.texture.name if effect.texture else '') for field in EFFECT_FIELDS)
+    return f'{effect.uid}={values}={effect.image.name if effect.image else ""}'
+
+
+def layer_signature(layer):
+    return ':'.join((layer.uid, layer.kind, layer.parent, layer.projection, layer.generator, layer.folder_blend, str(layer.geo_mask),
+                     layer.image.name if layer.image else '', layer.mask.name if layer.mask else '',
+                     *(slot_signature(slot) for slot in layer.slots if slot.enabled), *(effect_signature(effect) for effect in layer.effects)))
+
+
 def signature(data):
     channels = ','.join(channel.key for channel in set_channels(data))
     maps = ','.join(item.name for item in data.maps if item.image is not None)
-    layers = '|'.join(':'.join((layer.uid, layer.kind, layer.parent, layer.projection, layer.generator, layer.image.name if layer.image else '',
-                                layer.mask.name if layer.mask else '', *(slot_signature(slot) for slot in layer.slots if slot.enabled)))
-                      for layer in shown_layers(data.layers))
+    layers = '|'.join(layer_signature(layer) for layer in shown_layers(resolved(data.layers)))
     stroke = stroke_link(data)
     owner = f'{stroke[0]}:{",".join(stroke[2])}:{active_tile(data)}' if stroke else ''
     tiles = ','.join(str(number) for number in numbers(data))
@@ -140,13 +202,289 @@ def stroke_over(build, image, alpha, color, x):
     total = math_node(nodes, links, 'SUBTRACT', math_node(nodes, links, 'ADD', alpha, added, x - 150, -1700),
                       math_node(nodes, links, 'MULTIPLY', alpha, added, x - 150, -1800), x, -1700)
     weight = math_node(nodes, links, 'DIVIDE', added, math_node(nodes, links, 'MAXIMUM', total, 1e-4, x, -1800), x + 150, -1700)
-    mix = nodes.new('ShaderNodeMix')
-    mix.data_type = 'RGBA'
-    mix.location = (x + 150, -1500)
-    links.new(weight, socket(mix.inputs, 'Factor', 'VALUE'))
-    links.new(color, socket(mix.inputs, 'A', 'RGBA'))
-    links.new(texture.outputs['Color'], socket(mix.inputs, 'B', 'RGBA'))
-    return total, socket(mix.outputs, 'Result', 'RGBA'), weight
+    return total, mix_color(build, color, texture.outputs['Color'], weight), weight
+
+
+def mix_color(build, below, above, factor, mode='MIX'):
+    node = build.nodes.new('ShaderNodeMix')
+    node.data_type = 'RGBA'
+    node.blend_type = mode
+    node.clamp_result = True
+    link_or_set(build, socket(node.inputs, 'Factor', 'VALUE'), factor)
+    link_or_set(build, socket(node.inputs, 'A', 'RGBA'), below)
+    link_or_set(build, socket(node.inputs, 'B', 'RGBA'), above)
+    return socket(node.outputs, 'Result', 'RGBA')
+
+
+def mix_value(build, below, above, factor):
+    node = build.nodes.new('ShaderNodeMix')
+    node.data_type = 'FLOAT'
+    node.clamp_result = True
+    link_or_set(build, socket(node.inputs, 'Factor', 'VALUE'), factor)
+    link_or_set(build, socket(node.inputs, 'A', 'VALUE'), below)
+    link_or_set(build, socket(node.inputs, 'B', 'VALUE'), above)
+    return socket(node.outputs, 'Result', 'VALUE')
+
+
+def link_or_set(build, target, value):
+    if isinstance(value, (float, int)):
+        target.default_value = float(value) if target.type == 'VALUE' else (float(value),) * 3 + (1.0,)
+    elif isinstance(value, tuple):
+        target.default_value = value
+    else:
+        build.links.new(value, target)
+
+
+def gray(build, color):
+    node = build.nodes.new('ShaderNodeRGBToBW')
+    build.links.new(color, node.inputs['Color'])
+    return node.outputs['Val']
+
+
+def offset(build, vector, dx, dy):
+    return vector_math(build.nodes, build.links, 'ADD', vector, (dx, dy, 0.0))
+
+
+def averaged(build, samples):
+    color, alpha = samples[0]
+    for index, (next_color, next_alpha) in enumerate(samples[1:], 2):
+        color = mix_color(build, color, next_color, 1.0 / index)
+        alpha = mix_value(build, alpha, next_alpha, 1.0 / index)
+    return color, alpha
+
+
+def warp_vector(build, effect, vector):
+    noise = build.nodes.new('ShaderNodeTexNoise')
+    noise.inputs['Scale'].default_value = effect.scale
+    build.links.new(vector, noise.inputs['Vector'])
+    centered = vector_math(build.nodes, build.links, 'SUBTRACT', noise.outputs['Color'], (.5, .5, .5))
+    return vector_math(build.nodes, build.links, 'MULTIPLY_ADD', centered, (effect.amount * WARP_REACH,) * 3, vector)
+
+
+def wrap_sampling(build, effect, inner):
+    step = effect.radius / max(build.resolution, 1)
+
+    def ring(image, vector):
+        angles = [index * math.tau / BLUR_TAPS for index in range(BLUR_TAPS)]
+        return [inner(image, vector)] + [inner(image, offset(build, vector, math.cos(angle) * step, math.sin(angle) * step)) for angle in angles]
+
+    def line(image, vector):
+        direction = math.radians(effect.angle)
+        positions = [(index / (BLUR_TAPS // 2)) * step for index in range(-(BLUR_TAPS // 2), BLUR_TAPS // 2 + 1)]
+        return [inner(image, offset(build, vector, math.cos(direction) * position, math.sin(direction) * position)) for position in positions]
+
+    def sample(image, vector):
+        if effect.filter == 'WARP':
+            return inner(image, warp_vector(build, effect, vector))
+        center = inner(image, vector)
+        blurred = averaged(build, line(image, vector) if effect.filter == 'DIRECTIONAL_BLUR' else ring(image, vector))
+        if effect.filter == 'SHARPEN':
+            detail = mix_color(build, center[0], blurred[0], 1.0, 'SUBTRACT')
+            return mix_color(build, center[0], detail, effect.amount * 2, 'ADD'), center[1]
+        return mix_color(build, center[0], blurred[0], effect.opacity), mix_value(build, center[1], blurred[1], effect.opacity)
+    return sample
+
+
+def sampling(build, layer, target):
+    chain = build.sampler.sample
+    for effect in layer.effects:
+        if effect.enabled and effect.target == target and effect.kind == 'FILTER' and FILTER[effect.filter].sampling:
+            chain = wrap_sampling(build, effect, chain)
+    return lambda image, vector=None: chain(image, vector if vector is not None else build.sampler.uv())
+
+
+def levels_value(build, value, effect):
+    nodes, links = build.nodes, build.links
+    ranged = nodes.new('ShaderNodeMapRange')
+    link_or_set(build, ranged.inputs['Value'], value)
+    ranged.inputs['From Min'].default_value, ranged.inputs['From Max'].default_value = effect.in_low, max(effect.in_high, effect.in_low + 1e-3)
+    curved = math_node(nodes, links, 'POWER', ranged.outputs['Result'], 1.0 / effect.gamma)
+    output = nodes.new('ShaderNodeMapRange')
+    links.new(curved, output.inputs['Value'])
+    output.inputs['To Min'].default_value, output.inputs['To Max'].default_value = effect.out_low, effect.out_high
+    return mix_value(build, value, output.outputs['Result'], effect.opacity)
+
+
+def levels_color(build, color, effect):
+    nodes, links = build.nodes, build.links
+    ranged = nodes.new('ShaderNodeMapRange')
+    ranged.data_type = 'FLOAT_VECTOR'
+    links.new(color, socket(ranged.inputs, 'Vector', 'VECTOR'))
+    socket(ranged.inputs, 'From Min', 'VECTOR').default_value = (effect.in_low,) * 3
+    socket(ranged.inputs, 'From Max', 'VECTOR').default_value = (max(effect.in_high, effect.in_low + 1e-3),) * 3
+    socket(ranged.inputs, 'To Min', 'VECTOR').default_value = (0.0,) * 3
+    socket(ranged.inputs, 'To Max', 'VECTOR').default_value = (1.0,) * 3
+    curve = nodes.new('ShaderNodeGamma')
+    links.new(socket(ranged.outputs, 'Vector', 'VECTOR'), curve.inputs['Color'])
+    curve.inputs['Gamma'].default_value = 1.0 / effect.gamma
+    output = nodes.new('ShaderNodeMapRange')
+    output.data_type = 'FLOAT_VECTOR'
+    links.new(curve.outputs['Color'], socket(output.inputs, 'Vector', 'VECTOR'))
+    socket(output.inputs, 'From Min', 'VECTOR').default_value = (0.0,) * 3
+    socket(output.inputs, 'From Max', 'VECTOR').default_value = (1.0,) * 3
+    socket(output.inputs, 'To Min', 'VECTOR').default_value = (effect.out_low,) * 3
+    socket(output.inputs, 'To Max', 'VECTOR').default_value = (effect.out_high,) * 3
+    return mix_color(build, color, socket(output.outputs, 'Vector', 'VECTOR'), effect.opacity)
+
+
+def noise_factor(build, effect):
+    coordinates = build.nodes.new('ShaderNodeTexCoord')
+    noise = build.nodes.new('ShaderNodeTexNoise')
+    noise.inputs['Scale'].default_value = effect.scale
+    noise.inputs['Detail'].default_value = 8.0
+    build.links.new(coordinates.outputs['Object'], noise.inputs['Vector'])
+    return noise.outputs['Fac']
+
+
+def filter_value(build, value, effect):
+    nodes, links = build.nodes, build.links
+    if effect.filter == 'INVERT':
+        result = math_node(nodes, links, 'SUBTRACT', 1.0, value)
+    elif effect.filter == 'POSTERIZE':
+        steps = 2.0 + round(effect.amount * POSTERIZE_STEPS)
+        result = math_node(nodes, links, 'DIVIDE', math_node(nodes, links, 'FLOOR', math_node(nodes, links, 'MULTIPLY', value, steps), 0.0), steps - 1)
+    elif effect.filter == 'CONTRAST':
+        spread = (1 - effect.amount) * .5 + .01
+        ranged = nodes.new('ShaderNodeMapRange')
+        link_or_set(build, ranged.inputs['Value'], value)
+        ranged.inputs['From Min'].default_value, ranged.inputs['From Max'].default_value = .5 - spread, .5 + spread
+        result = ranged.outputs['Result']
+    elif effect.filter == 'THRESHOLD':
+        result = math_node(nodes, links, 'GREATER_THAN', value, effect.amount)
+    elif effect.filter == 'GRAIN':
+        result = math_node(nodes, links, 'ADD', value, math_node(nodes, links, 'MULTIPLY', math_node(nodes, links, 'SUBTRACT', noise_factor(build, effect), .5),
+                                                                  effect.amount * 2))
+    else:
+        return value
+    return mix_value(build, value, result, effect.opacity)
+
+
+def filter_color(build, color, effect):
+    nodes, links = build.nodes, build.links
+    if effect.filter == 'HSV':
+        node = nodes.new('ShaderNodeHueSaturation')
+        node.inputs['Hue'].default_value, node.inputs['Saturation'].default_value = effect.hue, effect.saturation
+        node.inputs['Value'].default_value = effect.brightness
+        links.new(color, node.inputs['Color'])
+        return mix_color(build, color, node.outputs['Color'], effect.opacity)
+    if effect.filter == 'TINT':
+        return mix_color(build, color, (*effect.color, 1.0), effect.opacity, 'MULTIPLY')
+    if effect.filter == 'GRADIENT_MAP':
+        return mix_color(build, color, mix_color(build, (*effect.color_b, 1.0), (*effect.color, 1.0), gray(build, color)), effect.opacity)
+    if effect.filter == 'LIGHT':
+        geometry = nodes.new('ShaderNodeNewGeometry')
+        direction = math.radians(effect.angle)
+        light = (math.cos(direction) * LIGHT_SLOPE, math.sin(direction) * LIGHT_SLOPE, 1.0)
+        dot = build.nodes.new('ShaderNodeVectorMath')
+        dot.operation = 'DOT_PRODUCT'
+        links.new(geometry.outputs['Normal'], dot.inputs[0])
+        dot.inputs[1].default_value = light
+        lit = math_node(nodes, links, 'ADD', math_node(nodes, links, 'MULTIPLY', dot.outputs['Value'], .5), .5)
+        shading = mix_color(build, (0.0, 0.0, 0.0, 1.0), (2.0, 2.0, 2.0, 1.0), lit)
+        return mix_color(build, color, mix_color(build, color, shading, 1.0, 'MULTIPLY'), effect.amount)
+    if effect.filter == 'INVERT':
+        node = nodes.new('ShaderNodeInvert')
+        node.inputs['Fac'].default_value = effect.opacity
+        links.new(color, node.inputs['Color'])
+        return node.outputs['Color']
+    if effect.filter == 'CONTRAST':
+        node = nodes.new('ShaderNodeBrightContrast')
+        node.inputs['Contrast'].default_value = (effect.amount - .5) * 2
+        links.new(color, node.inputs['Color'])
+        return mix_color(build, color, node.outputs['Color'], effect.opacity)
+    if effect.filter in {'POSTERIZE', 'THRESHOLD'}:
+        if effect.filter == 'THRESHOLD':
+            level = math_node(nodes, links, 'GREATER_THAN', gray(build, color), effect.amount)
+            return mix_color(build, color, mix_color(build, (0.0, 0.0, 0.0, 1.0), (1.0, 1.0, 1.0, 1.0), level), effect.opacity)
+        steps = 2.0 + round(effect.amount * POSTERIZE_STEPS)
+        stepped = vector_math(nodes, links, 'DIVIDE', vector_math(nodes, links, 'FLOOR', vector_math(nodes, links, 'MULTIPLY', color, (steps,) * 3)),
+                              (steps - 1,) * 3)
+        return mix_color(build, color, stepped, effect.opacity)
+    if effect.filter == 'GRAIN':
+        grain = math_node(nodes, links, 'MULTIPLY', math_node(nodes, links, 'SUBTRACT', noise_factor(build, effect), .5), effect.amount * 2)
+        return mix_color(build, color, vector_math(nodes, links, 'ADD', color, grain), effect.opacity)
+    return color
+
+
+def combine_mask(build, value, other, blend, factor):
+    nodes, links = build.nodes, build.links
+    if blend == 'MIX':
+        result = other
+    elif blend == 'DIFFERENCE':
+        result = math_node(nodes, links, 'ABSOLUTE', math_node(nodes, links, 'SUBTRACT', value, other), 0.0)
+    else:
+        result = math_node(nodes, links, blend, value, other)
+    return mix_value(build, value, result, factor)
+
+
+def fill_effect_value(build, effect):
+    if effect.source == 'VALUE':
+        return effect.value
+    if effect.source == 'IMAGE' and effect.texture is not None:
+        node = build.nodes.new('ShaderNodeTexImage')
+        node.image = effect.texture
+        build.links.new(build.sampler.uv(), node.inputs['Vector'])
+        return gray(build, node.outputs['Color'])
+    if effect.source == 'PATTERN':
+        coordinates = build.nodes.new('ShaderNodeTexCoord')
+        texture, factor = pattern_node(build.nodes, effect.pattern, effect.uid + '.texture', (0, 0))
+        build.links.new(coordinates.outputs['Object'], texture.inputs['Vector'])
+        set_pattern_values(texture, effect.pattern, effect.scale, effect.detail)
+        ranged = build.nodes.new('ShaderNodeMapRange')
+        build.links.new(factor, ranged.inputs['Value'])
+        ranged.inputs['From Min'].default_value, ranged.inputs['From Max'].default_value = contrast_range(effect.pattern, effect.contrast)
+        return ranged.outputs['Result']
+    return None
+
+
+def anchor_value(build, effect):
+    results = build.anchors.get(effect.other)
+    if results is None:
+        return None
+    key = effect.channel if effect.channel in results else next(iter(results), None)
+    return gray(build, results[key]) if key is not None else None
+
+
+def mask_value(build, layer):
+    if layer.uid in build.masks:
+        return build.masks[layer.uid]
+    build.masks[layer.uid] = 1.0
+    nodes, links = build.nodes, build.links
+    sample = sampling(build, layer, 'MASK')
+    value = 1.0
+    if layer.mask:
+        value = sample(layer.mask)[1]
+    if layer.generator != 'NONE':
+        generated = generator_mask(nodes, links, layer, build)
+        if generated is not None:
+            value = math_node(nodes, links, 'MULTIPLY', value, generated)
+    if layer.geo_mask and build.data is not None:
+        attribute = nodes.new('ShaderNodeAttribute')
+        attribute.attribute_type = 'GEOMETRY'
+        attribute.attribute_name = geometry_attribute(build.data, layer)
+        value = math_node(nodes, links, 'MULTIPLY', value, attribute.outputs['Fac'])
+    for effect in layer.effects:
+        if not effect.enabled or effect.target != 'MASK':
+            continue
+        if effect.kind == 'LEVELS':
+            value = levels_value(build, value, effect)
+        elif effect.kind == 'FILTER':
+            value = filter_value(build, value, effect)
+        elif effect.kind == 'PAINT' and effect.image is not None:
+            color, alpha = sample(effect.image)
+            value = combine_mask(build, value, gray(build, color), effect.blend, math_node(nodes, links, 'MULTIPLY', alpha, effect.opacity))
+        else:
+            if effect.kind == 'FILL':
+                other = fill_effect_value(build, effect)
+            elif effect.kind == 'COMPARE':
+                target = build.layer_map.get(effect.other)
+                other = mask_value(build, target) if target is not None and target.uid != layer.uid else None
+            else:
+                other = anchor_value(build, effect)
+            if other is not None:
+                value = combine_mask(build, value, other, effect.blend, effect.opacity)
+    build.masks[layer.uid] = value
+    return value
 
 
 def layer_coverage(build, layer, x, stroke=None):
@@ -158,17 +496,13 @@ def layer_coverage(build, layer, x, stroke=None):
     factor.inputs[0].default_value = 1.0
     coverage, source, weight = factor.outputs[0], None, None
     if layer.kind == 'PAINT' and layer.image:
-        source, alpha = build.sampler.sample(layer.image, None, (x - 300, -1100))
+        source, alpha = sampling(build, layer, 'CONTENT')(layer.image)
         if stroke is not None:
             alpha, source, weight = stroke_over(build, stroke, alpha, source, x)
         links.new(alpha, factor.inputs[0])
-    if layer.mask:
-        _, mask = build.sampler.sample(layer.mask, None, (x - 300, -1350))
-        coverage = math_node(nodes, links, 'MULTIPLY', coverage, mask, x - 50, -1100)
-    if layer.generator != 'NONE':
-        generated = generator_mask(nodes, links, layer, build)
-        if generated is not None:
-            coverage = math_node(nodes, links, 'MULTIPLY', coverage, generated, x - 50, -1250)
+    value = mask_value(build, layer)
+    if not isinstance(value, float):
+        coverage = math_node(nodes, links, 'MULTIPLY', coverage, value, x - 50, -1100)
     return coverage, source, weight
 
 
@@ -185,19 +519,20 @@ def layer_coordinates(nodes, links, layer, x):
 def slot_content(build, layer, slot, vector, name, x, y):
     nodes, links = build.nodes, build.links
     if slot.source == 'IMAGE' and slot.image:
-        if layer.kind == 'PAINT':
-            return build.sampler.sample(slot.image, None, (x - 250, y - 120))[0]
+        if layer.kind == 'PAINT' or layer.projection != 'TRIPLANAR':
+            return sampling(build, layer, 'CONTENT')(slot.image, None if layer.kind == 'PAINT' else vector)[0]
         texture = nodes.new('ShaderNodeTexImage')
         texture.image = slot.image
         texture.location = (x - 250, y - 120)
-        if layer.projection == 'TRIPLANAR':
-            texture.projection = 'BOX'
-            texture.projection_blend = TRIPLANAR_BLEND
+        texture.projection = 'BOX'
+        texture.projection_blend = TRIPLANAR_BLEND
         links.new(vector, texture.inputs['Vector'])
         return texture.outputs['Color']
     if slot.source == 'PATTERN':
         texture, factor = pattern_node(nodes, slot.pattern, name + '.texture', (x - 450, y - 120))
-        links.new(vector, texture.inputs['Vector'])
+        warp = next((effect for effect in layer.effects if effect.enabled and effect.target == 'CONTENT' and effect.kind == 'FILTER'
+                     and effect.filter == 'WARP'), None)
+        links.new(warp_vector(build, warp, vector) if warp else vector, texture.inputs['Vector'])
         contrast = nodes.new('ShaderNodeMapRange')
         contrast.name = name + '.contrast'
         contrast.location = (x - 300, y - 120)
@@ -209,6 +544,11 @@ def slot_content(build, layer, slot, vector, name, x, y):
         links.new(contrast.outputs['Result'], socket(mix.inputs, 'Factor', 'VALUE'))
         return socket(mix.outputs, 'Result', 'RGBA')
     return None
+
+
+def content_effects_for(layer, key):
+    return [effect for effect in layer.effects if effect.enabled and effect.target == 'CONTENT' and effect.kind in {'LEVELS', 'FILTER'}
+            and effect.channel in {'ALL', key} and not (effect.kind == 'FILTER' and FILTER[effect.filter].sampling)]
 
 
 def vector_math(nodes, links, operation, *values):
@@ -340,7 +680,8 @@ def compose_layer(build, channels, layer, results, x):
         name = f'{layer.uid}.{channel.key}'
         y = 300 - 250 * row
         factor = math_node(nodes, links, 'MULTIPLY', coverage, 1.0, x - 100, y - 60, name + '.opacity')
-        node = channel_mix(nodes, links, name, results[channel.key], factor, slot.blend, x, y)
+        detail = slot.blend == NORMAL_DETAIL
+        node = channel_mix(nodes, links, name, results[channel.key], factor, 'MIX' if detail else slot.blend, x, y)
         content = painted if channel.key == 'base_color' and painted is not None else slot_content(build, layer, slot, vector, name, x, y)
         if owner and channel.key != 'base_color' and channel.key in stroke[2]:
             brushed = nodes.new('ShaderNodeMix')
@@ -351,37 +692,124 @@ def compose_layer(build, channels, layer, results, x):
             if content is not None:
                 links.new(content, socket(brushed.inputs, 'A', 'RGBA'))
             content = socket(brushed.outputs, 'Result', 'RGBA')
+        effects = content_effects_for(layer, channel.key)
+        if content is None and (effects or detail):
+            constant = nodes.new('ShaderNodeRGB')
+            constant.name = name + '.const'
+            content = constant.outputs[0]
+        for effect in effects:
+            content = levels_color(build, content, effect) if effect.kind == 'LEVELS' else filter_color(build, content, effect)
+        if detail:
+            content = blend_normals(nodes, links, results[channel.key], content)
         if content is not None:
             links.new(content, socket(node.inputs, 'B', 'RGBA'))
         results[channel.key] = socket(node.outputs, 'Result', 'RGBA')
+    build.anchors[layer.uid] = dict(results)
+    return coverage
 
 
-def compose(build, channels, layers, parent, results, column):
+def union(build, coverages):
+    alpha = 0.0
+    for coverage in coverages:
+        alpha = math_node(build.nodes, build.links, 'SUBTRACT', math_node(build.nodes, build.links, 'ADD', alpha, coverage),
+                          math_node(build.nodes, build.links, 'MULTIPLY', alpha, coverage))
+    return alpha
+
+
+def compose(build, channels, layers, parent, results, column, collector=None):
     for layer in children(layers, parent):
         if not layer.visible:
             continue
         x = 300 * column[0]
         column[0] += 1
         if layer.kind != 'FOLDER':
-            compose_layer(build, channels, layer, results, x)
+            coverage = compose_layer(build, channels, layer, results, x)
+            if collector is not None:
+                collector.append(coverage)
             continue
         below = dict(results)
-        inner = compose(build, channels, layers, layer.uid, dict(results), column)
+        isolated = layer.folder_blend != 'PASSTHROUGH'
+        start = {channel.key: constant_color(build, channel) for channel in channels} if isolated else dict(results)
+        coverages = []
+        inner = compose(build, channels, layers, layer.uid, dict(start), column, coverages)
         coverage, _, _ = layer_coverage(build, layer, 300 * column[0])
+        factor = math_node(build.nodes, build.links, 'MULTIPLY', coverage, union(build, coverages)) if isolated else coverage
+        if collector is not None:
+            collector.append(factor)
         for row, channel in enumerate(channels):
-            if inner[channel.key] is not below[channel.key]:
-                node = channel_mix(build.nodes, build.links, f'{layer.uid}.{channel.key}', below[channel.key], coverage, 'MIX', 300 * column[0],
-                                   300 - 250 * row)
+            if inner[channel.key] is not start[channel.key]:
+                node = channel_mix(build.nodes, build.links, f'{layer.uid}.{channel.key}', below[channel.key], factor,
+                                   layer.folder_blend if isolated else 'MIX', 300 * column[0], 300 - 250 * row)
                 build.links.new(inner[channel.key], socket(node.inputs, 'B', 'RGBA'))
                 results[channel.key] = socket(node.outputs, 'Result', 'RGBA')
+        build.anchors[layer.uid] = dict(results)
         column[0] += 1
     return results
+
+
+class Rooted:
+    def __init__(self, layer):
+        self.layer = layer
+
+    def __getattr__(self, name):
+        return getattr(self.layer, name)
+
+    @property
+    def parent(self):
+        return ''
+
+    @property
+    def visible(self):
+        return True
+
+
+def isolated_tree(data, tree, roots, key, mask_uid=''):
+    build = set_build(data, tree, raw=True)
+    tree.nodes.clear()
+    build.sampler.cache.clear()
+    layers = resolved(data.layers)
+    build.layer_map = {layer.uid: layer for layer in layers}
+    output = tree.nodes.new('ShaderNodeOutputMaterial')
+    emission = tree.nodes.new('ShaderNodeEmission')
+    tree.links.new(emission.outputs[0], output.inputs['Surface'])
+    if mask_uid:
+        layer = build.layer_map[mask_uid]
+        value = mask_value(build, layer)
+        if layer.generator != 'NONE' and layer.uid + '.gen.range' in tree.nodes:
+            write_generator(tree.nodes, layer)
+    else:
+        channels = set_channels(data)
+        chosen = {root.uid for root in roots}
+        subset = [Rooted(layer) if layer.uid in chosen else layer for layer in layers if layer.uid in chosen or ancestor_in(layers, layer, chosen)]
+        coverages = []
+        results = compose(build, channels, subset, '',
+                          {channel.key: constant_color(build, channel) for channel in channels}, [0], coverages)
+        value = union(build, coverages) if key == 'ALPHA' else results[key]
+        write_values(tree.nodes, channels, subset)
+    link_or_set(build, emission.inputs['Color'], value)
+
+
+def ancestor_in(layers, layer, chosen):
+    by_uid = {item.uid: item for item in layers}
+    parent = by_uid.get(layer.parent)
+    while parent is not None:
+        if parent.uid in chosen:
+            return True
+        parent = by_uid.get(parent.parent)
+    return False
+
+
+def constant_color(build, channel):
+    node = build.nodes.new('ShaderNodeRGB')
+    node.outputs[0].default_value = rgba(channel.default)
+    return node.outputs[0]
 
 
 def build_tree(build, channels, layers, solo=None, raw=False):
     nodes, links = build.nodes, build.links
     nodes.clear()
     build.sampler.cache.clear()
+    build.layer_map = {layer.uid: layer for layer in layers}
     output = nodes.new('ShaderNodeOutputMaterial')
     shader = nodes.new('ShaderNodeBsdfPrincipled')
     results = {}
@@ -447,6 +875,8 @@ def write_values(nodes, channels, layers, brush=None):
                 contrast.inputs['From Min'].default_value, contrast.inputs['From Max'].default_value = contrast_range(slot.pattern, slot.contrast)
             elif slot.source == 'VALUE' or slot.image is None:
                 socket(nodes[name].inputs, 'B', 'RGBA').default_value = rgba(slot_value(slot))
+            if name + '.const' in nodes:
+                nodes[name + '.const'].outputs[0].default_value = rgba(slot_value(slot))
 
 
 def stroke_link(data):
@@ -483,14 +913,14 @@ def set_build(data, tree, raw=False):
     sampler = Sampler(tree.nodes, tree.links, numbers(data), lambda image, number: variant(data, image, number), project.uv_map)
     maps = {item.name: item.image for item in data.maps if item.image is not None}
     shading = dict(shader=data.shader, normal_format=project.normal_format, normal_space=project.normal_space)
-    return Build(tree.nodes, tree.links, sampler, None if raw else stroke_link(data), maps, False, 1.0, active_tile(data), shading)
+    return Build(tree.nodes, tree.links, sampler, None if raw else stroke_link(data), maps, False, 1.0, active_tile(data), shading, data, data.resolution)
 
 
 def rebuild(data, solo=None, raw=False):
     material = data.material
     build = set_build(data, material.node_tree, raw)
     channels = set_channels(data)
-    output = build_tree(build, channels, list(data.layers) if data.visible else [], solo or solo_channel(data), raw)
+    output = build_tree(build, channels, resolved(data.layers) if data.visible else [], solo or solo_channel(data), raw)
     material.surface_render_method = 'BLENDED' if any(channel.key == 'opacity' for channel in channels) else 'DITHERED'
     if not raw and solo is None and viewed_map(data) is not None:
         show_map(build, output, viewed_map(data))
@@ -501,7 +931,7 @@ def update_values(data):
     nodes = data.material.node_tree.nodes
     if not data.visible:
         return
-    write_values(nodes, set_channels(data), list(data.layers), brush_values(data))
+    write_values(nodes, set_channels(data), resolved(data.layers), brush_values(data))
     if 'shader.normal_map' in nodes:
         nodes['shader.normal_map'].inputs['Strength'].default_value = data.normal_strength
     if 'shader.bump' in nodes:
@@ -510,7 +940,7 @@ def update_values(data):
         nodes['shader.bsdf'].inputs['Emission Strength'].default_value = data.emission_strength
     obj = data.id_data
     project = obj.devil_painter
-    for layer in shown_layers(data.layers):
+    for layer in shown_layers(resolved(data.layers)):
         mapping = nodes.get(layer.uid + '.mapping')
         if mapping is not None and layer.projection == 'TRIPLANAR' and project.use_physical:
             mapping.inputs['Scale'].default_value = tuple(layer.tiling * axis / project.physical_size for axis in obj.scale)

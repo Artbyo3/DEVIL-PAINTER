@@ -44,18 +44,24 @@ def create(data, name, fill, data_values=False):
     return adopt(data, blank(name, data.resolution, fill, data_values), fill)
 
 
+def duplicate(image, name):
+    copied = image.copy()
+    copied.name = name
+    width, height = image.size
+    pixels = numpy.empty(width * height * 4, dtype=numpy.float32)
+    image.pixels.foreach_get(pixels)
+    copied.pixels.foreach_set(pixels)
+    copied.pack()
+    return copied
+
+
 def copy(data, key, name):
-    duplicate = key.copy()
-    duplicate.name = name
-    duplicate.pack()
+    copied = duplicate(key, name)
     for number in numbers(data)[1:]:
         source = variant(data, key, number)
         if source is not key:
-            tile = source.copy()
-            tile.name = f'{name} {number}'
-            tile.pack()
-            register(data, duplicate, number, tile)
-    return duplicate
+            register(data, copied, number, duplicate(source, f'{name} {number}'))
+    return copied
 
 
 def remove(data, key):
