@@ -55,6 +55,10 @@ class DEVIL_PAINTER_PG_tile_image(bpy.types.PropertyGroup):
     image: bpy.props.PointerProperty(type=bpy.types.Image)
 
 
+class DEVIL_PAINTER_PG_channel_blend(bpy.types.PropertyGroup):
+    blend: bpy.props.EnumProperty(items=[(key, label, '') for key, label in FOLDER_BLENDS])
+
+
 class DEVIL_PAINTER_PG_id_color(bpy.types.PropertyGroup):
     color: bpy.props.FloatVectorProperty(size=3, default=(1.0, 1.0, 1.0), min=0.0, max=1.0)
 
@@ -130,6 +134,7 @@ class DEVIL_PAINTER_PG_layer(bpy.types.PropertyGroup):
     mask: bpy.props.PointerProperty(type=bpy.types.Image)
     effects: bpy.props.CollectionProperty(type=DEVIL_PAINTER_PG_effect)
     folder_blend: bpy.props.EnumProperty(items=[(key, label, '') for key, label in FOLDER_BLENDS])
+    channel_blends: bpy.props.CollectionProperty(type=DEVIL_PAINTER_PG_channel_blend)
     geo_mask: bpy.props.BoolProperty(default=False)
     link_set: bpy.props.StringProperty()
     link_uid: bpy.props.StringProperty()
@@ -231,7 +236,7 @@ class DEVIL_PAINTER_PG_project(bpy.types.PropertyGroup):
 
 
 CLASSES = (DEVIL_PAINTER_PG_slot, DEVIL_PAINTER_PG_channel, DEVIL_PAINTER_PG_map, DEVIL_PAINTER_PG_tile, DEVIL_PAINTER_PG_tile_image,
-           DEVIL_PAINTER_PG_id_color, DEVIL_PAINTER_PG_effect, DEVIL_PAINTER_PG_layer, DEVIL_PAINTER_PG_texture_set, DEVIL_PAINTER_PG_project)
+           DEVIL_PAINTER_PG_id_color, DEVIL_PAINTER_PG_effect, DEVIL_PAINTER_PG_channel_blend, DEVIL_PAINTER_PG_layer, DEVIL_PAINTER_PG_texture_set, DEVIL_PAINTER_PG_project)
 
 
 def project_of(obj):
@@ -289,6 +294,11 @@ def set_slot_value(slot, value, second=False):
         setattr(slot, 'color_b' if second else 'color', value)
     else:
         setattr(slot, 'value_b' if second else 'value', value[0])
+
+
+def folder_mode(layer, key):
+    item = layer.channel_blends.get(key)
+    return item.blend if item is not None else layer.folder_blend
 
 
 def uses_coordinates(layer):

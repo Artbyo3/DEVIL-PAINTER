@@ -546,6 +546,22 @@ def folder_blend_section(flow, data, layer, w):
              tip='Passthrough mixes children straight into the stack; any other mode merges the folder first, then blends it')
 
 
+def folder_channels_section(flow, data, layer, w):
+    s = flow.layout.scale
+    half = (w - 4 * s) / 2
+    for channel in set_channels(data):
+        x, y, h = flow.field()
+        item = layer.channel_blends.get(channel.key)
+        flow.add('FOLDER_CHNAME.' + channel.key, Rect(x, y, half, h), 'NOTE', label=channel.label)
+        flow.add('FOLDER_CHBLEND.' + channel.key, Rect(x + half + 4 * s, y, half, h), 'DROPDOWN',
+                 text=dict(FOLDER_BLENDS)[item.blend] if item is not None else 'Same as folder',
+                 tip=f'How {channel.label.lower()} of this folder blends; Same as folder follows the Blend above')
+
+
+def folder_channel_lines(data):
+    return len(set_channels(data))
+
+
 def instance_section(flow, data, layer, w):
     x, y, h = flow.field()
     source = linked_layer(layer)
@@ -871,7 +887,8 @@ PROPERTY_SECTIONS = {'LAYER': (Section(one_line, opacity_section), Section(mater
                                Section(channel_lines, channels_section), Section(one_line, layer_mask_section),
                                Section(generator_lines, generator_section), Section(geometry_lines, geometry_section),
                                Section(one_line, effects_add_section)),
-                     'FOLDER': (Section(one_line, opacity_section), Section(one_line, folder_blend_section), Section(one_line, layer_mask_section),
+                     'FOLDER': (Section(one_line, opacity_section), Section(one_line, folder_blend_section),
+                                Section(folder_channel_lines, folder_channels_section), Section(one_line, layer_mask_section),
                                 Section(generator_lines, generator_section), Section(geometry_lines, geometry_section),
                                 Section(one_line, effects_add_section)),
                      'MASK': (Section(two_lines, mask_section), Section(generator_lines, generator_section)),

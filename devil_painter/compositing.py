@@ -1,6 +1,6 @@
 import math
 from .blending import MIX_NODE_BLENDS
-from .document import PROJECTORS, active_tile, children, geometry_attribute, isolated_uids, linked_layer, set_channels, shown_layers, slot_value, uses_coordinates
+from .document import PROJECTORS, active_tile, children, folder_mode, geometry_attribute, isolated_uids, linked_layer, set_channels, shown_layers, slot_value, uses_coordinates
 from .effects import EFFECT_FIELDS
 from .filters import FILTER, content_warp, filter_color, filter_value, warp_vector, wrap_sampling
 from .masks import generator_mask, id_selection, write_generator
@@ -164,6 +164,7 @@ def effect_signature(effect):
 def layer_signature(layer):
     return ':'.join((layer.uid, layer.kind, layer.parent, layer.projection, str(layer.tile_match), f'{layer.proj_bend:.3f}',
                      ','.join(f'{value:.3f}' for value in layer.proj_warp), layer.generator, layer.folder_blend, str(layer.geo_mask),
+                     ','.join(f'{item.name}={item.blend}' for item in layer.channel_blends),
                      layer.image.name if layer.image else '', layer.mask.name if layer.mask else '',
                      *(slot_signature(slot) for slot in layer.slots if slot.enabled), *(effect_signature(effect) for effect in layer.effects)))
 
@@ -679,18 +680,20 @@ def compose(build, channels, layers, parent, results, column, collector=None):
                 collector.append(coverage)
             continue
         below = dict(results)
-        isolated = layer.folder_blend != 'PASSTHROUGH'
-        start = {channel.key: constant_color(build, channel) for channel in channels} if isolated else dict(results)
+        modes = {channel.key: folder_mode(layer, channel.key) for channel in channels}
+        isolated = {key for key, mode in modes.items() if mode != 'PASSTHROUGH'}
+        start = {channel.key: constant_color(build, channel) if channel.key in isolated else results[channel.key] for channel in channels}
         coverages = []
         inner = compose(build, channels, layers, layer.uid, dict(start), column, coverages)
         coverage, _, _ = layer_coverage(build, layer, 300 * column[0])
-        factor = math_node(build.nodes, build.links, 'MULTIPLY', coverage, union(build, coverages)) if isolated else coverage
+        grouped = math_node(build.nodes, build.links, 'MULTIPLY', coverage, union(build, coverages)) if isolated else coverage
         if collector is not None:
-            collector.append(factor)
+            collector.append(grouped)
         for row, channel in enumerate(channels):
             if inner[channel.key] is not start[channel.key]:
-                node = channel_mix(build.nodes, build.links, f'{layer.uid}.{channel.key}', below[channel.key], factor,
-                                   layer.folder_blend if isolated else 'MIX', 300 * column[0], 300 - 250 * row)
+                merged = channel.key in isolated
+                node = channel_mix(build.nodes, build.links, f'{layer.uid}.{channel.key}', below[channel.key], grouped if merged else coverage,
+                                   modes[channel.key] if merged else 'MIX', 300 * column[0], 300 - 250 * row)
                 build.links.new(inner[channel.key], socket(node.inputs, 'B', 'RGBA'))
                 results[channel.key] = socket(node.outputs, 'Result', 'RGBA')
         build.anchors[layer.uid] = dict(results)
