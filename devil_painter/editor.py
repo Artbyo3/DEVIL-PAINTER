@@ -319,11 +319,12 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         target = self.state.picking
         self.state.picking = ''
         obj, data = self.painted()
-        if target.startswith('id:'):
+        if target.startswith(('id:', 'idadd:')):
             face, location = sets.hit_under(self._region, self._area.spaces.active.region_3d, obj, self.pointer)
             if face < 0:
                 return 'Click on the model to pick an ID color.'
-            return actions.pick_id_color(context, obj, data, target.removeprefix('id:'), face, location)
+            mode, effect_uid = target.split(':', 1)
+            return actions.pick_id_color(context, obj, data, effect_uid, face, location, mode == 'idadd')
         previous = tuple(painting.brush_value(self.scene, 'color'))
         bpy.ops.paint.sample_color(location=(int(self.pointer[0]), int(self.pointer[1])), merged=True, palette=False)
         picked = tuple(painting.brush_value(self.scene, 'color'))
@@ -1142,6 +1143,11 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         elif key == 'FX_PICK_ID':
             self.state.picking = 'id:' + data.active_effect
             self.message = 'Click the model to pick an ID color.'
+        elif key == 'FX_ADD_ID':
+            self.state.picking = 'idadd:' + data.active_effect
+            self.message = 'Click the model to add another ID color.'
+        elif key.startswith('FX_REMOVE_ID.'):
+            self.message = actions.remove_id_color(context, obj, data, int(key.removeprefix('FX_REMOVE_ID.')))
         elif key.startswith('FXCOLOR.'):
             self.open_color(control, 'fx:' + key.removeprefix('FXCOLOR.'))
         elif key.startswith(('SET_FXBLEND.', 'SET_FXFILTER.', 'SET_FXSOURCE.', 'SET_FXOTHER.', 'SET_FXCHANNEL.')):

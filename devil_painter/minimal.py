@@ -620,6 +620,13 @@ def effect_section(flow, data, layer, w):
         flow.add('FXCOLOR.color', Rect(x, y, half, h), 'SWATCH', color=(*linear_to_srgb(numpy.array(effect.color)), 1.0), tip='The ID color this mask keeps')
         flow.add('FX_PICK_ID', Rect(x + half + 4 * s, y, half, h), 'CHIP', label='Pick on model',
                  tip='Click the model to pick a color from the baked ID map')
+        for index, item in enumerate(effect.id_colors):
+            x, y, h = flow.field()
+            flow.add(f'FX_ID_COLOR.{index}', Rect(x, y, half, h), 'SWATCH', color=(*linear_to_srgb(numpy.array(item.color)), 1.0),
+                     tip='Another ID color this mask keeps')
+            flow.add(f'FX_REMOVE_ID.{index}', Rect(x + half + 4 * s, y, half, h), 'CHIP', label='Remove', tip='Stop keeping this ID color')
+        x, y, h = flow.field()
+        flow.add('FX_ADD_ID', Rect(x, y, w, h), 'CHIP', label='Add color', tip='Click the model to keep one more ID color')
         if 'id' not in data.maps or data.maps['id'].image is None:
             x, y, h = flow.field()
             flow.add('FX_ID_MISSING', Rect(x, y, w - 106 * s, h), 'NOTE', label='Needs the ID map')
@@ -638,7 +645,7 @@ def effect_lines(data):
     lines = 2 + (effect.kind in {'PAINT', 'FILL', 'FILTER', 'COMPARE', 'ANCHOR'})
     lines += (len(effect_sliders(effect)) + 1) // 2
     if effect.kind == 'ID_COLOR':
-        lines += 1 + int('id' not in data.maps or data.maps['id'].image is None)
+        lines += 2 + len(effect.id_colors) + int('id' not in data.maps or data.maps['id'].image is None)
     return lines + int(effect.kind == 'FILTER' and bool(FILTER[effect.filter].colors))
 
 

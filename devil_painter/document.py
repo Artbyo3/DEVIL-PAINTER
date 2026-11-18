@@ -55,6 +55,10 @@ class DEVIL_PAINTER_PG_tile_image(bpy.types.PropertyGroup):
     image: bpy.props.PointerProperty(type=bpy.types.Image)
 
 
+class DEVIL_PAINTER_PG_id_color(bpy.types.PropertyGroup):
+    color: bpy.props.FloatVectorProperty(size=3, default=(1.0, 1.0, 1.0), min=0.0, max=1.0)
+
+
 def is_mesh(self, obj):
     return obj.type == 'MESH'
 
@@ -90,6 +94,7 @@ class DEVIL_PAINTER_PG_effect(bpy.types.PropertyGroup):
     color_b: bpy.props.FloatVectorProperty(size=3, default=(0.0, 0.0, 0.0), min=0.0, max=1.0)
     other: bpy.props.StringProperty()
     channel: bpy.props.StringProperty(default='ALL')
+    id_colors: bpy.props.CollectionProperty(type=DEVIL_PAINTER_PG_id_color)
 
 
 class DEVIL_PAINTER_PG_layer(bpy.types.PropertyGroup):
@@ -221,7 +226,7 @@ class DEVIL_PAINTER_PG_project(bpy.types.PropertyGroup):
 
 
 CLASSES = (DEVIL_PAINTER_PG_slot, DEVIL_PAINTER_PG_channel, DEVIL_PAINTER_PG_map, DEVIL_PAINTER_PG_tile, DEVIL_PAINTER_PG_tile_image,
-           DEVIL_PAINTER_PG_effect, DEVIL_PAINTER_PG_layer, DEVIL_PAINTER_PG_texture_set, DEVIL_PAINTER_PG_project)
+           DEVIL_PAINTER_PG_id_color, DEVIL_PAINTER_PG_effect, DEVIL_PAINTER_PG_layer, DEVIL_PAINTER_PG_texture_set, DEVIL_PAINTER_PG_project)
 
 
 def project_of(obj):
