@@ -199,7 +199,7 @@ Planned stages, each shipped as a tested increment:
 
 ## MVP acceptance examples
 
-- Build `dist/devil_painter-0.2.0.zip` cleanly via `python tools/build.py`.
+- Build `dist/devil_painter-0.2.1.zip` cleanly via `python tools/build.py`.
 - Validate the packaged extension archive with `blender --command extension validate`.
 - Enable `devil_painter` in headless Blender and confirm its operators, menu
   entry, and layer stack property register and unregister without errors.

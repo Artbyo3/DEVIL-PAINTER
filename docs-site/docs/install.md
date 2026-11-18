@@ -26,7 +26,7 @@ If you want to package the extension directly from the repository:
    ```bash
    python tools/build.py
    ```
-3. In Blender, choose **Edit > Preferences > Add-ons > Install from Disk...** and select `dist/devil_painter-0.2.0.zip`.
+3. In Blender, choose **Edit > Preferences > Add-ons > Install from Disk...** and select `dist/devil_painter-0.2.1.zip`.
 
 ## Enable Devil Painter
 
