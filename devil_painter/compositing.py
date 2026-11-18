@@ -16,6 +16,7 @@ PREVIEW_TOOLS = {'PAINT', 'FILL', ''}
 BUMP_DISTANCE = .05
 DISPLAY_GAMMA = 2.2
 TRIPLANAR_BLEND = .2
+MASK_MIXES = {'MINIMUM': 'DARKEN', 'MAXIMUM': 'LIGHTEN'}
 SHADER_INPUTS = {'base_color': 'Base Color', 'roughness': 'Roughness', 'metallic': 'Metallic', 'emission': 'Emission Color',
                  'opacity': 'Alpha'}
 
@@ -234,14 +235,9 @@ def levels_color(build, color, effect):
 
 
 def combine_mask(build, value, other, blend, factor):
-    nodes, links = build.nodes, build.links
-    if blend == 'MIX':
-        result = other
-    elif blend == 'DIFFERENCE':
-        result = math_node(nodes, links, 'ABSOLUTE', math_node(nodes, links, 'SUBTRACT', value, other), 0.0)
-    else:
-        result = math_node(nodes, links, blend, value, other)
-    return mix_value(build, value, result, factor)
+    split = build.nodes.new('ShaderNodeSeparateColor')
+    build.links.new(mix_color(build, value, other, factor, MASK_MIXES.get(blend, blend)), split.inputs['Color'])
+    return split.outputs['Red']
 
 
 def fill_effect_value(build, effect):

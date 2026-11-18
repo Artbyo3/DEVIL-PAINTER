@@ -11,7 +11,7 @@ from .blending import BLEND_MODES, CHANNEL, CHANNELS, FOLDER_BLENDS, linear_to_s
 from .canvas import Layout, Rect
 from .document import (BAKE_ID_LABELS, DYNAMICS, NORMAL_FORMATS, PROJECTORS, STROKE_METHODS, TRANSPARENCY, NORMAL_SPACES, PROJECTIONS, RESOLUTIONS, SHADERS, active_effect, active_layer, children, editing_mask, find_layer,
                        linked_layer, set_channels, slot_value, uses_coordinates)
-from .effects import EFFECT_ICONS, EFFECT_KINDS, MASK_BLENDS, effect_label
+from .effects import EFFECT_ICONS, EFFECT_KINDS, MASK_BLEND_LABEL, effect_label
 from .filters import FILTER, FILTERS
 from .library import capture, libraries as library_folders, texture_folder
 from .exporting import FORMAT_LABELS, SOURCES, TOKENS, find_template, is_custom
@@ -588,7 +588,7 @@ def effect_section(flow, data, layer, w):
     x, y, h = flow.field()
     half = (w - 4 * s) / 2
     if effect.target == 'MASK' and effect.kind not in {'LEVELS', 'FILTER'}:
-        flow.add('FX_BLEND', Rect(x, y, half, h), 'DROPDOWN', label='Blend', text=dict(MASK_BLENDS)[effect.blend],
+        flow.add('FX_BLEND', Rect(x, y, half, h), 'DROPDOWN', label='Blend', text=MASK_BLEND_LABEL[effect.blend],
                  tip='How this effect combines with the mask below it')
     else:
         flow.add('FX_KIND', Rect(x, y, half, h), 'NOTE', label=effect_label(effect))

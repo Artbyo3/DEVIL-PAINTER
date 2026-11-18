@@ -1094,7 +1094,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
     def open_effect_menu(self, key, control, data):
         effect = active_effect(data)
         if key == 'FX_BLEND':
-            items = tuple((f'SET_FXBLEND.{mode}', label, mode == effect.blend) for mode, label in MASK_BLENDS)
+            items = tuple((f'SET_FXBLEND.{mode}', label, mode == effect.blend) for mode, label, _ in MASK_BLENDS)
         elif key == 'FX_FILTER':
             offered = [item for item in FILTERS if effect.target == 'CONTENT' or not item.color_only]
             items = tuple(entry for group in GROUPS for entry in ((MENU_HEADING + group, group, False),) + tuple(

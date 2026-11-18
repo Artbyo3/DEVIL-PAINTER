@@ -64,7 +64,7 @@ class DEVIL_PAINTER_PG_effect(bpy.types.PropertyGroup):
     kind: bpy.props.EnumProperty(items=[(key, label, '') for key, label, _ in EFFECT_KINDS])
     target: bpy.props.EnumProperty(items=(('MASK', 'Mask', ''), ('CONTENT', 'Content', '')))
     enabled: bpy.props.BoolProperty(default=True)
-    blend: bpy.props.EnumProperty(items=[(key, label, '') for key, label in MASK_BLENDS])
+    blend: bpy.props.EnumProperty(items=[(key, label, '', number) for key, label, number in MASK_BLENDS], default='MULTIPLY')
     opacity: bpy.props.FloatProperty(default=1.0, min=0.0, max=1.0)
     image: bpy.props.PointerProperty(type=bpy.types.Image)
     source: bpy.props.EnumProperty(items=SOURCES)
