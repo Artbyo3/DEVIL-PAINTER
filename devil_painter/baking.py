@@ -147,7 +147,7 @@ def bake_channel(context, obj, project, wanted, channel, margin=BAKE_MARGIN):
     def prepare(data):
         if channel in set_channels(data):
             compositing.rebuild(data, solo=channel, raw=True)
-            compositing.update_values(data)
+            compositing.update_values(data, raw=True)
         else:
             emission_tree(data.material.node_tree, rgba(channel.default))
 

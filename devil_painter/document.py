@@ -154,6 +154,7 @@ class DEVIL_PAINTER_PG_texture_set(bpy.types.PropertyGroup):
     target: bpy.props.EnumProperty(items=(('CONTENT', 'Content', ''), ('MASK', 'Mask', ''), ('EFFECT', 'Effect', '')))
     active_effect: bpy.props.StringProperty()
     solo: bpy.props.StringProperty()
+    isolate: bpy.props.StringProperty()
     material: bpy.props.PointerProperty(type=bpy.types.Material)
     serial: bpy.props.IntProperty(default=0)
     stroke: bpy.props.PointerProperty(type=bpy.types.Image)
@@ -307,6 +308,12 @@ def descendants(layers, uid):
                 found.append(layer.uid)
                 pending.append(layer.uid)
     return found
+
+
+def isolated_uids(data):
+    if find_layer(data, data.isolate) is None:
+        return None
+    return {data.isolate, *descendants(data.layers, data.isolate)}
 
 
 def shown_layers(layers):

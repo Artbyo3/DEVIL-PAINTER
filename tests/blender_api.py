@@ -63,6 +63,11 @@ check(written and all(Path(path).is_file() for path in written), 'export() write
 base = next(path for path in written if 'BaseColor' in path or 'Base' in path)
 pixels = png(base)
 check(pixels[:, 0].max() > .9 and pixels[:, 2].max() < pixels[:, 0].max(), 'the exported base color is gold')
+body = cube.devil_painter.sets[0]
+body.isolate = body.layers[0].uid
+isolated = png(next(path for path in api.export(cube, export_dir) if path == base))
+body.isolate = ''
+check(numpy.abs(isolated - pixels).max() < 1e-6, 'showing only one layer leaves exported textures unchanged')
 mesh = cube.data.copy()
 mesh.materials.clear()
 mesh.materials.append(bpy.data.materials.new('Body'))

@@ -164,6 +164,10 @@ def alpha(image):
     return pixels.reshape(-1, 4)[:, 3]
 
 
+def tree_nodes(data):
+    return data.material.node_tree.nodes
+
+
 def surface_source(data):
     output = next(node for node in data.material.node_tree.nodes if node.type == 'OUTPUT_MATERIAL')
     return output.inputs['Surface'].links[0].from_node
@@ -442,6 +446,27 @@ def journey():
     click(window, region, 'EYE_' + fill.uid)
     yield from settle()
     check(fill.visible and fill.uid in data.material[SIGNATURE_KEY], 'the eye shows the fill layer again')
+    press(window, 'LEFTMOUSE', *spot(region, 'EYE_' + paint_layer.uid), alt=True)
+    yield from settle()
+    check(data.isolate == paint_layer.uid and f'{fill.uid}.base_color' not in tree_nodes(data) and f'{paint_layer.uid}.base_color' in tree_nodes(data)
+          and control('EYE_' + fill.uid).icon == 'HIDE_ON' and fill.visible, 'Alt-clicking an eye shows only that layer without hiding the others for good')
+    press(window, 'LEFTMOUSE', *spot(region, 'EYE_' + paint_layer.uid), alt=True)
+    yield from settle()
+    check(data.isolate == '' and f'{fill.uid}.base_color' in tree_nodes(data) and control('EYE_' + fill.uid).icon == 'HIDE_OFF',
+          'Alt-clicking the eye again shows every layer')
+    click(window, region, 'ROW_' + fill.uid, kind='RIGHTMOUSE')
+    yield from settle()
+    check(control('ISOLATE').label == 'Show only this layer', 'the layer menu offers Show only this layer')
+    click(window, region, 'ISOLATE')
+    yield from settle()
+    check(data.isolate == fill.uid and f'{paint_layer.uid}.base_color' not in tree_nodes(data) and f'{fill.uid}.base_color' in tree_nodes(data),
+          'Show only this layer isolates the layer in the material')
+    click(window, region, 'ROW_' + fill.uid, kind='RIGHTMOUSE')
+    yield from settle()
+    check(control('ISOLATE').label == 'Show all layers', 'while isolated, the layer menu offers Show all layers')
+    click(window, region, 'ISOLATE')
+    yield from settle()
+    check(data.isolate == '' and f'{paint_layer.uid}.base_color' in tree_nodes(data), 'Show all layers brings the whole stack back')
 
     click(window, region, 'ROW_' + fill.uid, kind='RIGHTMOUSE')
     yield from settle()

@@ -683,6 +683,11 @@ def toggle_visible(context, obj, data, uid):
     return refresh(context, obj, data, f'{layer.name} {"shown" if layer.visible else "hidden"}.')
 
 
+def toggle_isolate(context, obj, data, uid):
+    data.isolate = '' if data.isolate == uid else uid
+    return refresh(context, obj, data, f'Showing only {find_layer(data, uid).name}.' if data.isolate else 'Showing every layer.')
+
+
 def set_blend(context, obj, data, key, mode):
     layer = active_layer(data)
     layer.slots[key].blend = mode

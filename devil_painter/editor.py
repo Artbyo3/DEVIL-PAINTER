@@ -1227,7 +1227,8 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             items.append(('DELETE_SELECTED', f'Delete {len(uids)} layers', False))
             self.state.popover = Popover('MENU', anchor, items=tuple(items))
             return
-        items = [('RENAME', 'Rename', False), ('DUPLICATE', 'Duplicate', False), ('COPY_LAYERS', 'Copy', False)]
+        items = [('RENAME', 'Rename', False), ('DUPLICATE', 'Duplicate', False), ('COPY_LAYERS', 'Copy', False),
+                 ('ISOLATE', 'Show all layers' if data.isolate == layer.uid else 'Show only this layer', False)]
         if self.state.clipboard:
             items += [('PASTE_LAYERS', 'Paste layers', False), ('PASTE_MASK', 'Paste mask', False), ('PASTE_EFFECTS', 'Paste effects', False)]
         if layer.kind == 'INSTANCE':
@@ -2000,8 +2001,12 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.message = actions.duplicate_layer(context, obj, data)
         elif key.startswith('ROW_'):
             self.message = self.select_row(context, obj, data, key.removeprefix('ROW_'), control, double)
+        elif key.startswith('EYE_') and self.modifiers[2]:
+            self.message = actions.toggle_isolate(context, obj, data, key.removeprefix('EYE_'))
         elif key.startswith('EYE_'):
             self.message = actions.toggle_visible(context, obj, data, key.removeprefix('EYE_'))
+        elif key == 'ISOLATE':
+            self.message = actions.toggle_isolate(context, obj, data, data.active_uid)
         elif key.startswith('FOLD_'):
             self.state.collapsed ^= {key}
         elif key == 'MOVE_INTO':
