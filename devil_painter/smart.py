@@ -75,6 +75,7 @@ def effect_entry(effect, folder):
     values = {field: plain_value(getattr(effect, field)) for field in EFFECT_FIELDS if field != 'texture'}
     values['image'] = write_png(effect.image, folder / f'{effect.uid}.png', False) if effect.image is not None else ''
     values['texture'] = bpy.path.abspath(effect.texture.filepath) if effect.texture is not None and effect.texture.filepath else ''
+    values['id_colors'] = [list(item.color) for item in effect.id_colors]
     return values
 
 
@@ -88,8 +89,10 @@ def add_effects(obj, data, layer, entries):
         effect = layer.effects.add()
         effect.uid = f'E{data.serial}'
         for field, value in entry.items():
-            if field not in {'image', 'texture'}:
+            if field not in {'image', 'texture', 'id_colors'}:
                 setattr(effect, field, value)
+        for color in entry.get('id_colors', ()):
+            effect.id_colors.add().color = color
         if entry['image']:
             effect.image = owned_image(data, entry['image'], f'DP {obj.name} {data.name} {layer.uid} {effect.uid}', False)
         if entry['texture']:

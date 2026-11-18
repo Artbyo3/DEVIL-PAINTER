@@ -447,6 +447,32 @@ def journey():
     colors = len(numpy.unique(numpy.round(id_map[id_map[..., 3] > .5][:, :3], 2), axis=0))
     check(selected[front_pixel] > .9 and selected[back_pixel] < .1 and selected[top_pixel] < .1,
           f'the ID color mask keeps only the picked UV chunk ({selected[front_pixel]:.2f}, {selected[back_pixel]:.2f}, {selected[top_pixel]:.2f}, {colors} ID colors, {id_map[front_pixel]}, {id_map[back_pixel]})')
+    id_row = f'FX_{picked_uid}.{find_layer(data, picked_uid).effects[-1].uid}'
+    yield from reveal(window, region, id_row, 'LAYERS')
+    click(window, region, id_row)
+    yield from settle()
+    yield from reveal(window, region, 'FX_ADD_ID')
+    click(window, region, 'FX_ADD_ID')
+    yield from settle()
+    press(window, 'LEFTMOUSE', *point_toward_corner(region, area, cube, top, 0.0))
+    yield from settle()
+    extra = active_effect(data).id_colors
+    check(len(extra) == 1 and numpy.abs(numpy.array(extra[0].color) - id_map[top_pixel][:3]).max() < .02 and has('FX_ID_COLOR.0') and has('FX_REMOVE_ID.0'),
+          'Add color picks a second ID color from the model and lists it under the first')
+    yield from context_menu(window, region, picked_uid, 'EXPORT_MASK')
+    both = mask_png(export_dir, find_layer(data, picked_uid))
+    check(both[front_pixel] > .9 and both[top_pixel] > .9 and both[back_pixel] < .1,
+          f'the ID color mask keeps both picked UV chunks and nothing else ({both[front_pixel]:.2f}, {both[top_pixel]:.2f}, {both[back_pixel]:.2f})')
+    yield from reveal(window, region, id_row, 'LAYERS')
+    click(window, region, id_row)
+    yield from settle()
+    yield from reveal(window, region, 'FX_REMOVE_ID.0')
+    click(window, region, 'FX_REMOVE_ID.0')
+    yield from settle()
+    check(len(active_effect(data).id_colors) == 0 and not has('FX_ID_COLOR.0'), 'Remove drops the extra ID color')
+    yield from context_menu(window, region, picked_uid, 'EXPORT_MASK')
+    single = mask_png(export_dir, find_layer(data, picked_uid))
+    check(single[front_pixel] > .9 and single[top_pixel] < .1, 'after Remove the mask keeps only the first ID color again')
 
     click(window, region, 'ADD_PAINT')
     yield from settle()
