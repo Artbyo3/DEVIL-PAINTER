@@ -13,7 +13,7 @@ from .ui_system import ACCENT
 from .canvas import Rect
 from .document import (BAKE_ID_LABELS, DYNAMICS, PROJECTIONS, PROJECTORS, RESOLUTIONS, STROKE_METHODS, active_effect, active_layer, active_tile, find_layer,
                        editing_mask, paint_target, set_channels, slot_value, texture_set, uses_coordinates)
-from .effects import MASK_BLENDS
+from .effects import FILL_PROJECTIONS, MASK_BLENDS, mask_effects
 from .filters import FILTER, FILTERS, GROUPS
 from .post import POST_SLIDERS
 from .compositing import PIN_CORNERS
@@ -150,7 +150,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         self.load_column()
         self.message = library.settings_notice()
         self.last_click = ('', 0.0)
-        self.modifiers = (False, False)
+        self.modifiers = (False, False, False)
         self._closed = False
         self.failure = None
         self.saved_regions = {}
@@ -319,11 +319,12 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         target = self.state.picking
         self.state.picking = ''
         obj, data = self.painted()
-        if target.startswith('id:'):
+        if target.startswith(('id:', 'idadd:')):
             face, location = sets.hit_under(self._region, self._area.spaces.active.region_3d, obj, self.pointer)
             if face < 0:
                 return 'Click on the model to pick an ID color.'
-            return actions.pick_id_color(context, obj, data, target.removeprefix('id:'), face, location)
+            mode, effect_uid = target.split(':', 1)
+            return actions.pick_id_color(context, obj, data, effect_uid, face, location, mode == 'idadd')
         previous = tuple(painting.brush_value(self.scene, 'color'))
         bpy.ops.paint.sample_color(location=(int(self.pointer[0]), int(self.pointer[1])), merged=True, palette=False)
         picked = tuple(painting.brush_value(self.scene, 'color'))
@@ -596,7 +597,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
                 self.state.popover = Popover('MENU', control.rect, items=tuple(items))
             return {'RUNNING_MODAL'}
         if control is not None and event.type == 'LEFTMOUSE' and event.value in {'PRESS', 'DOUBLE_CLICK'}:
-            self.modifiers = (event.ctrl, event.shift)
+            self.modifiers = (event.ctrl, event.shift, event.alt)
             try:
                 result = self.act(context, control, event.value == 'DOUBLE_CLICK')
             except (ValueError, RuntimeError) as failure:
@@ -1065,7 +1066,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         self.message = actions.move_effect(context, obj, data, uid, effect, index)
 
     def select_row(self, context, obj, data, uid, control, double):
-        ctrl, shift = self.modifiers
+        ctrl, shift, _ = self.modifiers
         if shift and data.active_uid:
             order = [layer.uid for layer, _, effect in layer_rows(data, self.state.collapsed) if effect is None]
             start, end = sorted((order.index(data.active_uid), order.index(uid))) if data.active_uid in order else (order.index(uid),) * 2
@@ -1094,7 +1095,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
     def open_effect_menu(self, key, control, data):
         effect = active_effect(data)
         if key == 'FX_BLEND':
-            items = tuple((f'SET_FXBLEND.{mode}', label, mode == effect.blend) for mode, label in MASK_BLENDS)
+            items = tuple((f'SET_FXBLEND.{mode}', label, mode == effect.blend) for mode, label, _ in MASK_BLENDS)
         elif key == 'FX_FILTER':
             offered = [item for item in FILTERS if effect.target == 'CONTENT' or not item.color_only]
             items = tuple(entry for group in GROUPS for entry in ((MENU_HEADING + group, group, False),) + tuple(
@@ -1103,6 +1104,8 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             items = (('SET_FXSOURCE.VALUE', 'Plain value', effect.source == 'VALUE'),
                      ('FX_PICK_TEXTURE', 'Texture from the shelf', effect.source == 'IMAGE')) + tuple(
                 (f'SET_FXPATTERN.{item.key}', 'Pattern · ' + item.label, effect.source == 'PATTERN' and effect.pattern == item.key) for item in PATTERNS)
+        elif key == 'FX_PROJECTION':
+            items = tuple((f'SET_FXPROJECTION.{mode}', label, mode == effect.projection) for mode, label in FILL_PROJECTIONS)
         elif key == 'FX_OTHER':
             items = tuple((f'SET_FXOTHER.{layer.uid}', layer.name, layer.uid == effect.other) for layer in data.layers
                           if layer.uid != data.active_uid and layer.kind != 'INSTANCE') or (('NO_LAYER', 'No other layer', False),)
@@ -1130,7 +1133,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.message = actions.move_effect(context, obj, data, layer.uid, effect.uid, index + (1 if key == 'FX_UP' else -1))
         elif key == 'FX_DELETE':
             self.message = actions.delete_effect(context, obj, data)
-        elif key in {'FX_BLEND', 'FX_FILTER', 'FX_SOURCE', 'FX_OTHER', 'FX_CHANNEL'}:
+        elif key in {'FX_BLEND', 'FX_FILTER', 'FX_SOURCE', 'FX_OTHER', 'FX_CHANNEL', 'FX_PROJECTION'}:
             self.open_effect_menu(key, control, data)
         elif key.startswith('SET_FXPATTERN.'):
             actions.edit_effect(context, obj, data, 'source', 'PATTERN', False)
@@ -1142,11 +1145,17 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         elif key == 'FX_PICK_ID':
             self.state.picking = 'id:' + data.active_effect
             self.message = 'Click the model to pick an ID color.'
+        elif key == 'FX_ADD_ID':
+            self.state.picking = 'idadd:' + data.active_effect
+            self.message = 'Click the model to add another ID color.'
+        elif key.startswith('FX_REMOVE_ID.'):
+            self.message = actions.remove_id_color(context, obj, data, int(key.removeprefix('FX_REMOVE_ID.')))
         elif key.startswith('FXCOLOR.'):
             self.open_color(control, 'fx:' + key.removeprefix('FXCOLOR.'))
-        elif key.startswith(('SET_FXBLEND.', 'SET_FXFILTER.', 'SET_FXSOURCE.', 'SET_FXOTHER.', 'SET_FXCHANNEL.')):
+        elif key.startswith(('SET_FXBLEND.', 'SET_FXFILTER.', 'SET_FXSOURCE.', 'SET_FXOTHER.', 'SET_FXCHANNEL.', 'SET_FXPROJECTION.')):
             prefix, value = key.split('.', 1)
-            field = {'SET_FXBLEND': 'blend', 'SET_FXFILTER': 'filter', 'SET_FXSOURCE': 'source', 'SET_FXOTHER': 'other', 'SET_FXCHANNEL': 'channel'}[prefix]
+            field = {'SET_FXBLEND': 'blend', 'SET_FXFILTER': 'filter', 'SET_FXSOURCE': 'source', 'SET_FXOTHER': 'other', 'SET_FXCHANNEL': 'channel',
+                     'SET_FXPROJECTION': 'projection'}[prefix]
             self.message = actions.edit_effect(context, obj, data, field, value, True)
         elif control.kind == 'ROW' and key.startswith('FX_'):
             uid, effect_uid = key.removeprefix('FX_').split('.')
@@ -1218,7 +1227,8 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             items.append(('DELETE_SELECTED', f'Delete {len(uids)} layers', False))
             self.state.popover = Popover('MENU', anchor, items=tuple(items))
             return
-        items = [('RENAME', 'Rename', False), ('DUPLICATE', 'Duplicate', False), ('COPY_LAYERS', 'Copy', False)]
+        items = [('RENAME', 'Rename', False), ('DUPLICATE', 'Duplicate', False), ('COPY_LAYERS', 'Copy', False),
+                 ('ISOLATE', 'Show all layers' if data.isolate == layer.uid else 'Show only this layer', False)]
         if self.state.clipboard:
             items += [('PASTE_LAYERS', 'Paste layers', False), ('PASTE_MASK', 'Paste mask', False), ('PASTE_EFFECTS', 'Paste effects', False)]
         if layer.kind == 'INSTANCE':
@@ -1979,6 +1989,9 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
                                                              for channel in set_channels(data)]
             items += [(f'SOLO.map:{item.key}', item.label + ' map', data.solo == 'map:' + item.key) for item in MESH_MAPS
                       if item.key in data.maps and data.maps[item.key].image is not None]
+            layer = active_layer(data)
+            if layer is not None and (layer.mask is not None or layer.generator != 'NONE' or mask_effects(layer)):
+                items.append((f'SOLO.mask:{layer.uid}', 'Mask of ' + layer.name, data.solo == 'mask:' + layer.uid))
             self.state.popover = Popover('MENU', control.rect, items=tuple(items))
         elif key.startswith('SOLO.'):
             self.message = actions.set_solo(context, obj, data, key.removeprefix('SOLO.'))
@@ -1988,8 +2001,12 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.message = actions.duplicate_layer(context, obj, data)
         elif key.startswith('ROW_'):
             self.message = self.select_row(context, obj, data, key.removeprefix('ROW_'), control, double)
+        elif key.startswith('EYE_') and self.modifiers[2]:
+            self.message = actions.toggle_isolate(context, obj, data, key.removeprefix('EYE_'))
         elif key.startswith('EYE_'):
             self.message = actions.toggle_visible(context, obj, data, key.removeprefix('EYE_'))
+        elif key == 'ISOLATE':
+            self.message = actions.toggle_isolate(context, obj, data, data.active_uid)
         elif key.startswith('FOLD_'):
             self.state.collapsed ^= {key}
         elif key == 'MOVE_INTO':
@@ -2015,7 +2032,10 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         elif key == 'REMOVE_MASK':
             self.message = actions.remove_mask(context, obj, data)
         elif key.startswith('MASKTHUMB_'):
-            self.message = actions.select_layer(context, obj, data, key.removeprefix('MASKTHUMB_'), mask=True)
+            uid = key.removeprefix('MASKTHUMB_')
+            self.message = actions.select_layer(context, obj, data, uid, mask=True)
+            if self.modifiers[2]:
+                self.message = actions.set_solo(context, obj, data, '' if data.solo == 'mask:' + uid else 'mask:' + uid)
         elif key in {'SELECT_LAYER', 'SELECT_MASK'}:
             self.message = actions.set_target(context, obj, data, 'MASK' if key == 'SELECT_MASK' else 'CONTENT')
         return None

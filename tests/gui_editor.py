@@ -164,6 +164,26 @@ def alpha(image):
     return pixels.reshape(-1, 4)[:, 3]
 
 
+def tree_nodes(data):
+    return data.material.node_tree.nodes
+
+
+def surface_source(data):
+    output = next(node for node in data.material.node_tree.nodes if node.type == 'OUTPUT_MATERIAL')
+    return output.inputs['Surface'].links[0].from_node
+
+
+def upstream_image(node):
+    pending, seen = [node], set()
+    while pending:
+        current = pending.pop()
+        if current.type == 'TEX_IMAGE':
+            return current.image
+        seen.add(current.name)
+        pending.extend(link.from_node for socket in current.inputs for link in socket.links if link.from_node.name not in seen)
+    return None
+
+
 def rendered_pixel(window, area, region, point):
     offscreen = gpu.types.GPUOffScreen(region.width, region.height)
     with offscreen.bind():
@@ -426,6 +446,27 @@ def journey():
     click(window, region, 'EYE_' + fill.uid)
     yield from settle()
     check(fill.visible and fill.uid in data.material[SIGNATURE_KEY], 'the eye shows the fill layer again')
+    press(window, 'LEFTMOUSE', *spot(region, 'EYE_' + paint_layer.uid), alt=True)
+    yield from settle()
+    check(data.isolate == paint_layer.uid and f'{fill.uid}.base_color' not in tree_nodes(data) and f'{paint_layer.uid}.base_color' in tree_nodes(data)
+          and control('EYE_' + fill.uid).icon == 'HIDE_ON' and fill.visible, 'Alt-clicking an eye shows only that layer without hiding the others for good')
+    press(window, 'LEFTMOUSE', *spot(region, 'EYE_' + paint_layer.uid), alt=True)
+    yield from settle()
+    check(data.isolate == '' and f'{fill.uid}.base_color' in tree_nodes(data) and control('EYE_' + fill.uid).icon == 'HIDE_OFF',
+          'Alt-clicking the eye again shows every layer')
+    click(window, region, 'ROW_' + fill.uid, kind='RIGHTMOUSE')
+    yield from settle()
+    check(control('ISOLATE').label == 'Show only this layer', 'the layer menu offers Show only this layer')
+    click(window, region, 'ISOLATE')
+    yield from settle()
+    check(data.isolate == fill.uid and f'{paint_layer.uid}.base_color' not in tree_nodes(data) and f'{fill.uid}.base_color' in tree_nodes(data),
+          'Show only this layer isolates the layer in the material')
+    click(window, region, 'ROW_' + fill.uid, kind='RIGHTMOUSE')
+    yield from settle()
+    check(control('ISOLATE').label == 'Show all layers', 'while isolated, the layer menu offers Show all layers')
+    click(window, region, 'ISOLATE')
+    yield from settle()
+    check(data.isolate == '' and f'{paint_layer.uid}.base_color' in tree_nodes(data), 'Show all layers brings the whole stack back')
 
     click(window, region, 'ROW_' + fill.uid, kind='RIGHTMOUSE')
     yield from settle()
@@ -445,6 +486,27 @@ def journey():
     yield from settle()
     check(data.target == 'MASK' and has('MASK_INFO') and bpy.context.scene.tool_settings.image_paint.canvas == fill.mask,
           'clicking the mask thumbnail selects the mask for painting and editing')
+    press(window, 'LEFTMOUSE', *spot(region, 'MASKTHUMB_' + fill.uid), alt=True)
+    yield from settle()
+    check(data.solo == 'mask:' + fill.uid and control('VIEW').text == 'Mask · ' + fill.name and data.target == 'MASK',
+          'Alt-clicking the mask thumbnail shows that mask in the viewport and keeps it selected for painting')
+    check(surface_source(data).type == 'EMISSION' and upstream_image(surface_source(data)) == fill.mask,
+          'in mask view the material emits the layer mask instead of the shaded material')
+    press(window, 'LEFTMOUSE', *spot(region, 'MASKTHUMB_' + fill.uid), alt=True)
+    yield from settle()
+    check(data.solo == '' and surface_source(data).type == 'BSDF_PRINCIPLED' and control('VIEW').text == 'Material',
+          'Alt-clicking the mask thumbnail again goes back to the material')
+    click(window, region, 'VIEW')
+    yield from settle()
+    check(has('SOLO.mask:' + fill.uid), 'the View menu offers the mask of the selected layer')
+    click(window, region, 'SOLO.mask:' + fill.uid)
+    yield from settle()
+    check(data.solo == 'mask:' + fill.uid and surface_source(data).type == 'EMISSION', 'the View menu shows the mask in the viewport')
+    click(window, region, 'VIEW')
+    yield from settle()
+    click(window, region, 'SOLO.')
+    yield from settle()
+    check(data.solo == '' and surface_source(data).type == 'BSDF_PRINCIPLED', 'the View menu goes back to the material')
 
     row = control('ROW_' + paint_layer.uid).rect
     card = next(rect for rect, _ in editor._active.workspace.cards if rect.contains(row.x + row.w / 2, row.y + row.h / 2))
