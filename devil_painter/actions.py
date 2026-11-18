@@ -805,6 +805,8 @@ def commit_value(context, obj, data, label):
 
 def set_solo(context, obj, data, key):
     data.solo = key
+    if key.startswith('mask:'):
+        return refresh(context, obj, data, f'Viewing the mask of {find_layer(data, key.removeprefix("mask:")).name}.')
     if key.startswith('map:'):
         return refresh(context, obj, data, f'Viewing the {MESH_MAP[key.removeprefix("map:")].label.lower()} map.')
     return refresh(context, obj, data, f'Viewing {CHANNEL[key].label} only.' if key else 'Viewing the full material.')

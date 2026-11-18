@@ -209,6 +209,9 @@ def start_layout(layout, state, bounds, obj_name, setup):
 
 
 def view_label(data):
+    if data.solo.startswith('mask:'):
+        layer = find_layer(data, data.solo.removeprefix('mask:'))
+        return 'Mask · ' + layer.name if layer is not None else 'Material'
     if data.solo.startswith('map:'):
         return MESH_MAP[data.solo.removeprefix('map:')].label
     return CHANNEL[data.solo].label if data.solo else 'Material'
@@ -494,7 +497,8 @@ def fill_layers(layout, state, data, flow):
                      icon='DISCLOSURE' if folded else 'DOWN', tip='Show the layers in this folder' if folded else 'Hide the layers in this folder')
         if layer.mask is not None:
             flow.add(f'MASKTHUMB_{uid}', Rect(row.x + 34 * s + size, row.y + (row.h - size) / 2, size, size), 'THUMB',
-                     preview=layer.mask, active=selected and target == 'MASK', tip='Select the mask to paint and edit it')
+                     preview=layer.mask, active=selected and target == 'MASK',
+                     tip='Select the mask to paint and edit it; Alt-click to show the mask in the viewport')
 
 
 def layers_panel(layout, state, data):

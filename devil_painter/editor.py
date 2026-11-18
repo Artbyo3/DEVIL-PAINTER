@@ -13,7 +13,7 @@ from .ui_system import ACCENT
 from .canvas import Rect
 from .document import (BAKE_ID_LABELS, DYNAMICS, PROJECTIONS, PROJECTORS, RESOLUTIONS, STROKE_METHODS, active_effect, active_layer, active_tile, find_layer,
                        editing_mask, paint_target, set_channels, slot_value, texture_set, uses_coordinates)
-from .effects import MASK_BLENDS
+from .effects import MASK_BLENDS, mask_effects
 from .filters import FILTER, FILTERS, GROUPS
 from .post import POST_SLIDERS
 from .compositing import PIN_CORNERS
@@ -150,7 +150,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         self.load_column()
         self.message = library.settings_notice()
         self.last_click = ('', 0.0)
-        self.modifiers = (False, False)
+        self.modifiers = (False, False, False)
         self._closed = False
         self.failure = None
         self.saved_regions = {}
@@ -596,7 +596,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
                 self.state.popover = Popover('MENU', control.rect, items=tuple(items))
             return {'RUNNING_MODAL'}
         if control is not None and event.type == 'LEFTMOUSE' and event.value in {'PRESS', 'DOUBLE_CLICK'}:
-            self.modifiers = (event.ctrl, event.shift)
+            self.modifiers = (event.ctrl, event.shift, event.alt)
             try:
                 result = self.act(context, control, event.value == 'DOUBLE_CLICK')
             except (ValueError, RuntimeError) as failure:
@@ -1065,7 +1065,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         self.message = actions.move_effect(context, obj, data, uid, effect, index)
 
     def select_row(self, context, obj, data, uid, control, double):
-        ctrl, shift = self.modifiers
+        ctrl, shift, _ = self.modifiers
         if shift and data.active_uid:
             order = [layer.uid for layer, _, effect in layer_rows(data, self.state.collapsed) if effect is None]
             start, end = sorted((order.index(data.active_uid), order.index(uid))) if data.active_uid in order else (order.index(uid),) * 2
@@ -1979,6 +1979,9 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
                                                              for channel in set_channels(data)]
             items += [(f'SOLO.map:{item.key}', item.label + ' map', data.solo == 'map:' + item.key) for item in MESH_MAPS
                       if item.key in data.maps and data.maps[item.key].image is not None]
+            layer = active_layer(data)
+            if layer is not None and (layer.mask is not None or layer.generator != 'NONE' or mask_effects(layer)):
+                items.append((f'SOLO.mask:{layer.uid}', 'Mask of ' + layer.name, data.solo == 'mask:' + layer.uid))
             self.state.popover = Popover('MENU', control.rect, items=tuple(items))
         elif key.startswith('SOLO.'):
             self.message = actions.set_solo(context, obj, data, key.removeprefix('SOLO.'))
@@ -2015,7 +2018,10 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         elif key == 'REMOVE_MASK':
             self.message = actions.remove_mask(context, obj, data)
         elif key.startswith('MASKTHUMB_'):
-            self.message = actions.select_layer(context, obj, data, key.removeprefix('MASKTHUMB_'), mask=True)
+            uid = key.removeprefix('MASKTHUMB_')
+            self.message = actions.select_layer(context, obj, data, uid, mask=True)
+            if self.modifiers[2]:
+                self.message = actions.set_solo(context, obj, data, '' if data.solo == 'mask:' + uid else 'mask:' + uid)
         elif key in {'SELECT_LAYER', 'SELECT_MASK'}:
             self.message = actions.set_target(context, obj, data, 'MASK' if key == 'SELECT_MASK' else 'CONTENT')
         return None

@@ -788,6 +788,20 @@ def show_map(build, output, image):
     build.links.new(emission.outputs[0], output.inputs['Surface'])
 
 
+def viewed_mask(data):
+    uid = data.solo.removeprefix('mask:') if data.solo.startswith('mask:') else None
+    return next((layer for layer in resolved(data.layers) if layer.uid == uid), None)
+
+
+def show_mask(build, output, layer):
+    gamma = build.nodes.new('ShaderNodeGamma')
+    gamma.inputs['Gamma'].default_value = DISPLAY_GAMMA
+    link_or_set(build, gamma.inputs['Color'], mask_value(build, layer))
+    emission = build.nodes.new('ShaderNodeEmission')
+    build.links.new(gamma.outputs['Color'], emission.inputs['Color'])
+    build.links.new(emission.outputs[0], output.inputs['Surface'])
+
+
 def viewed_map(data):
     item = data.maps.get(data.solo.removeprefix('map:')) if data.solo.startswith('map:') else None
     return item.image if item is not None else None
@@ -810,6 +824,8 @@ def rebuild(data, solo=None, raw=False):
         show_map(build, output, data.cage_map if data.bake_paint == 'CAGE' else data.skew_map)
     elif not raw and solo is None and viewed_map(data) is not None:
         show_map(build, output, viewed_map(data))
+    elif not raw and solo is None and viewed_mask(data) is not None:
+        show_mask(build, output, viewed_mask(data))
     material[SIGNATURE_KEY] = '' if raw else signature(data)
 
 
