@@ -69,6 +69,36 @@ BAKE_OBJECTS = {'BAKE_SOURCE': ('bake_source', 'SET_SOURCE.'), 'BAKE_CAGE': ('ba
 AUTO_BAKE_DELAY = 1.0
 LAYER_KEYS = ('ROW_', 'FX_', 'EYE_', 'FXEYE_', 'MASKTHUMB_')
 _active = None
+_pending_regions = []
+
+
+def give_back_regions(space, saved):
+    for name, value in saved.items():
+        if not space.is_property_readonly(name) and not getattr(space, name):
+            setattr(space, name, value)
+
+
+def found_window(address):
+    return next((window for window in bpy.context.window_manager.windows if window.as_pointer() == address), None)
+
+
+def found_space(window, address):
+    return next((space for area in window.screen.areas for space in area.spaces if space.as_pointer() == address), None)
+
+
+def regions_after_full_screen():
+    for pending in list(_pending_regions):
+        window_address, space_address, saved = pending
+        window = found_window(window_address)
+        if window is not None and window.screen.show_fullscreen:
+            continue
+        space = None if window is None else found_space(window, space_address)
+        if space is not None:
+            give_back_regions(space, saved)
+            for area in window.screen.areas:
+                area.tag_redraw()
+        _pending_regions.remove(pending)
+    return .1 if _pending_regions else None
 
 
 def close_active():
@@ -108,6 +138,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             _active.cleanup()
             return {'FINISHED'}
         self._area, self._window = context.area, context.window
+        self._window_address = context.window.as_pointer()
         self._region = next(r for r in context.area.regions if r.type == 'WINDOW')
         self.pointer = (0, 0)
         self.message = ''
@@ -162,6 +193,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
 
     def hide_regions(self):
         space = self._area.spaces.active
+        self._space_address = space.as_pointer()
         for name in HIDDEN_REGIONS:
             if not hasattr(space, name) or space.is_property_readonly(name):
                 continue
@@ -2153,9 +2185,12 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         if self._closed:
             return
         self._closed = True
+        window = found_window(self._window_address)
+        space = None if window is None else found_space(window, self._space_address)
         if self.engine_before:
             try:
-                self._area.spaces.active.shading.type = 'MATERIAL'
+                if space is not None:
+                    space.shading.type = 'MATERIAL'
                 self.scene.render.engine = self.engine_before
             except ReferenceError:
                 pass
@@ -2172,15 +2207,15 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         if self._timer is not None:
             bpy.context.window_manager.event_timer_remove(self._timer)
             self._timer = None
-        try:
-            space = self._area.spaces.active
-            with bpy.context.temp_override(window=self._window, area=self._area):
-                for name, value in self.saved_regions.items():
-                    if not space.is_property_readonly(name):
-                        setattr(space, name, value)
-            self._area.tag_redraw()
-        except ReferenceError:
-            pass
+        if space is not None:
+            give_back_regions(space, self.saved_regions)
+        if window is not None:
+            if window.screen.show_fullscreen:
+                _pending_regions.append((self._window_address, self._space_address, dict(self.saved_regions)))
+                if not bpy.app.timers.is_registered(regions_after_full_screen):
+                    bpy.app.timers.register(regions_after_full_screen, first_interval=.1)
+            for area in window.screen.areas:
+                area.tag_redraw()
         try:
             self.close_flat(bpy.context)
         except (ReferenceError, RuntimeError):
