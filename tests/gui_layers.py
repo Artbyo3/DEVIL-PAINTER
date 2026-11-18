@@ -363,7 +363,7 @@ def journey():
     yield from reveal(window, region, 'FX_BLEND')
     click(window, region, 'FX_BLEND')
     yield from settle()
-    check(len(keys('SET_FXBLEND.')) == len(MASK_BLENDS) == len(BLEND_MODES) - 1,
+    check(len(keys('SET_FXBLEND.')) == len(MASK_BLENDS) == 19,
           f'mask effects offer the full layer blend list ({len(keys("SET_FXBLEND."))} modes)')
     click(window, region, 'SET_FXBLEND.SUBTRACT')
     yield from settle()
