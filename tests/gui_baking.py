@@ -14,6 +14,7 @@ import devil_painter
 from devil_painter import editor
 from devil_painter.meshmaps import id_color
 from tools.workspace import prepare_scratch
+from tests.gui_harness import settle, until
 
 TIMEOUT = 600
 STARTED = time.time()
@@ -107,7 +108,7 @@ def sphere(name, radius, materials):
 def open_card(window, region):
     if not has('BAKE_RUN'):
         click(window, region, 'BAKE')
-        yield 0.4
+        yield from settle()
     check(has('BAKE_RUN'), 'the bake card is open')
 
 
@@ -116,29 +117,29 @@ def toggle_maps(window, region, wanted):
     for key in keys('BAKEMAP.'):
         if control(key).active != (key.removeprefix('BAKEMAP.') in wanted):
             click(window, region, key)
-            yield 0.1
+            yield from settle()
     check({key.removeprefix('BAKEMAP.') for key in keys('BAKEMAP.') if control(key).active} == set(wanted), f'the bake card selects {sorted(wanted)}')
 
 
 def choose(window, region, opener, item):
     yield from open_card(window, region)
     click(window, region, opener)
-    yield 0.3
+    yield from settle()
     check(has(item), f'{opener} offers {item}')
     click(window, region, item)
-    yield 0.4
+    yield from settle()
 
 
-def bake(window, region, wait=2.5):
+def bake(window, region):
     yield from open_card(window, region)
     click(window, region, 'BAKE_RUN')
-    yield wait
+    yield from settle()
 
 
 def journey():
     prepare_scratch()
     devil_painter.register()
-    yield 0.5
+    yield from settle()
     window, area, region = viewport()
     cube = bpy.data.objects['Cube']
     cube.name = 'Crate_low'
@@ -150,11 +151,11 @@ def journey():
     mesh.color_attributes.render_color_index = mesh.color_attributes.active_color_index = 0
     middle = (area.x + area.width / 2, area.y + area.height / 2)
     press(window, 'P', *middle, ctrl=True, alt=True)
-    yield 0.6
+    yield from settle()
     click(window, region, 'RES.0.1024')
-    yield 0.2
+    yield from settle()
     click(window, region, 'START')
-    yield 2.0
+    yield from settle()
     data = cube.devil_painter.sets[0]
 
     yield from open_card(window, region)
@@ -164,7 +165,7 @@ def journey():
           'height asks for a high-poly while normal also bakes from the mesh itself')
     rect = control('BAKE_SAMPLES').rect
     press(window, 'LEFTMOUSE', region.x + rect.x + rect.w * .03, region.y + rect.y + rect.h / 2)
-    yield 0.2
+    yield from settle()
     check(data.bake_samples <= 6, 'the samples slider lowers the bake quality')
 
     yield from toggle_maps(window, region, {'normal', 'height'})
@@ -196,16 +197,16 @@ def journey():
     bpy.context.scene.collection.objects.link(cage)
     high.hide_set(True)
     cage.hide_set(True)
-    yield 0.3
+    yield from settle()
     yield from open_card(window, region)
     click(window, region, 'BAKE_MATCH')
-    yield 0.4
+    yield from settle()
     check(data.bake_match and has('BAKE_MATCHED') and 'Crate_high' in control('BAKE_MATCHED').label
           and 'Crate_cage' in control('BAKE_MATCHED_CAGE').label and not has('BAKE_SOURCE'),
           'Match by name pairs Crate_low with Crate_high and Crate_cage')
     yield from choose(window, region, 'BAKE_ID', 'SET_BAKE_ID.MATERIAL')
     yield from toggle_maps(window, region, {'normal', 'height', 'id'})
-    yield from bake(window, region, 5.0)
+    yield from bake(window, region)
     check('Baked 3' in editor._active.message, 'normal, height, and ID bake from the matched high-poly')
     tangent = pixels(data.maps['normal'].image)
     covered = tangent[tangent[:, 3] > .5]
@@ -223,7 +224,7 @@ def journey():
     check(control('BAKETHUMB.height').preview == data.maps['height'].image, 'the bake card shows the height thumbnail')
 
     click(window, region, 'BAKE_MATCH')
-    yield 0.3
+    yield from settle()
     yield from choose(window, region, 'BAKE_SOURCE', 'SET_SOURCE.Crate_high')
     yield from choose(window, region, 'BAKE_CAGE', 'SET_CAGE.Crate_high')
     check(data.bake_source == high and data.bake_cage == high, 'the high-poly and cage dropdowns pick meshes by hand')
@@ -236,46 +237,47 @@ def journey():
     yield from open_card(window, region)
     rect = control('BAKE_EXTRUSION').rect
     press(window, 'LEFTMOUSE', region.x + rect.x + rect.w * .2, region.y + rect.y + rect.h / 2)
-    yield 0.2
+    yield from settle()
     check(abs(data.bake_extrusion - .1) < .02, 'the ray distance slider sets how far rays search')
 
     yield from toggle_maps(window, region, {'normal', 'height', 'id'})
     click(window, region, 'BAKE_AUTO')
-    yield 0.3
+    yield from settle()
     check(data.bake_auto and control('BAKE_AUTO').active, 'automatic rebaking turns on')
-    yield 4.0
+    yield from settle()
     before = pixels(data.maps['height'].image).copy()
     signature = data.bake_signature
     high.scale = (1.06, 1.06, 1.06)
-    yield 5.0
+    yield from until(lambda: data.bake_signature != signature, 'the automatic rebake after the high-poly moved')
     after = pixels(data.maps['height'].image)
     check(data.bake_signature != signature and numpy.abs(after - before).max() > .02 and editor._active.message.startswith('Rebaked'),
           'moving the high-poly rebakes the baked maps automatically')
+    signature = data.bake_signature
     yield from choose(window, region, 'BAKE_ID', 'SET_BAKE_ID.OBJECT')
-    yield 5.0
+    yield from until(lambda: data.bake_signature != signature, 'the automatic rebake after the ID setting changed')
     found, share = dominant(pixels(data.maps['id'].image), 1)
     check(share[0] > .9 and near(found[0], id_color('Crate_high')), 'changing the ID setting rebakes the ID map from the high-poly object')
     stable = data.bake_signature
-    yield 2.0
+    yield from settle()
     check(data.bake_signature == stable, 'nothing rebakes while settings and meshes stay the same')
     yield from open_card(window, region)
     click(window, region, 'BAKE_AUTO')
-    yield 0.3
+    yield from settle()
     check(not data.bake_auto, 'automatic rebaking turns off')
 
     press(window, 'ESC', *middle)
-    yield 0.3
+    yield from settle()
     check(has('MAP.height') and control('MAP.height').preview == data.maps['height'].image, 'the mesh maps panel shows the height thumbnail')
     click(window, region, 'MAP.height')
-    yield 0.6
+    yield from settle()
     check(data.solo == 'map:height' and control('VIEW').text == 'Height', 'clicking the height thumbnail views it on the model')
     click(window, region, 'VIEW')
-    yield 0.3
+    yield from settle()
     click(window, region, 'SOLO.')
-    yield 0.5
+    yield from settle()
 
     click(window, region, 'CLOSE')
-    yield 0.6
+    yield from settle()
     check(editor._active is None, 'Devil Painter closes')
     devil_painter.unregister()
     check(not hasattr(bpy.types.Object, 'devil_painter'), 'Devil Painter unregisters cleanly')

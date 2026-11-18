@@ -18,6 +18,7 @@ from devil_painter import editor, exporting, library, projects, tiles
 from devil_painter.actions import owned_images
 from devil_painter.document import texture_set
 from tools.workspace import prepare_scratch
+from tests.gui_harness import settle
 
 TIMEOUT = 300
 STARTED = time.time()
@@ -134,30 +135,30 @@ def journey():
     check(library.library_root().resolve().is_relative_to(scratch.resolve()), 'the test library lives in scratch, not the user library')
     (library.library_root() / library.SETTINGS_FILE).unlink(missing_ok=True)
     devil_painter.register()
-    yield 0.5
+    yield from settle()
     window, area, region = viewport()
     cube, body_low, body_high, trim = build_mesh(area)
     middle = (area.x + area.width / 2, area.y + area.height / 2)
 
     press(window, 'P', *middle, ctrl=True, alt=True)
-    yield 0.6
+    yield from settle()
     check(control('SETUP_SET.0').label == 'Body' and control('SETUP_SET.1').label == 'Trim', 'the setup card lists one texture set per material slot')
     check(control('SETUP_TILES.0').label == 'UDIM 1001, 1002' and control('SETUP_TILES.1').label == 'Single tile'
           and has('SETUP_UDIM') and control('SETUP_UDIM').active, 'the setup card detects the UDIM tiles each set uses')
     click(window, region, 'SETUP_TEMPLATE')
-    yield 0.3
+    yield from settle()
     names = [item['name'] for item in projects.PROJECT_TEMPLATES]
     click(window, region, f'SET_SETUP_TEMPLATE.{names.index("Unreal Engine")}')
-    yield 0.3
+    yield from settle()
     check(control('SETUP_TEMPLATE').text == 'Unreal Engine' and control('SETUP_NF.DIRECTX').active and has('SETUP_NS.TANGENT'),
           'a project template presets channels, shader, export, and the DirectX normal format')
     click(window, region, 'RES.0.1024')
-    yield 0.2
+    yield from settle()
     click(window, region, 'RES.1.1024')
-    yield 0.2
+    yield from settle()
     check(control('RES.1.1024').active, 'each texture set picks its own resolution')
     click(window, region, 'START')
-    yield 2.0
+    yield from settle()
     project = cube.devil_painter
     body, trim_set = project.sets[0], project.sets[1]
     check(project.enabled and len(project.sets) == 2 and tiles.numbers(body) == [1001, 1002] and tiles.numbers(trim_set) == [1001],
@@ -172,9 +173,9 @@ def journey():
 
     rect = control('BRUSHVAL.roughness').rect
     press(window, 'LEFTMOUSE', region.x + rect.x + rect.w * .9, region.y + rect.y + rect.h / 2)
-    yield 0.3
+    yield from settle()
     stroke_at(window, region, screen_point(region, area, cube, body_high))
-    yield 1.2
+    yield from settle()
     check(project.active_set == 0 and project.active_tile == 1002, 'clicking a face in tile 1002 switches painting to that tile')
     selected = numpy.empty(len(cube.data.polygons), dtype=bool)
     cube.data.polygons.foreach_get('select', selected)
@@ -185,88 +186,88 @@ def journey():
     check(pixels(tiles.variant(body, canvas, 1002))[:, 0].max() > .85, 'the stroke paints roughness into the tile 1002 canvas')
 
     stroke_at(window, region, screen_point(region, area, cube, trim))
-    yield 1.2
+    yield from settle()
     check(project.active_set == 1 and pixels(trim_set.layers[0].image)[:, 3].max() > .5, 'clicking a Trim face paints the Trim set')
     check(pixels(tiles.variant(body, body_paint.image, 1002))[:, 3].max() > .5, 'the Body painting stays in its own set')
 
     rect = control('SET.1').rect
     move(window, region.x + rect.x + rect.w * .5, region.y + rect.y + rect.h / 2)
-    yield 0.4
+    yield from settle()
     check(editor._active.highlight == 1 and editor._active.highlight_cache[1][2] == 4, 'hovering a texture set highlights its faces in the viewport')
     move(window, region.x + region.width * .3, region.y + region.height * .6)
-    yield 0.3
+    yield from settle()
     click(window, region, 'SETEYE.1')
-    yield 0.5
+    yield from settle()
     output = next(node for node in trim_set.material.node_tree.nodes if node.type == 'OUTPUT_MATERIAL')
     check(not trim_set.visible and not trim_set.export and not any(node.type == 'TEX_IMAGE' for node in trim_set.material.node_tree.nodes),
           'disabling a texture set hides its layers and leaves it out of export')
     click(window, region, 'SETEYE.1')
-    yield 0.5
+    yield from settle()
     check(trim_set.visible and trim_set.export, 'enabling it again brings the layers back')
     click(window, region, 'CHANNELS')
-    yield 0.4
+    yield from settle()
     click(window, region, 'CHANNELS_ALL')
-    yield 0.2
+    yield from settle()
     click(window, region, 'CHANSET.user1')
-    yield 0.6
+    yield from settle()
     check(body.channels['user1'].enabled and trim_set.channels['user1'].enabled, 'the Channels card adds a channel to every texture set at once')
     press(window, 'ESC', *middle)
-    yield 0.3
+    yield from settle()
 
     click(window, region, 'SET.0')
-    yield 0.5
+    yield from settle()
     check(project.active_set == 0 and has('TILE.1001') and has('TILE.1002'), 'the Texture sets panel switches sets and shows their tiles')
     click(window, region, 'TILE.1001')
-    yield 0.5
+    yield from settle()
     check(project.active_tile == 1001 and control('TILE.1001').active, 'tile chips switch the painted tile')
     click(window, region, 'SETRES.1')
-    yield 0.3
+    yield from settle()
     click(window, region, 'SET_SETRES.1.2048')
-    yield 1.0
+    yield from settle()
     check(trim_set.resolution == 2048 and tuple(trim_set.layers[0].image.size) == (2048, 2048), 'a texture set changes resolution and keeps its paint')
     check(pixels(trim_set.layers[0].image)[:, 3].max() > .5, 'the rescaled Trim paint survives')
 
     click(window, region, 'SET.0')
-    yield 0.4
+    yield from settle()
     click(window, region, 'ADD_PAINT')
-    yield 0.6
+    yield from settle()
     moved_uid = body.active_uid
     click(window, region, 'ROW_' + moved_uid, kind='RIGHTMOUSE')
-    yield 0.3
+    yield from settle()
     click(window, region, 'MOVE_TO_SET.1')
-    yield 1.0
+    yield from settle()
     moved = next((layer for layer in trim_set.layers if layer.name == 'Paint 2'), None)
     check(project.active_set == 1 and moved is not None and tuple(moved.image.size) == (2048, 2048)
           and not any(layer.uid == moved_uid for layer in body.layers), 'a layer moves to another texture set at its resolution')
     click(window, region, 'SHELF_TAB.MATERIALS')
-    yield 0.3
+    yield from settle()
     click(window, region, 'ITEM.0')
-    yield 0.8
+    yield from settle()
     check(trim_set.layers[-1].name == 'Red Plastic' or any(layer.name == 'Red Plastic' for layer in trim_set.layers), 'the Trim set gets a red fill')
     click(window, region, 'SET.0')
-    yield 0.4
+    yield from settle()
 
     click(window, region, 'BAKE')
-    yield 0.4
+    yield from settle()
     for key in ('curvature', 'thickness', 'position', 'world_normal', 'id'):
         click(window, region, 'BAKEMAP.' + key)
-        yield 0.05
+        yield from settle()
     rect = control('BAKE_SAMPLES').rect
     press(window, 'LEFTMOUSE', region.x + rect.x + rect.w * .03, region.y + rect.y + rect.h / 2)
-    yield 0.2
+    yield from settle()
     click(window, region, 'BAKE_RUN')
-    yield 2.0
+    yield from settle()
     ao = body.maps['ao'].image
     low_cover = (pixels(ao)[:, 3] > .5).mean()
     high_cover = (pixels(tiles.variant(body, ao, 1002))[:, 3] > .5).mean()
     check(0 < high_cover < low_cover and 'ao' in trim_set.maps, 'ambient occlusion bakes per tile and per texture set')
     press(window, 'Z', *middle, ctrl=True)
-    yield 1.0
+    yield from settle()
     cube = bpy.data.objects['Cube']
     project = cube.devil_painter
     check(editor._active is not None and not any(item.image for item in project.sets[0].maps), 'Ctrl+Z undoes the bake')
     press(window, 'Z', *middle, ctrl=True, shift=True)
-    yield 1.0
+    yield from settle()
     cube = bpy.data.objects['Cube']
     project = cube.devil_painter
     body, trim_set = project.sets[0], project.sets[1]
@@ -275,23 +276,23 @@ def journey():
     def card():
         if not has('EXPORT_RUN'):
             click(window, region, 'EXPORT')
-        yield 0.4
+        yield from settle()
 
     export_dir = scratch / 'project_export'
     yield from card()
     check(has('EXPORT_TEMPLATE') and has('EXPORT_SET.0') and has('EXPORT_SET.1') and has('EXPORT_PATTERN'),
           'the export card offers templates, texture sets, naming, and the folder')
     click(window, region, 'EXPORT_TEMPLATE')
-    yield 0.3
+    yield from settle()
     names = [item['name'] for item in exporting.all_templates()]
     click(window, region, f'SET_TEMPLATE.{names.index("Unreal Engine")}')
-    yield 0.3
+    yield from settle()
     yield from card()
     check(control('EXPORT_TEMPLATE').text == 'Unreal Engine' and has('OUT_LABEL.1'), 'picking the Unreal Engine template lists its packed outputs')
     field(window, region, 'EXPORT_DIR', str(export_dir))
-    yield 0.3
+    yield from settle()
     click(window, region, 'EXPORT_RUN')
-    yield 3.0
+    yield from settle()
     expected = ['Cube_Body_BaseColor.1001.png', 'Cube_Body_BaseColor.1002.png', 'Cube_Body_OcclusionRoughnessMetallic.1002.png',
                 'Cube_Body_Normal.1001.png', 'Cube_Trim_BaseColor.png', 'Cube_Trim_OcclusionRoughnessMetallic.png']
     check(all((export_dir / name).is_file() for name in expected), 'export writes every set, with UDIM numbers only for tiled sets')
@@ -307,33 +308,33 @@ def journey():
 
     yield from card()
     click(window, region, 'TEMPLATE_DUPLICATE')
-    yield 0.3
+    yield from settle()
     yield from card()
     check(project.export_template == 'Unreal Engine copy' and has('OUT_SRC.1.0') and has('OUT_FORMAT.1'), 'a custom copy of the template is editable')
     for opener, item in (('OUT_FORMAT.1', 'SET_FORMAT.1.OPEN_EXR'), ('OUT_DEPTH.1', 'SET_DEPTH.1.32'), ('OUT_SRC.1.3', 'SET_SRC.1.3.user1')):
         click(window, region, opener)
-        yield 0.3
+        yield from settle()
         click(window, region, item)
-        yield 0.3
+        yield from settle()
         yield from card()
     custom = exporting.find_template('Unreal Engine copy')['outputs'][1]
     check(custom['format'] == 'OPEN_EXR' and custom['depth'] == '32' and custom['sources'] == ['ao', 'roughness', 'metallic', 'user1'],
           'outputs take a format, a bit depth, and an extra packed channel')
     click(window, region, 'EXPORT_SET.1')
-    yield 0.3
+    yield from settle()
     field(window, region, 'EXPORT_PATTERN', '{set}-{output}-{udim}')
-    yield 0.3
+    yield from settle()
     yield from card()
     click(window, region, 'EXPORT_DEPTH')
-    yield 0.3
+    yield from settle()
     click(window, region, 'SET_EXPORT_DEPTH.16')
-    yield 0.3
+    yield from settle()
     yield from card()
     custom_dir = scratch / 'custom_export'
     field(window, region, 'EXPORT_DIR', str(custom_dir))
-    yield 0.3
+    yield from settle()
     click(window, region, 'EXPORT_RUN')
-    yield 3.0
+    yield from settle()
     exr = custom_dir / 'Body-OcclusionRoughnessMetallic-1002.exr'
     png = custom_dir / 'Body-BaseColor-1001.png'
     check(exr.is_file() and png.is_file() and not any('Trim' in path.name for path in custom_dir.iterdir()),
@@ -345,35 +346,35 @@ def journey():
 
     yield from card()
     click(window, region, 'EXPORT_TEMPLATE')
-    yield 0.3
+    yield from settle()
     names = [item['name'] for item in exporting.all_templates()]
     click(window, region, f'SET_TEMPLATE.{names.index("USD Preview Surface")}')
-    yield 0.3
+    yield from settle()
     yield from card()
     click(window, region, 'EXPORT_SET.0')
-    yield 0.2
+    yield from settle()
     click(window, region, 'EXPORT_SET.1')
-    yield 0.2
+    yield from settle()
     for opener, item in (('EXPORT_SIZE', 'SET_EXPORT_SIZE.512'), ('EXPORT_PADDING', 'SET_EXPORT_PADDING.-1')):
         click(window, region, opener)
-        yield 0.3
+        yield from settle()
         click(window, region, item)
-        yield 0.3
+        yield from settle()
         yield from card()
     usd_dir = scratch / 'usd_export'
     field(window, region, 'EXPORT_DIR', str(usd_dir))
-    yield 0.3
+    yield from settle()
     click(window, region, 'EXPORT_RUN')
-    yield 3.0
+    yield from settle()
     diffuse, _, _ = loaded(usd_dir / 'Trim-diffuseColor-1001.png')
     red = (diffuse[:, 0] > .5) & (diffuse[:, 1] < .2)
     check(len(diffuse) == 512 * 512 and red.mean() > .97 and (usd_dir / 'Trim-occlusion-1001.png').is_file(),
           'the USD template writes 512 px files with infinite padding filling the whole texture')
 
     click(window, region, 'SHELF_TAB.ALPHAS')
-    yield 0.4
+    yield from settle()
     click(window, region, 'ITEM.2')
-    yield 0.4
+    yield from settle()
     alpha_image = texture_set(cube).brush_alpha
     check(alpha_image is not None and alpha_image.packed_file is None and Path(bpy.path.abspath(alpha_image.filepath)).is_file(),
           'the brush alpha comes from an external file')
@@ -384,7 +385,7 @@ def journey():
     check(owned and all(image.packed_file is not None for image in owned), 'saving packs every layer, mask, canvas, and UDIM tile image')
     check(alpha_image.packed_file is not None, 'saving also packs external resources the project uses, so the .blend is self-contained')
     bpy.ops.wm.open_mainfile(filepath=str(saved))
-    yield 1.5
+    yield from settle()
     window, area, region = viewport()
     middle = (area.x + area.width / 2, area.y + area.height / 2)
     cube = bpy.data.objects['Cube']
@@ -393,7 +394,7 @@ def journey():
     check(editor._active is None and project.enabled and len(project.sets) == 2
           and pixels(tiles.variant(body, body.layers[0].image, 1002))[:, 3].max() > .5, 'reopening the .blend restores the project and its painted tiles')
     press(window, 'P', *middle, ctrl=True, alt=True)
-    yield 0.8
+    yield from settle()
     check(editor._active is not None and has('SET.1') and has('TILE.1002'), 'Devil Painter reopens on the saved project')
 
     detail = cube.data.copy()
@@ -404,11 +405,11 @@ def journey():
     bpy.context.scene.collection.objects.link(update)
     old_mesh = cube.data.name
     click(window, region, 'PROJECT')
-    yield 0.4
+    yield from settle()
     click(window, region, 'REIMPORT_OBJECT')
-    yield 0.3
+    yield from settle()
     click(window, region, 'REIMPORT_FROM.CubeV2')
-    yield 1.0
+    yield from settle()
     check(cube.data.name != old_mesh and cube.material_slots[0].material == project.sets[0].material
           and cube.material_slots[1].material == project.sets[1].material and len(project.sets[0].layers) >= 1,
           'reimporting a mesh keeps every texture set and its layers mapped by slot')
@@ -416,12 +417,12 @@ def journey():
     with bpy.context.temp_override(window=window, area=area, region=region):
         bpy.ops.wm.obj_export(filepath=str(obj_path), export_selected_objects=False, export_materials=True)
         bpy.ops.devil_painter.reimport_mesh(filepath=str(obj_path))
-    yield 1.0
+    yield from settle()
     check(cube.material_slots[0].material == project.sets[0].material and cube.data.uv_layers and len(project.sets) == 2,
           'reimporting from an OBJ file keeps the texture sets')
 
     click(window, region, 'CLOSE')
-    yield 0.5
+    yield from settle()
     check(editor._active is None and not cube.data.use_paint_mask, 'closing Devil Painter restores the face mask, even after a save and reopen')
     shape = bmesh.new()
     bmesh.ops.create_cube(shape, size=1.0)
@@ -438,16 +439,16 @@ def journey():
     box.select_set(True)
     bpy.context.view_layer.objects.active = box
     press(window, 'P', *middle, ctrl=True, alt=True)
-    yield 0.8
+    yield from settle()
     check(has('SETUP_UNWRAP.HARD_SURFACE'), 'a mesh without UVs offers smart or hard-surface unwrapping')
     click(window, region, 'SETUP_UNWRAP.HARD_SURFACE')
-    yield 0.2
+    yield from settle()
     click(window, region, 'START')
-    yield 2.0
+    yield from settle()
     check(box.data.uv_layers and any(edge.use_seam for edge in box.data.edges) and box.devil_painter.enabled,
           'hard-surface unwrapping cuts seams at sharp edges and starts the project')
     click(window, region, 'CLOSE')
-    yield 0.5
+    yield from settle()
 
     devil_painter.unregister()
     check(not hasattr(bpy.types.Object, 'devil_painter'), 'Devil Painter unregisters cleanly')

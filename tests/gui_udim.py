@@ -17,6 +17,7 @@ import devil_painter
 from devil_painter import editor, tiles
 from devil_painter.document import active_layer, find_layer
 from tools.workspace import prepare_scratch
+from tests.gui_harness import settle
 
 TIMEOUT = 600
 STARTED = time.time()
@@ -88,7 +89,7 @@ def reveal(window, region, key, panel='PROPERTIES'):
             x, y = region.x + viewport_rect.x + viewport_rect.w / 2, region.y + viewport_rect.y + viewport_rect.h / 2
             move(window, x, y)
             window.event_simulate(type=direction, value='PRESS', x=int(x), y=int(y))
-            yield 0.1
+            yield from settle()
             if direction == 'WHEELUPMOUSE' and editor._active.state.scroll.get(panel, 0.0) <= 0.0:
                 break
         if shown(key):
@@ -121,13 +122,13 @@ def png(path):
 def set_hex(window, region, opener, text):
     yield from reveal(window, region, opener)
     click(window, region, opener)
-    yield 0.3
+    yield from settle()
     click(window, region, 'COLOR_HEX')
-    yield 0.2
+    yield from settle()
     type_text(window, text, *spot(region, 'COLOR_HEX'))
-    yield 0.4
+    yield from settle()
     press(window, 'ESC', *spot(region, 'COLOR_HEX'))
-    yield 0.3
+    yield from settle()
 
 
 def build_plates():
@@ -177,43 +178,43 @@ def journey():
     scratch = prepare_scratch()
     export_dir = scratch / 'udim_export'
     devil_painter.register()
-    yield 0.5
+    yield from settle()
     window, area, region = viewport()
     plates = build_plates()
     area.spaces.active.region_3d.view_rotation = Euler((math.radians(35), 0.0, 0.0)).to_quaternion()
     area.spaces.active.region_3d.view_location = (0.0, 0.0, 0.0)
     area.spaces.active.region_3d.view_distance = 7.0
-    yield 0.4
+    yield from settle()
     middle = (area.x + area.width / 2, area.y + area.height / 2)
     press(window, 'P', *middle, ctrl=True, alt=True)
-    yield 0.6
+    yield from settle()
     check(has('SETUP_UDIM') and control('SETUP_UDIM').active and 'UDIM 1001, 1002' in control('SETUP_TILES.0').label,
           'the setup card detects the two UDIM tiles')
     click(window, region, 'RES.0.1024')
-    yield 0.2
+    yield from settle()
     click(window, region, 'START')
-    yield 2.0
+    yield from settle()
     project = plates.devil_painter
     data = project.sets[0]
     check([tile.number for tile in data.tiles] == [1001, 1002], 'the texture set paints two UV tiles')
     click(window, region, 'ADD_PAINT')
-    yield 0.8
+    yield from settle()
     uid = active_layer(data).uid
     layer = lambda: find_layer(data, uid)
     first, second = tile_image(data, layer().image, 1001), tile_image(data, layer().image, 1002)
     check(first is not None and second is not None and first != second and tuple(second.size) == (1024, 1024), 'each tile gets its own canvas')
     click(window, region, 'PROJECT')
-    yield 0.4
+    yield from settle()
     check(has('CROSS_TILES') and control('CROSS_TILES').active and project.cross_tiles, 'strokes cross UV tiles by default')
     press(window, 'ESC', *middle)
-    yield 0.3
+    yield from settle()
     click(window, region, 'BRUSH_SIZE', fx=.04)
-    yield 0.3
+    yield from settle()
     yield from set_hex(window, region, 'BRUSH_COLOR', 'FF0000')
     roughness = lambda number: tile_image(data, layer().slots['roughness'].image, number)
 
     drag(window, screen(region, area, plates, (-1.0, 0.0, 0.0)), screen(region, area, plates, (1.0, 0.0, 0.0)))
-    yield 2.0
+    yield from settle()
     check(painted(tile_image(data, layer().image, 1001)) > 500 and painted(tile_image(data, layer().image, 1002)) > 500,
           f'one stroke paints across the boundary into both tiles ({editor._active.message})')
     near_edge = pixels(tile_image(data, layer().image, 1001)).reshape(1024, 1024, 4)[:, 1000:, 3].max() > .5
@@ -222,42 +223,42 @@ def journey():
     check(pixels(roughness(1001))[:, 3].max() > .5 and pixels(roughness(1002))[:, 3].max() > .5, 'the stroke paints every channel in both tiles')
     check('crossed UV tiles 1001, 1002' in editor._active.message, 'the editor reports the tiles the stroke crossed')
     press(window, 'Z', *middle, ctrl=True)
-    yield 1.0
+    yield from settle()
     plates = bpy.data.objects['Plates']
     project = plates.devil_painter
     data = project.sets[0]
     check(painted(tile_image(data, layer().image, 1001)) == 0 and painted(tile_image(data, layer().image, 1002)) == 0, 'one Ctrl+Z undoes the stroke in both tiles')
 
     drag(window, screen(region, area, plates, (1.0, -.3, 0.0)), screen(region, area, plates, (1.5, .3, 0.0)))
-    yield 1.5
+    yield from settle()
     check(painted(tile_image(data, layer().image, 1001)) == 0 and painted(tile_image(data, layer().image, 1002)) > 300, 'a stroke inside tile 1002 stays in that tile')
     click(window, region, 'PROJECT')
-    yield 0.4
+    yield from settle()
     click(window, region, 'CROSS_TILES')
-    yield 0.3
+    yield from settle()
     press(window, 'ESC', *middle)
-    yield 0.3
+    yield from settle()
     check(not project.cross_tiles, 'crossing can be turned off')
     before = painted(tile_image(data, layer().image, 1002))
     drag(window, screen(region, area, plates, (-1.0, .5, 0.0)), screen(region, area, plates, (1.0, .5, 0.0)))
-    yield 2.0
+    yield from settle()
     check(painted(tile_image(data, layer().image, 1001)) > 300 and painted(tile_image(data, layer().image, 1002)) == before,
           'with crossing off, a live stroke stays in the tile it starts in')
     click(window, region, 'PROJECT')
-    yield 0.4
+    yield from settle()
     click(window, region, 'CROSS_TILES')
-    yield 0.3
+    yield from settle()
     press(window, 'ESC', *middle)
-    yield 0.3
+    yield from settle()
 
     click(window, region, 'EXPORT')
-    yield 0.4
+    yield from settle()
     click(window, region, 'EXPORT_DIR')
-    yield 0.2
+    yield from settle()
     type_text(window, str(export_dir), *spot(region, 'EXPORT_DIR'))
-    yield 0.3
+    yield from settle()
     click(window, region, 'EXPORT_RUN')
-    yield 4.0
+    yield from settle()
     files = sorted(path.name for path in export_dir.glob('*.png'))
     color = {number: next((export_dir / name for name in files if 'BaseColor' in name and f'{number}' in name), None) for number in (1001, 1002)}
     check(color[1001] is not None and color[1002] is not None, f'export writes one base color file per tile ({len(files)} files)')
@@ -265,7 +266,7 @@ def journey():
     check(reds[1001] > 300 and reds[1002] > 300, f'each exported tile carries its painted red ({reds[1001]}, {reds[1002]})')
 
     click(window, region, 'CLOSE')
-    yield 0.6
+    yield from settle()
     check(editor._active is None, 'Devil Painter closes')
     devil_painter.unregister()
     check(not hasattr(bpy.types.Object, 'devil_painter'), 'Devil Painter unregisters cleanly')

@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT))
 import devil_painter
 from devil_painter import editor, library, shelf, thumbnails
 from tools.workspace import prepare_scratch
+from tests.gui_harness import settle, until
 
 TIMEOUT = 900
 STARTED = time.time()
@@ -132,7 +133,7 @@ def scroll_while_loading(window, region, seconds):
         move(window, x, y)
         if tick % 3 == 0:
             window.event_simulate(type='WHEELDOWNMOUSE', value='PRESS', x=int(x), y=int(y))
-        yield 0.05
+        yield from settle()
     return streamed
 
 
@@ -142,7 +143,7 @@ def wait_full(seconds):
         current = tiles()
         if current and all(item.preview is not None or item.icon == 'FAILED' for item in current):
             return True
-        yield 0.1
+        yield from settle()
     return False
 
 
@@ -158,33 +159,28 @@ def journey():
     library.set_texture_folder(str(folder))
     timed()
     devil_painter.register()
-    yield 0.5
+    yield from settle()
     window, area, region = viewport()
     middle = (area.x + area.width / 2, area.y + area.height / 2)
     press(window, 'P', *middle, ctrl=True, alt=True)
-    yield 0.6
+    yield from settle()
     click(window, region, 'RES.0.1024')
-    yield 0.2
+    yield from settle()
     click(window, region, 'START')
-    yield 2.0
+    yield from settle()
     data = bpy.data.objects['Cube'].devil_painter.sets[0]
 
     opened = time.perf_counter()
     click(window, region, 'SHELF_TAB.TEXTURES')
-    yield 0.2
+    yield from settle()
     check(len(shelf.visible('TEXTURES')) >= COUNT, f'the Textures section lists all {COUNT} library textures')
+    yield from until(lambda: any(item.label == 'aaa_broken' and item.icon == 'FAILED' for item in tiles()), 'the broken texture tile to say Preview failed')
     broken = next((item for item in tiles() if item.label == 'aaa_broken'), None)
-    for _ in range(60):
-        broken = next((item for item in tiles() if item.label == 'aaa_broken'), None)
-        if broken is not None and broken.icon == 'FAILED':
-            break
-        move(window, *middle)
-        yield 0.1
     check(broken is not None and broken.preview is None and broken.icon == 'FAILED', 'a texture whose preview cannot be decoded says Preview failed on its tile')
     check(thumbnails.waiting() and any(item.preview is None for item in tiles()), 'previews are still loading in the background when the section opens')
     layers = len(data.layers)
     click(window, region, 'ADD_PAINT')
-    yield 0.2
+    yield from settle()
     check(len(data.layers) == layers + 1 and thumbnails.waiting(), 'a button click is handled at once while previews stream in')
     full = yield from wait_full(10)
     first_screen = time.perf_counter() - opened
@@ -208,7 +204,7 @@ def journey():
     editor._active.state.scroll['SHELF'] = 0.0
     reopened = time.perf_counter()
     move(window, *middle)
-    yield 0.1
+    yield from settle()
     full = yield from wait_full(5)
     first, repeat = summary(DECODES, opened), summary(DECODES, reopened)
     print('MEASURED DECODE FIRST TIME:', described(first))
@@ -218,14 +214,14 @@ def journey():
 
     rendered = time.perf_counter()
     click(window, region, 'SHELF_TAB.SMART')
-    yield 0.2
+    yield from settle()
     end = time.perf_counter() + 40
     while time.perf_counter() < end:
         move(window, *middle)
         current = tiles()
         if current and all(item.preview is not None or item.icon == 'FAILED' for item in current):
             break
-        yield 0.1
+        yield from settle()
     smart = summary(EVENTS, rendered)
     smart_draws = summary(DRAWS, rendered)
     print('MEASURED SMART RENDERS EVENTS:', described(smart))
@@ -235,7 +231,7 @@ def journey():
     check(smart['worst'] < 100 and smart_draws['worst'] < 100, f'rendering material previews never stalls the UI: events {described(smart)}')
 
     click(window, region, 'CLOSE')
-    yield 0.6
+    yield from settle()
     check(editor._active is None, 'Devil Painter closes')
     devil_painter.unregister()
     check(not hasattr(bpy.types.Object, 'devil_painter') and not thumbnails.rendering(), 'Devil Painter unregisters and stops its preview renderers')

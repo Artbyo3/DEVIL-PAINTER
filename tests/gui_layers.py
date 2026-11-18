@@ -17,6 +17,7 @@ from devil_painter import editor, library
 from devil_painter.blending import BLEND_MODES, CHANNEL, FOLDER_BLENDS
 from devil_painter.document import active_layer, find_layer, geometry_attribute
 from tools.workspace import prepare_scratch
+from tests.gui_harness import settle, until
 
 TIMEOUT = 600
 STARTED = time.time()
@@ -88,7 +89,7 @@ def reveal(window, region, key, panel='PROPERTIES'):
             x, y = region.x + viewport_rect.x + viewport_rect.w / 2, region.y + viewport_rect.y + viewport_rect.h / 2
             move(window, x, y)
             window.event_simulate(type=direction, value='PRESS', x=int(x), y=int(y))
-            yield 0.1
+            yield from settle()
             if direction == 'WHEELUPMOUSE' and editor._active.state.scroll.get(panel, 0.0) <= 0.0:
                 break
         if shown(key):
@@ -165,25 +166,25 @@ def stroke_face(window, x, y):
 
 def menu(window, region, opener, item):
     click(window, region, opener)
-    yield 0.3
+    yield from settle()
     check(has(item), f'{opener} offers {item}')
     click(window, region, item)
-    yield 0.5
+    yield from settle()
 
 
 def context_menu(window, region, uid, item):
     yield from reveal(window, region, 'ROW_' + uid, 'LAYERS')
     click(window, region, 'ROW_' + uid, kind='RIGHTMOUSE')
-    yield 0.3
+    yield from settle()
     check(has(item), f'the layer menu offers {item}')
     click(window, region, item)
-    yield 0.6
+    yield from settle()
 
 
 def select_row(window, region, uid, **modifiers):
     yield from reveal(window, region, 'ROW_' + uid, 'LAYERS')
     click(window, region, 'ROW_' + uid, fx=.6, **modifiers)
-    yield 0.4
+    yield from settle()
 
 
 def add_effect(window, region, target, kind):
@@ -195,7 +196,7 @@ def add_effect(window, region, target, kind):
 def slide(window, region, key, fx):
     yield from reveal(window, region, key)
     click(window, region, key, fx=fx)
-    yield 0.4
+    yield from settle()
 
 
 def drag_row(window, region, source, target, fy, checks=()):
@@ -203,26 +204,26 @@ def drag_row(window, region, source, target, fy, checks=()):
     tx, ty = spot(region, target, .6, fy)
     move(window, x, y)
     window.event_simulate(type='LEFTMOUSE', value='PRESS', x=int(x), y=int(y))
-    yield 0.2
+    yield from settle()
     for step in range(1, 7):
         move(window, x + (tx - x) * step / 6, y + (ty - y) * step / 6)
-    yield 0.3
+    yield from settle()
     for key, message in checks:
         check(has(key), message)
     window.event_simulate(type='LEFTMOUSE', value='RELEASE', x=int(tx), y=int(ty))
-    yield 0.6
+    yield from settle()
 
 
 def set_hex(window, region, opener, text):
     yield from reveal(window, region, opener)
     click(window, region, opener)
-    yield 0.3
+    yield from settle()
     click(window, region, 'COLOR_HEX')
-    yield 0.2
+    yield from settle()
     type_text(window, text, *spot(region, 'COLOR_HEX'))
-    yield 0.4
+    yield from settle()
     press(window, 'ESC', *spot(region, 'COLOR_HEX'))
-    yield 0.3
+    yield from settle()
 
 
 def journey():
@@ -231,7 +232,7 @@ def journey():
     (library.library_root() / library.SETTINGS_FILE).unlink(missing_ok=True)
     export_dir = scratch / 'layer_export'
     devil_painter.register()
-    yield 0.5
+    yield from settle()
     window, area, region = viewport()
     cube, front, side = build_mesh(area)
     middle = (area.x + area.width / 2, area.y + area.height / 2)
@@ -239,45 +240,45 @@ def journey():
     side_point = screen_point(region, area, cube, side)
 
     press(window, 'P', *middle, ctrl=True, alt=True)
-    yield 0.6
+    yield from settle()
     click(window, region, 'RES.0.1024')
-    yield 0.2
+    yield from settle()
     click(window, region, 'RES.1.1024')
-    yield 0.2
+    yield from settle()
     click(window, region, 'START')
-    yield 2.0
+    yield from settle()
     project = cube.devil_painter
     body, trim = project.sets[0], project.sets[1]
     check(len(project.sets) == 2 and project.active_set == 0, 'the project has a Body and a Trim texture set')
     paint_uid = body.layers[0].uid
     click(window, region, 'EXPORT')
-    yield 0.4
+    yield from settle()
     click(window, region, 'EXPORT_DIR')
-    yield 0.2
+    yield from settle()
     type_text(window, str(export_dir), *spot(region, 'EXPORT_DIR'))
-    yield 0.3
+    yield from settle()
     press(window, 'ESC', *middle)
-    yield 0.3
+    yield from settle()
     check(Path(project.export_directory) == export_dir, 'the export folder is typed into the export card')
 
     click(window, region, 'ADD_FILL')
-    yield 0.6
+    yield from settle()
     fill_uid = body.active_uid
     yield from reveal(window, region, 'BLEND.base_color')
     click(window, region, 'BLEND.base_color')
-    yield 0.3
+    yield from settle()
     offered = keys('SET_BLEND.base_color.')
     check(len(offered) == len(BLEND_MODES) and len(BLEND_MODES) >= 20 and {'SET_BLEND.base_color.DIVIDE', 'SET_BLEND.base_color.LINEAR_LIGHT',
           'SET_BLEND.base_color.HUE', 'SET_BLEND.base_color.EXCLUSION', 'SET_BLEND.base_color.NORMAL_DETAIL'} <= set(offered),
           'the blend dropdown offers every shader mix mode plus normal map detail')
     click(window, region, 'SET_BLEND.base_color.DIVIDE')
-    yield 0.6
+    yield from settle()
     check(nodes(body)[f'{fill_uid}.base_color'].blend_type == 'DIVIDE', 'picking Divide drives the base color mix node')
     if body.channels['normal'].enabled:
         if not find_layer(body, fill_uid).slots['normal'].enabled:
             yield from reveal(window, region, 'USE.normal')
             click(window, region, 'USE.normal')
-            yield 0.5
+            yield from settle()
         yield from reveal(window, region, 'BLEND.normal')
         yield from menu(window, region, 'BLEND.normal', 'SET_BLEND.normal.NORMAL_DETAIL')
         check(find_layer(body, fill_uid).slots['normal'].blend == 'NORMAL_DETAIL' and nodes(body)[f'{fill_uid}.normal'].blend_type == 'MIX',
@@ -286,7 +287,7 @@ def journey():
     yield from menu(window, region, 'BLEND.base_color', 'SET_BLEND.base_color.MIX')
 
     click(window, region, 'ADD_FOLDER')
-    yield 0.6
+    yield from settle()
     folder_uid = body.active_uid
     yield from reveal(window, region, 'ROW_' + fill_uid, 'LAYERS')
     yield from drag_row(window, region, 'ROW_' + fill_uid, 'ROW_' + folder_uid, .5,
@@ -295,11 +296,11 @@ def journey():
     yield from select_row(window, region, folder_uid)
     yield from reveal(window, region, 'FOLDER_BLEND')
     click(window, region, 'FOLDER_BLEND')
-    yield 0.3
+    yield from settle()
     check(len(keys('SET_FOLDERBLEND.')) == len(FOLDER_BLENDS) and control('SET_FOLDERBLEND.PASSTHROUGH').active,
           'folders default to passthrough and offer every blend mode')
     click(window, region, 'SET_FOLDERBLEND.MULTIPLY')
-    yield 0.6
+    yield from settle()
     check(find_layer(body, folder_uid).folder_blend == 'MULTIPLY' and nodes(body)[f'{folder_uid}.base_color'].blend_type == 'MULTIPLY',
           'an isolated folder merges its children first, then multiplies onto the stack')
     yield from drag_row(window, region, 'ROW_' + paint_uid, 'ROW_' + folder_uid, .9,
@@ -330,19 +331,16 @@ def journey():
     textures.mkdir(exist_ok=True)
     write_png(textures / 'lone.png', (.3, .3, .3, 1.0))
     click(window, region, 'SHELF_TAB.TEXTURES')
-    yield 0.3
+    yield from settle()
     click(window, region, 'TEXTURE_DIR')
-    yield 0.2
+    yield from settle()
     type_text(window, str(textures), *spot(region, 'TEXTURE_DIR'))
-    for _ in range(15):
-        yield 0.2
-        if has('ITEM.0'):
-            break
+    yield from until(lambda: has('ITEM.0'), 'has("ITEM.0")')
     yield from reveal(window, region, 'FX_SOURCE')
     yield from menu(window, region, 'FX_SOURCE', 'FX_PICK_TEXTURE')
     check(editor._active.state.shelf_tab == 'TEXTURES' and has('ARM_INFO') and has('ITEM.0'), 'picking a texture for the fill effect arms the texture shelf')
     click(window, region, 'ITEM.0')
-    yield 0.6
+    yield from settle()
     effect = layer.effects[0]
     check(effect.source == 'IMAGE' and effect.texture is not None and effect.texture.name.startswith('lone')
           and any(node.bl_idname == 'ShaderNodeTexImage' and node.image == effect.texture for node in nodes(body)),
@@ -362,16 +360,16 @@ def journey():
     yield from add_effect(window, region, 'MASK', 'FILTER')
     yield from reveal(window, region, 'FX_FILTER')
     click(window, region, 'FX_FILTER')
-    yield 0.3
+    yield from settle()
     check(has('SET_FXFILTER.BLUR') and has('SET_FXFILTER.THRESHOLD') and not has('SET_FXFILTER.HSV'),
           'mask filters offer value filters and leave out color-only ones')
     click(window, region, 'SET_FXFILTER.THRESHOLD')
-    yield 0.6
+    yield from settle()
     threshold = layer.effects[-1].uid
     check(any(node.bl_idname == 'ShaderNodeMath' and node.operation == 'GREATER_THAN' for node in nodes(body)), 'the threshold filter cuts the mask')
     yield from reveal(window, region, f'FXEYE_{fill_uid}.{threshold}', 'LAYERS')
     click(window, region, f'FXEYE_{fill_uid}.{threshold}')
-    yield 0.6
+    yield from settle()
     check(not layer.effects[-1].enabled and not any(node.bl_idname == 'ShaderNodeMath' and node.operation == 'GREATER_THAN' for node in nodes(body)),
           'the effect eye turns an effect off without deleting it')
 
@@ -397,7 +395,7 @@ def journey():
     check(abs(find_layer(body, paint_uid).effects[-1].radius - 16.0) < 1.0, 'the blur radius slider edits the filter')
     yield from reveal(window, region, 'FX_DELETE')
     click(window, region, 'FX_DELETE')
-    yield 0.6
+    yield from settle()
     check(len(find_layer(body, paint_uid).effects) == 0 and body.target == 'CONTENT', 'deleting an effect removes it from the stack')
 
     first, second = layer.effects[0].uid, layer.effects[1].uid
@@ -407,7 +405,7 @@ def journey():
     check([effect.uid for effect in layer.effects][:2] == [second, first], 'dragging an effect row reorders the effect stack')
     yield from reveal(window, region, 'FX_UP')
     click(window, region, 'FX_UP')
-    yield 0.6
+    yield from settle()
     check([effect.uid for effect in layer.effects].index(first) == 2, 'the effect arrows move the selected effect')
 
     yield from select_row(window, region, paint_uid)
@@ -424,15 +422,15 @@ def journey():
           'selecting a paint effect sends the brush into the effect image')
     check(control(f'FX_{paint_uid}.{painted.uid}').preview == painted.image, 'the paint effect row shows its painted image as the thumbnail')
     click(window, region, 'BRUSH_COLOR')
-    yield 0.3
+    yield from settle()
     click(window, region, 'COLOR_HEX')
-    yield 0.2
+    yield from settle()
     type_text(window, '#FFFFFF', *spot(region, 'COLOR_HEX'))
-    yield 0.4
+    yield from settle()
     press(window, 'ESC', *middle)
-    yield 0.3
+    yield from settle()
     stroke_face(window, *front_point)
-    yield 1.2
+    yield from settle()
     check(pixels(painted.image)[:, 3].max() > .5, 'a brush stroke paints into the paint effect')
     yield from context_menu(window, region, paint_uid, 'EXPORT_MASK')
     mask_file = export_dir / f'{bpy.path.clean_name(paint_layer.name)}_Mask.png'
@@ -441,7 +439,7 @@ def journey():
     check(mask[:, 0].max() > .9 and numpy.mean(mask[:, 0] > .5) < .2, 'the exported mask is black except where the paint effect revealed it')
 
     click(window, region, 'ADD_PAINT')
-    yield 0.6
+    yield from settle()
     compare_uid = body.active_uid
     yield from add_effect(window, region, 'MASK', 'COMPARE')
     yield from reveal(window, region, 'FX_OTHER')
@@ -491,10 +489,10 @@ def journey():
     yield from select_row(window, region, paint_uid)
     x, y = spot(region, 'ROW_' + paint_uid, .6)
     press(window, 'C', x, y, ctrl=True)
-    yield 0.3
+    yield from settle()
     count = len(body.layers)
     press(window, 'V', x, y, ctrl=True)
-    yield 0.8
+    yield from settle()
     pasted = find_layer(body, body.active_uid)
     check(len(body.layers) == count + 1 and pasted.uid != paint_uid and len(pasted.effects) == len(find_layer(body, paint_uid).effects),
           'Ctrl+C and Ctrl+V over the layers paste a copy with its effects')
@@ -521,26 +519,26 @@ def journey():
     value = constant.outputs[0].default_value if constant else next(item for item in mix.inputs if item.name == 'B' and item.type == 'RGBA').default_value
     check(value[1] > .9 and value[0] < .1, 'editing the source layer updates its instance in the other set')
     click(window, region, 'SET.1')
-    yield 0.8
+    yield from settle()
     check(project.active_set == 1 and has('ROW_' + link.uid) and has('LINKED_' + link.uid), 'the instance row shows a link badge')
     yield from select_row(window, region, link.uid)
     check(has('INSTANCE_INFO') and body.name in control('INSTANCE_INFO').label, 'the instance properties name the source set')
     click(window, region, 'SET.0')
-    yield 0.8
+    yield from settle()
 
     click(window, region, 'ADD_PAINT')
-    yield 0.6
+    yield from settle()
     geo_uid = body.active_uid
     yield from reveal(window, region, 'GEO_MASK')
     click(window, region, 'GEO_MASK')
-    yield 0.6
+    yield from settle()
     geo_layer = find_layer(body, geo_uid)
     name = geometry_attribute(body, geo_layer)
     check(geo_layer.geo_mask and name in cube.data.attributes and editor._active.state.geo_pick == 'FACE'
           and any(node.bl_idname == 'ShaderNodeAttribute' and node.attribute_name == name for node in nodes(body)),
           'turning on the geometry mask reads a face attribute in the material')
     press(window, 'LEFTMOUSE', *front_point)
-    yield 0.6
+    yield from settle()
     values = numpy.zeros(len(cube.data.polygons), dtype=numpy.float32)
     cube.data.attributes[name].data.foreach_get('value', values)
     check(values[front] == 1.0 and values.sum() == 1.0, 'clicking a face adds it to the geometry mask')
@@ -550,25 +548,25 @@ def journey():
     yield from select_row(window, region, geo_uid)
     yield from reveal(window, region, 'GEO_ISLANDS')
     click(window, region, 'GEO_ISLANDS')
-    yield 0.3
+    yield from settle()
     press(window, 'LEFTMOUSE', *side_point)
-    yield 0.6
+    yield from settle()
     cube.data.attributes[name].data.foreach_get('value', values)
     check(values.sum() == len(values), 'clicking a mesh part adds every connected face')
     yield from reveal(window, region, 'GEO_INVERT')
     click(window, region, 'GEO_INVERT')
-    yield 0.6
+    yield from settle()
     cube.data.attributes[name].data.foreach_get('value', values)
     check(values.sum() == 0.0, 'Invert swaps picked and unpicked faces')
     click(window, region, 'GEO_ISLANDS')
-    yield 0.3
+    yield from settle()
     check(editor._active.state.geo_pick == '', 'clicking the active pick mode again stops picking')
 
     click(window, region, 'ADD_FOLDER')
-    yield 0.6
+    yield from settle()
     flat_folder = body.active_uid
     click(window, region, 'ADD_FILL')
-    yield 0.6
+    yield from settle()
     red_uid = body.active_uid
     check(find_layer(body, red_uid).parent == flat_folder, 'a new fill layer lands inside the selected folder')
     yield from set_hex(window, region, 'SWATCH.base_color', '#FF0000')
@@ -601,7 +599,7 @@ def journey():
           'Flatten merges a multi-selection into one paint layer')
 
     click(window, region, 'CLOSE')
-    yield 0.6
+    yield from settle()
     check(editor._active is None, 'Devil Painter closes')
     devil_painter.unregister()
     check(not hasattr(bpy.types.Object, 'devil_painter'), 'Devil Painter unregisters cleanly')

@@ -17,6 +17,7 @@ from devil_painter import editor
 from devil_painter.actions import LAST_LAYER
 from devil_painter.document import active_layer
 from tools.workspace import prepare_scratch
+from tests.gui_harness import settle
 
 TIMEOUT = 600
 STARTED = time.time()
@@ -110,10 +111,10 @@ def healthy(data):
 
 def layer_menu(window, region, uid, item):
     click(window, region, 'ROW_' + uid, kind='RIGHTMOUSE')
-    yield 0.3
+    yield from settle()
     check(has(item), f'the layer menu offers {item}')
     click(window, region, item)
-    yield 0.6
+    yield from settle()
 
 
 def stays_responsive(window, region, data):
@@ -121,7 +122,7 @@ def stays_responsive(window, region, data):
     started = time.perf_counter()
     for step in range(20):
         move(window, middle[0] + step * 3, middle[1])
-        yield 0.05
+        yield from settle()
     elapsed = time.perf_counter() - started
     check(healthy(data) and elapsed < 5.0, f'the workspace keeps drawing and answering input ({elapsed:.2f}s for 20 moves)')
 
@@ -129,16 +130,16 @@ def stays_responsive(window, region, data):
 def journey():
     prepare_scratch()
     devil_painter.register()
-    yield 0.5
+    yield from settle()
     window, area, region = viewport()
     cube, front = build_mesh(area)
     middle = (area.x + area.width / 2, area.y + area.height / 2)
     front_point = screen_point(region, area, cube, front)
 
     press(window, 'P', *middle, ctrl=True, alt=True)
-    yield 0.6
+    yield from settle()
     click(window, region, 'START')
-    yield 2.0
+    yield from settle()
     project = cube.devil_painter
     body = project.sets[0]
     first = body.layers[0].uid
@@ -155,7 +156,7 @@ def journey():
     yield from stays_responsive(window, region, body)
 
     click(window, region, 'ADD_PAINT')
-    yield 0.6
+    yield from settle()
     check(len(body.layers) == 2, 'adding a layer after the refused delete works')
     second = next(uid for uid in uids(body) if uid != first)
     check(uids(body).index(first) == 0, 'the default layer is still at index 0')
@@ -164,13 +165,13 @@ def journey():
     yield from stays_responsive(window, region, body)
 
     stroke(window, *front_point)
-    yield 1.0
+    yield from settle()
     check(alpha(active_layer(body).image).max() > .5, 'a brush stroke after deleting the first layer paints the remaining layer')
 
     click(window, region, 'ADD_PAINT')
-    yield 0.6
+    yield from settle()
     click(window, region, 'ADD_FILL')
-    yield 0.6
+    yield from settle()
     check(len(body.layers) == 3, 'two more layers are added')
     order = uids(body)
     yield from layer_menu(window, region, order[1], 'DELETE')
@@ -185,16 +186,16 @@ def journey():
     yield from stays_responsive(window, region, body)
 
     click(window, region, 'ADD_PAINT')
-    yield 0.6
+    yield from settle()
     click(window, region, 'ROW_' + remaining[0], ctrl=True)
-    yield 0.4
+    yield from settle()
     check(len(editor._active.chosen(body)) == 2, 'both layers are selected')
     yield from layer_menu(window, region, remaining[0], 'DELETE_SELECTED')
     check(len(body.layers) == 2 and editor._active.message == LAST_LAYER, 'deleting every selected layer at once is refused without removing any')
     yield from stays_responsive(window, region, body)
     other = next(uid for uid in uids(body) if uid != body.active_uid)
     click(window, region, 'ROW_' + other, ctrl=True)
-    yield 0.4
+    yield from settle()
     check(len(editor._active.chosen(body)) == 2, 'both layers are selected again')
     yield from layer_menu(window, region, other, 'MOVE_SELECTED.1')
     check(len(body.layers) == 1 and len(project.sets[1].layers) == 2 and editor._active.message == LAST_LAYER,
@@ -203,17 +204,17 @@ def journey():
 
     kept = uids(body)
     click(window, region, 'CLOSE')
-    yield 0.6
+    yield from settle()
     check(editor._active is None, 'Devil Painter closes')
     press(window, 'P', *middle, ctrl=True, alt=True)
-    yield 1.0
+    yield from settle()
     check(editor._active is not None and uids(body) == kept and healthy(body), 'Devil Painter reopens on the same stack with a working workspace')
     before = alpha(active_layer(body).image).max()
     stroke(window, *front_point)
-    yield 1.0
+    yield from settle()
     check(alpha(active_layer(body).image).max() > max(before, .5), 'painting works after reopening')
     click(window, region, 'CLOSE')
-    yield 0.6
+    yield from settle()
     devil_painter.unregister()
     check(not hasattr(bpy.types.Object, 'devil_painter'), 'Devil Painter unregisters cleanly')
     print('ALL GUI LAYER DELETE CHECKS PASSED', bpy.app.version_string)

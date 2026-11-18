@@ -17,6 +17,7 @@ import devil_painter
 from devil_painter import editor, library, painting
 from devil_painter.document import active_layer, find_layer
 from tools.workspace import prepare_scratch
+from tests.gui_harness import settle, until
 
 TIMEOUT = 600
 STARTED = time.time()
@@ -92,7 +93,7 @@ def reveal(window, region, key, panel='PROPERTIES'):
             x, y = region.x + viewport_rect.x + viewport_rect.w / 2, region.y + viewport_rect.y + viewport_rect.h / 2
             move(window, x, y)
             window.event_simulate(type=direction, value='PRESS', x=int(x), y=int(y))
-            yield 0.1
+            yield from settle()
             if direction == 'WHEELUPMOUSE' and editor._active.state.scroll.get(panel, 0.0) <= 0.0:
                 break
         if shown(key):
@@ -133,43 +134,43 @@ def pick(window, region, opener, item):
 
 def menu(window, region, opener, item):
     click(window, region, opener)
-    yield 0.3
+    yield from settle()
     check(has(item), f'{opener} offers {item}')
     click(window, region, item)
-    yield 0.5
+    yield from settle()
 
 
 def context_menu(window, region, uid, item):
     yield from reveal(window, region, 'ROW_' + uid, 'LAYERS')
     click(window, region, 'ROW_' + uid, kind='RIGHTMOUSE')
-    yield 0.3
+    yield from settle()
     check(has(item), f'the layer menu offers {item}')
     click(window, region, item)
-    yield 0.6
+    yield from settle()
 
 
 def select_row(window, region, uid, **modifiers):
     yield from reveal(window, region, 'ROW_' + uid, 'LAYERS')
     click(window, region, 'ROW_' + uid, fx=.6, **modifiers)
-    yield 0.4
+    yield from settle()
 
 
 def slide(window, region, key, fx):
     yield from reveal(window, region, key)
     click(window, region, key, fx=fx)
-    yield 0.4
+    yield from settle()
 
 
 def set_hex(window, region, opener, text):
     yield from reveal(window, region, opener)
     click(window, region, opener)
-    yield 0.3
+    yield from settle()
     click(window, region, 'COLOR_HEX')
-    yield 0.2
+    yield from settle()
     type_text(window, text, *spot(region, 'COLOR_HEX'))
-    yield 0.4
+    yield from settle()
     press(window, 'ESC', *spot(region, 'COLOR_HEX'))
-    yield 0.3
+    yield from settle()
 
 
 def face_center_pixel(cube, face, resolution):
@@ -211,24 +212,24 @@ def drag(window, x, y, dx, dy, count=8, **modifiers):
 def card_click(window, region, opener, key, popover):
     if not (editor._active.state.popover is not None and editor._active.state.popover.kind == popover):
         click(window, region, opener)
-        yield 0.3
+        yield from settle()
     check(has(key), f'{opener} shows {key}')
     click(window, region, key)
-    yield 0.3
+    yield from settle()
 
 
 def close_cards(window, middle):
     if editor._active.state.popover is not None:
         press(window, 'ESC', *middle)
-    yield 0.3
+    yield from settle()
 
 
 def card_slide(window, region, opener, key, popover, fx):
     if not (editor._active.state.popover is not None and editor._active.state.popover.kind == popover):
         click(window, region, opener)
-        yield 0.3
+        yield from settle()
     click(window, region, key, fx=fx)
-    yield 0.3
+    yield from settle()
 
 
 def build_plates():
@@ -271,65 +272,65 @@ def journey():
         swatch.save()
         bpy.data.images.remove(swatch)
     devil_painter.register()
-    yield 0.5
+    yield from settle()
     window, area, region = viewport()
     cube = bpy.data.objects['Cube']
     middle = (area.x + area.width / 2, area.y + area.height / 2)
     press(window, 'P', *middle, ctrl=True, alt=True)
-    yield 0.6
+    yield from settle()
     click(window, region, 'RES.0.1024')
-    yield 0.2
+    yield from settle()
     click(window, region, 'START')
-    yield 2.0
+    yield from settle()
     data = cube.devil_painter.sets[0]
     resolution = data.resolution
     right, front, top, left, back = (face_of(cube, normal) for normal in ((1, 0, 0), (0, -1, 0), (0, 0, 1), (-1, 0, 0), (0, 1, 0)))
     spot = {face: face_center_pixel(cube, face, resolution) for face in (right, front, top, left, back)}
 
     click(window, region, 'BRUSH_CARD')
-    yield 0.4
+    yield from settle()
     check(all(has(key) for key in ('BRUSH_ANGLE', 'BRUSH_STROKE', 'SAVE_BRUSH', 'BRUSH_SMOOTHING', 'BRUSHUSE.base_color', 'BRUSHUSE.height')),
           'the brush card offers angle, stroke, lazy mouse, presets, and every channel')
     check(control('BRUSH_SMOOTHING').label == 'Lazy mouse', 'smoothing is the lazy mouse')
     click(window, region, 'BRUSH_ANGLE', fx=.25)
-    yield 0.3
+    yield from settle()
     check(abs(data.brush_angle - 90) < 4, 'the angle slider rotates the brush')
     click(window, region, 'BRUSH_SMOOTHING', fx=.5)
-    yield 0.3
+    yield from settle()
     brush = bpy.context.tool_settings.image_paint.brush
     check(brush.use_smooth_stroke and brush.smooth_stroke_radius > 40, 'lazy mouse stabilizes the Blender stroke')
     click(window, region, 'BRUSH_STROKE')
-    yield 0.3
+    yield from settle()
     check(all(has('SET_STROKE.' + method) for method in ('SPACE', 'LINE', 'DOTS', 'AIRBRUSH', 'ANCHORED')), 'the stroke menu offers line, dots, airbrush, and anchored strokes')
     click(window, region, 'SET_STROKE.LINE')
-    yield 0.3
+    yield from settle()
     check(data.brush_stroke == 'LINE' and bpy.context.tool_settings.image_paint.brush.stroke_method == 'LINE', 'Line strokes draw straight lines')
     yield from card_click(window, region, 'BRUSH_CARD', 'SAVE_BRUSH', 'BRUSH')
     check(data.brush_preset == 'Custom 1' and library.settings().get('brush_presets'), 'Save as preset stores the brush')
     yield from close_cards(window, middle)
     click(window, region, 'SHELF_TAB.BRUSHES')
-    yield 0.5
+    yield from settle()
     labels = {control(key).label: key for key in keys('ITEM.')}
     check('Custom 1' in labels and control(labels['Custom 1']).preview is not None, 'the brush shelf shows the saved preset with a preview')
     click(window, region, labels['Soft Round'])
-    yield 0.4
+    yield from settle()
     check(data.brush_stroke == 'SPACE' and data.brush_angle == 0.0, 'a built-in preset resets the stroke and angle')
     click(window, region, labels['Custom 1'])
-    yield 0.4
+    yield from settle()
     check(data.brush_stroke == 'LINE' and abs(data.brush_angle - 90) < 4, 'the saved preset brings its stroke and angle back')
     click(window, region, labels['Custom 1'], kind='RIGHTMOUSE')
-    yield 0.3
+    yield from settle()
     click(window, region, 'DELETE_BRUSH.0')
-    yield 0.3
+    yield from settle()
     check(not library.settings().get('brush_presets'), 'a saved preset can be deleted')
     click(window, region, labels['Soft Round'])
-    yield 0.4
+    yield from settle()
 
     click(window, region, 'BRUSH_SIZE', fx=.06)
-    yield 0.3
+    yield from settle()
     check(painting.brush_value(bpy.context.scene, 'size') < 40, 'the size slider makes a small brush')
     click(window, region, 'ADD_PAINT')
-    yield 0.8
+    yield from settle()
     painted_uid = active_layer(data).uid
     layer = lambda: find_layer(data, painted_uid)
     yield from set_hex(window, region, 'BRUSH_COLOR', 'FF0000')
@@ -347,7 +348,7 @@ def journey():
     yield from close_cards(window, middle)
     x, y = face_point(region, area, cube, right)
     drag(window, x, y, 6, 4)
-    yield 1.2
+    yield from settle()
     canvas = lambda key: layer().slots[key].image
     check(image_at(layer().image, spot[right])[3] > .5 and image_at(layer().image, spot[right])[0] > .9, 'one stroke paints the base color')
     check(abs(image_at(canvas('roughness'), spot[right])[0] - .2) < .05 and image_at(canvas('height'), spot[right])[0] > .8,
@@ -362,11 +363,11 @@ def journey():
     check(data.brush_radial == 4 and data.brush_radial_axis == 'Z' and control('SYMMETRY').text == 'Radial 4', 'radial symmetry makes four copies around Z')
     yield from close_cards(window, middle)
     click(window, region, 'ADD_PAINT')
-    yield 0.8
+    yield from settle()
     radial_uid = active_layer(data).uid
     x, y = face_point(region, area, cube, front)
     drag(window, x, y, 6, 4)
-    yield 1.5
+    yield from settle()
     radial = find_layer(data, radial_uid).image
     check(all(image_at(radial, spot[face])[3] > .5 for face in (right, front, left, back)) and image_at(radial, spot[top])[3] < .5,
           f'a radial stroke lands on all four sides and not on top {[round(float(image_at(radial, spot[face])[3]), 2) for face in (right, front, left, back, top)]} {int((image_pixels(radial)[..., 3] > .5).sum())} {editor._active.message}')
@@ -375,92 +376,89 @@ def journey():
     yield from select_row(window, region, painted_uid)
 
     click(window, region, 'ERASE')
-    yield 0.4
+    yield from settle()
     yield from card_click(window, region, 'BRUSH_CARD', 'BRUSHUSE.base_color', 'BRUSH')
     check(not data.brush_slots['base_color'].enabled, 'base color can be left out of the eraser')
     yield from close_cards(window, middle)
     x, y = face_point(region, area, cube, right)
     drag(window, x, y, 4, 2)
-    yield 1.2
+    yield from settle()
     check(image_at(canvas('roughness'), spot[right])[3] < .5 and image_at(layer().image, spot[right])[3] > .5,
           'Erase without base color clears roughness and keeps the color')
     press(window, 'Z', *middle, ctrl=True)
-    yield 0.8
+    yield from settle()
     cube = bpy.data.objects['Cube']
     data = cube.devil_painter.sets[0]
     check(image_at(canvas('roughness'), spot[right])[3] > .5, 'Ctrl+Z restores the erased channel')
     yield from card_click(window, region, 'BRUSH_CARD', 'BRUSHUSE.base_color', 'BRUSH')
     yield from close_cards(window, middle)
     drag(window, x, y, 4, 2)
-    yield 1.2
+    yield from settle()
     check(image_at(layer().image, spot[right])[3] < .5, 'Erase with base color clears the layer there')
 
     click(window, region, 'PAINT')
-    yield 0.4
+    yield from settle()
     fx, fy = face_point(region, area, cube, front)
     drag(window, fx, fy, 6, 3)
-    yield 1.2
+    yield from settle()
     before = image_pixels(layer().image).copy()
     click(window, region, 'BLUR')
-    yield 0.4
+    yield from settle()
     drag(window, fx - 40, fy, 80, 0)
-    yield 1.5
+    yield from settle()
     after = image_pixels(layer().image)
     partial = lambda values: int(((values[..., 3] > .05) & (values[..., 3] < .95)).sum())
     check(numpy.abs(after - before).max() > .05 and partial(after) > partial(before), 'Blur softens the painted edge')
     before = after.copy()
     click(window, region, 'SMEAR')
-    yield 0.4
+    yield from settle()
     drag(window, fx, fy, 70, 0, count=12)
-    yield 1.5
+    yield from settle()
     after = image_pixels(layer().image)
     check(after[..., 3].sum() > before[..., 3].sum() and numpy.abs(after - before).max() > .05, 'Smudge drags paint along the stroke')
     click(window, region, 'CLONE')
-    yield 0.4
+    yield from settle()
     drag(window, fx, fy, 0, 0, count=1)
-    yield 0.8
+    yield from settle()
     check('Ctrl+click' in editor._active.message, 'Clone asks for a source first')
     sx, sy = face_point(region, area, cube, front)
     press(window, 'LEFTMOUSE', sx, sy, ctrl=True)
-    yield 0.5
+    yield from settle()
     check(editor._active.state.clone_source is not None, 'Ctrl+click sets the clone source on the model')
     tx, ty = face_point(region, area, cube, top)
     drag(window, tx, ty, 4, 2)
-    yield 1.5
+    yield from settle()
     copied, source = image_at(layer().image, spot[top]), image_at(layer().image, spot[front])
     check(source[3] > .2 and numpy.abs(copied - source).max() < .06, 'Clone copies the painted area to the top')
     check(abs(image_at(canvas('roughness'), spot[top])[0] - image_at(canvas('roughness'), spot[front])[0]) < .06, 'Clone copies the roughness channel too')
     click(window, region, 'PAINT')
-    yield 0.4
+    yield from settle()
 
     click(window, region, 'SHELF_TAB.TEXTURES')
-    yield 0.3
+    yield from settle()
     click(window, region, 'TEXTURE_DIR')
-    yield 0.2
+    yield from settle()
     type_text(window, str(textures), *spot_of(region, 'TEXTURE_DIR'))
     wanted = {'decal', 'brick_basecolor', 'brick_roughness'}
-    for _ in range(15):
-        yield 0.2
-        if wanted <= {control(key).label for key in keys('ITEM.')}:
-            break
+    yield from until(lambda: wanted <= {control(key).label for key in keys('ITEM.')}, 'wanted <= {control(key).label for key in keys("ITEM.")}')
     check(wanted <= {control(key).label for key in keys('ITEM.')}, 'the texture folder lists the decal and the brick textures')
     click(window, region, 'SHELF_TAB.MATERIALS')
-    yield 0.4
+    yield from settle()
     labels = {control(key).label: key for key in keys('ITEM.')}
     click(window, region, labels['Gold'], kind='RIGHTMOUSE')
-    yield 0.3
+    yield from settle()
     check(has(f'PAINT_MATERIAL.{labels["Gold"].removeprefix("ITEM.")}'), 'materials offer Paint with this material')
     click(window, region, f'PAINT_MATERIAL.{labels["Gold"].removeprefix("ITEM.")}')
-    yield 0.4
+    yield from settle()
     check(data.brush_material == 'Gold' and data.brush_slots['metallic'].enabled and abs(data.brush_slots['metallic'].value - 1.0) < 1e-3,
           'the brush takes every channel of the Gold material')
     click(window, region, 'ADD_PAINT')
-    yield 0.8
+    yield from settle()
     gold = active_layer(data)
     gold_uid = gold.uid
     x, y = face_point(region, area, cube, front)
     drag(window, x, y, 6, 3)
-    yield 1.2
+    yield from settle()
     gold = find_layer(data, gold_uid)
     color = image_at(gold.image, spot[front])
     check(color[3] > .5 and color[0] > color[2] + .3, f'material painting lays down the gold color {color} {tuple(painting.brush_value(bpy.context.scene, "color"))} {int((image_pixels(gold.image)[..., 3] > .5).sum())} {editor._active.message}')
@@ -470,15 +468,15 @@ def journey():
     brick = labels.get('Brick')
     check(brick is not None, 'the texture set appears as a material')
     click(window, region, brick, kind='RIGHTMOUSE')
-    yield 0.3
+    yield from settle()
     click(window, region, f'PAINT_MATERIAL.{brick.removeprefix("ITEM.")}')
-    yield 0.4
+    yield from settle()
     check(data.brush_slots['roughness'].source == 'IMAGE' and has('BRUSH_CARD'), 'a textured material puts its textures on the brush')
     click(window, region, 'ADD_PAINT')
-    yield 0.8
+    yield from settle()
     textured_uid = active_layer(data).uid
     drag(window, x, y, 6, 3)
-    yield 1.2
+    yield from settle()
     textured = find_layer(data, textured_uid)
     check(abs(image_at(textured.slots['roughness'].image, spot[front])[0] - .7) < .05, 'material painting samples the material textures per channel')
     yield from card_click(window, region, 'BRUSH_CARD', 'BRUSH_MATERIAL_CLEAR', 'BRUSH')
@@ -486,19 +484,19 @@ def journey():
     yield from close_cards(window, middle)
 
     click(window, region, 'CHANNELS')
-    yield 0.4
+    yield from settle()
     click(window, region, 'CHANSET.flow')
-    yield 0.5
+    yield from settle()
     press(window, 'ESC', *middle)
-    yield 0.3
+    yield from settle()
     click(window, region, 'ADD_PAINT')
-    yield 0.8
+    yield from settle()
     flow_uid = active_layer(data).uid
     yield from card_click(window, region, 'BRUSH_CARD', 'BRUSHUSE.flow', 'BRUSH')
     yield from close_cards(window, middle)
     x, y = face_point(region, area, cube, front, .3, 0)
     drag(window, x, y, 60, 0, count=10)
-    yield 1.5
+    yield from settle()
     flow_map = image_pixels(find_layer(data, flow_uid).slots['flow'].image)
     painted = flow_map[image_pixels(find_layer(data, flow_uid).image)[..., 3] > .5]
     check(len(painted) and numpy.abs(painted[:, :2] - .5).max(axis=1).mean() > .3, 'a flow map stroke records its direction')
@@ -506,12 +504,12 @@ def journey():
     yield from close_cards(window, middle)
 
     click(window, region, 'SHELF_TAB.TEXTURES')
-    yield 0.4
+    yield from settle()
     labels = {control(key).label: key for key in keys('ITEM.')}
     click(window, region, labels['decal'], kind='RIGHTMOUSE')
-    yield 0.3
+    yield from settle()
     click(window, region, 'USE_STENCIL.' + labels['decal'].removeprefix('ITEM.'))
-    yield 0.4
+    yield from settle()
     brush = bpy.context.tool_settings.image_paint.brush
     check(data.brush_stencil is not None and brush.texture is not None and brush.texture.image == data.brush_stencil
           and brush.texture_slot.map_mode == 'STENCIL', 'Use as stencil puts the texture on screen as a brush stencil')
@@ -524,22 +522,22 @@ def journey():
     yield from close_cards(window, middle)
     yield from set_hex(window, region, 'BRUSH_COLOR', 'FFFFFF')
     click(window, region, 'ADD_PAINT')
-    yield 0.8
+    yield from settle()
     decal_uid = active_layer(data).uid
     yield from card_click(window, region, 'STENCIL_CARD', 'STENCIL_PROJECT', 'STENCIL')
-    yield 1.5
+    yield from settle()
     projected = image_pixels(find_layer(data, decal_uid).image)
     reds = (projected[..., 3] > .5) & (projected[..., 0] > .8) & (projected[..., 1] < .2)
     check(int(reds.sum()) > 500 and 'Projected' in editor._active.message, 'Project through the view stamps the stencil image onto the model')
     check(abs(image_at(find_layer(data, decal_uid).slots['roughness'].image, tuple(numpy.argwhere(reds)[len(numpy.argwhere(reds)) // 2]))[0] - data.brush_slots['roughness'].value) < .05,
           'the projection also writes the brush channels')
     press(window, 'Z', *middle, ctrl=True)
-    yield 0.8
+    yield from settle()
     cube = bpy.data.objects['Cube']
     data = cube.devil_painter.sets[0]
     check(int((image_pixels(find_layer(data, decal_uid).image)[..., 3] > .5).sum()) == 0, 'Ctrl+Z undoes the projection')
     drag(window, middle[0], middle[1], 6, 3)
-    yield 1.2
+    yield from settle()
     through = image_pixels(find_layer(data, decal_uid).image)
     stamped = through[through[..., 3] > .5]
     check(len(stamped) and numpy.median(stamped[:, 0]) > .8 and numpy.median(stamped[:, 1]) < .2, 'a white stroke through the red stencil paints red')
@@ -548,10 +546,10 @@ def journey():
     yield from close_cards(window, middle)
 
     click(window, region, 'SHELF_TAB.MATERIALS')
-    yield 0.4
+    yield from settle()
     labels = {control(key).label: key for key in keys('ITEM.')}
     click(window, region, labels['Wood'])
-    yield 0.8
+    yield from settle()
     wood_uid = active_layer(data).uid
     yield from pick(window, region, 'PROJECTION', 'SET_PROJECTION.PLANAR')
     wood = find_layer(data, wood_uid)
@@ -560,18 +558,18 @@ def journey():
     check(len(control('GIZMO_MOVE').points) >= 8, 'the gizmo draws the projector frame')
     gx, gy = spot_of(region, 'GIZMO_MOVE')
     drag(window, gx, gy, 60, 0)
-    yield 0.8
+    yield from settle()
     wood = find_layer(data, wood_uid)
     check(Vector(wood.proj_offset).length > .1 and tuple(nodes(data)[f'{wood_uid}.projector'].inputs['Location'].default_value) == tuple(wood.proj_offset),
           'dragging the gizmo moves the projection')
     size = wood.proj_size
     sx, sy = spot_of(region, 'GIZMO_SIZE')
     drag(window, sx, sy, 50, 50)
-    yield 0.8
+    yield from settle()
     check(find_layer(data, wood_uid).proj_size > size * 1.1, 'dragging the corner handle grows the projection')
     yield from reveal(window, region, 'PROJ_ALIGN')
     click(window, region, 'PROJ_ALIGN')
-    yield 0.5
+    yield from settle()
     check(Vector(find_layer(data, wood_uid).proj_rotation).length > .1, 'Align to view points the projector along the view')
     yield from slide(window, region, 'PROJ_SPIN', .25)
     check(abs(math.degrees(find_layer(data, wood_uid).proj_rotation[2]) - 90) < 5, 'the spin slider turns the projection')
@@ -583,25 +581,25 @@ def journey():
     plates = build_plates()
     bpy.context.view_layer.objects.active = plates
     plates.select_set(True)
-    yield 0.6
+    yield from settle()
     check(has('START') and has('SETUP_UDIM') and control('SETUP_UDIM').active, 'the second mesh offers UDIM tiles')
     click(window, region, 'RES.0.1024')
-    yield 0.2
+    yield from settle()
     click(window, region, 'START')
-    yield 2.0
+    yield from settle()
     plate_set = plates.devil_painter.sets[0]
     check([tile.number for tile in plate_set.tiles] == [1001, 1002], 'the plates use two UDIM tiles')
     click(window, region, 'EXPORT')
-    yield 0.4
+    yield from settle()
     click(window, region, 'EXPORT_DIR')
-    yield 0.2
+    yield from settle()
     type_text(window, str(export_dir), *spot_of(region, 'EXPORT_DIR'))
-    yield 0.3
+    yield from settle()
     press(window, 'ESC', *middle)
-    yield 0.3
+    yield from settle()
     labels = {control(key).label: key for key in keys('ITEM.')}
     click(window, region, labels['Wood'])
-    yield 0.8
+    yield from settle()
     tiled_uid = active_layer(plate_set).uid
     yield from pick(window, region, 'PROJECTION', 'SET_PROJECTION.UV')
 
@@ -614,14 +612,14 @@ def journey():
     apart = yield from tiles_export()
     yield from reveal(window, region, 'TILE_MATCH')
     click(window, region, 'TILE_MATCH')
-    yield 0.6
+    yield from settle()
     check(find_layer(plate_set, tiled_uid).tile_match and any(node.type == 'VECT_MATH' and node.operation == 'FRACTION' for node in nodes(plate_set)),
           'Same on every UV tile repeats the fill per UDIM tile')
     matched = yield from tiles_export()
     check(apart > .02 and matched < .005, f'the exported tiles differ without matching and match with it ({apart:.3f}, {matched:.4f})')
 
     click(window, region, 'CLOSE')
-    yield 0.6
+    yield from settle()
     check(editor._active is None, 'Devil Painter closes')
     devil_painter.unregister()
     check(not hasattr(bpy.types.Object, 'devil_painter'), 'Devil Painter unregisters cleanly')

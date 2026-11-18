@@ -16,6 +16,7 @@ import devil_painter
 from devil_painter import editor, library, shelf
 from devil_painter.document import active_layer, find_layer
 from tools.workspace import prepare_scratch
+from tests.gui_harness import settle, until
 
 TIMEOUT = 600
 STARTED = time.time()
@@ -87,7 +88,7 @@ def reveal(window, region, key, panel='PROPERTIES'):
             x, y = region.x + viewport_rect.x + viewport_rect.w / 2, region.y + viewport_rect.y + viewport_rect.h / 2
             move(window, x, y)
             window.event_simulate(type=direction, value='PRESS', x=int(x), y=int(y))
-            yield 0.1
+            yield from settle()
             if direction == 'WHEELUPMOUSE' and editor._active.state.scroll.get(panel, 0.0) <= 0.0:
                 break
         if shown(key):
@@ -124,16 +125,16 @@ def nodes(data):
 def context_menu(window, region, uid, item):
     yield from reveal(window, region, 'ROW_' + uid, 'LAYERS')
     click(window, region, 'ROW_' + uid, kind='RIGHTMOUSE')
-    yield 0.3
+    yield from settle()
     check(has(item), f'the layer menu offers {item}')
     click(window, region, item)
-    yield 0.6
+    yield from settle()
 
 
 def select_row(window, region, uid, **modifiers):
     yield from reveal(window, region, 'ROW_' + uid, 'LAYERS')
     click(window, region, 'ROW_' + uid, fx=.6, **modifiers)
-    yield 0.4
+    yield from settle()
 
 
 def labels():
@@ -142,15 +143,12 @@ def labels():
 
 def open_tab(window, region, tab):
     click(window, region, 'SHELF_TAB.' + tab)
-    yield 0.4
+    yield from settle()
 
 
 def wait_preview(key):
-    for _ in range(60):
-        if has(key) and control(key).preview is not None:
-            return True
-        yield 0.25
-    return False
+    yield from until(lambda: has(key) and control(key).preview is not None, f'{key} to show its preview')
+    return True
 
 
 def drag_to(window, start, end, steps=10):
@@ -158,12 +156,12 @@ def drag_to(window, start, end, steps=10):
     window.event_simulate(type='LEFTMOUSE', value='PRESS', x=int(start[0]), y=int(start[1]))
     for step in range(1, steps + 1):
         move(window, start[0] + (end[0] - start[0]) * step / steps, start[1] + (end[1] - start[1]) * step / steps)
-    yield 0.4
+    yield from settle()
 
 
 def release(window, end):
     window.event_simulate(type='LEFTMOUSE', value='RELEASE', x=int(end[0]), y=int(end[1]))
-    yield 0.8
+    yield from settle()
 
 
 def row_point(region, uid, fy):
@@ -177,11 +175,11 @@ def order(data):
 
 def search(window, region, text):
     click(window, region, 'SHELF_SEARCH')
-    yield 0.2
+    yield from settle()
     type_text(window, text, *spot(region, 'SHELF_SEARCH'))
-    yield 0.3
+    yield from settle()
     move(window, region.x + region.width / 2, region.y + region.height / 2)
-    yield 0.3
+    yield from settle()
 
 
 def write_library(folder):
@@ -211,26 +209,26 @@ def journey():
     export_dir = scratch / 'shelf_export'
     library_dir = scratch / 'my_library'
     devil_painter.register()
-    yield 0.5
+    yield from settle()
     write_library(library_dir)
     window, area, region = viewport()
     cube = bpy.data.objects['Cube']
     middle = (area.x + area.width / 2, area.y + area.height / 2)
     press(window, 'P', *middle, ctrl=True, alt=True)
-    yield 0.6
+    yield from settle()
     click(window, region, 'RES.0.1024')
-    yield 0.2
+    yield from settle()
     click(window, region, 'START')
-    yield 2.0
+    yield from settle()
     data = cube.devil_painter.sets[0]
     click(window, region, 'EXPORT')
-    yield 0.4
+    yield from settle()
     click(window, region, 'EXPORT_DIR')
-    yield 0.2
+    yield from settle()
     type_text(window, str(export_dir), *spot(region, 'EXPORT_DIR'))
-    yield 0.3
+    yield from settle()
     press(window, 'ESC', *middle)
-    yield 0.3
+    yield from settle()
 
     tabs = {key.removeprefix('SHELF_TAB.') for key in keys('SHELF_TAB.')}
     check({'MATERIALS', 'SMART', 'TEXTURES', 'PATTERNS', 'MASKS', 'GENERATORS', 'FILTERS', 'BRUSHES', 'ALPHAS', 'ENVIRONMENTS'} <= tabs,
@@ -249,51 +247,51 @@ def journey():
     check(editor._active.state.shelf_query == 'gold' and list(labels()) == ['Gold'], 'typing in the search field filters the shelf by name')
     check(has('SAVE_SEARCH'), f'Save search appears {editor._active.state.shelf_query!r} {editor._active.state.text} {[k for k in keys("S")][:20]}')
     click(window, region, 'SAVE_SEARCH')
-    yield 0.3
+    yield from settle()
     check(has('SEARCH.0') and control('SEARCH.0').label == 'gold' and shelf.saved_searches(), 'Save search keeps the search as a chip')
     import json
     check(json.loads((library.library_root() / library.SETTINGS_FILE).read_text(encoding='utf-8'))['saved_searches'][0]['query'] == 'gold',
           'saved searches are stored in the library')
     click(window, region, 'SEARCH.0')
-    yield 0.3
+    yield from settle()
     check(editor._active.state.shelf_query == '' and len(labels()) > 5, 'clicking the active saved search clears it')
     click(window, region, 'SEARCH.0')
-    yield 0.3
+    yield from settle()
     check(list(labels()) == ['Gold'], 'clicking a saved search runs it again')
     click(window, region, 'SEARCH.0')
-    yield 0.3
+    yield from settle()
     click(window, region, 'SCOPE.MINE')
-    yield 0.4
+    yield from settle()
     builtin = {definition['name'] for definition in library.BUILTIN_MATERIALS}
     check(not builtin & set(labels()), 'the Mine filter hides the built-in materials')
     click(window, region, 'SCOPE.BUILTIN')
-    yield 0.4
+    yield from settle()
     check('Steel' in labels(), 'the Built-in filter shows the shipped materials')
     click(window, region, 'SCOPE.ALL')
-    yield 0.3
+    yield from settle()
     click(window, region, 'SEARCH.0', kind='RIGHTMOUSE')
-    yield 0.3
+    yield from settle()
     click(window, region, 'DELETE_SEARCH.0')
-    yield 0.3
+    yield from settle()
     check(not shelf.saved_searches() and not has('SEARCH.0'), 'a saved search can be deleted')
 
     click(window, region, 'LIBRARIES')
-    yield 0.4
+    yield from settle()
     check(has('LIBRARY_NEW') and has('LIBRARY_BROWSE') and has('IMPORT_RESOURCES'), 'the libraries card adds folders and imports files')
     click(window, region, 'LIBRARY_NEW')
-    yield 0.2
+    yield from settle()
     type_text(window, str(library_dir), *spot(region, 'LIBRARY_NEW'))
-    yield 0.6
+    yield from settle()
     check(library.libraries() == [str(library_dir)] and has('LIBRARY.0'), 'typing a folder adds it as a library')
     press(window, 'ESC', *middle)
-    yield 0.3
+    yield from settle()
     click(window, region, 'SCOPE.MINE')
-    yield 0.4
+    yield from settle()
     check('Painted Metal' in labels(), 'the library .blend material appears in the shelf')
     shown = yield from wait_preview(labels()['Painted Metal'])
     check(shown, 'the .blend material gets a rendered preview')
     click(window, region, labels()['Painted Metal'])
-    yield 0.8
+    yield from settle()
     metal = active_layer(data)
     metal_uid = metal.uid
     check(metal.name == 'Painted Metal' and metal.slots['base_color'].source == 'IMAGE' and metal.slots['base_color'].image.name.startswith('rust_plate')
@@ -302,23 +300,23 @@ def journey():
     yield from open_tab(window, region, 'TEXTURES')
     check('rust_plate' in labels(), 'library images appear among the textures')
     click(window, region, 'LIBRARIES')
-    yield 0.4
+    yield from settle()
     click(window, region, 'LIB_REMOVE.0')
-    yield 0.4
+    yield from settle()
     check(not library.libraries(), 'a library folder can be removed')
     press(window, 'ESC', *middle)
-    yield 0.3
+    yield from settle()
     bpy.ops.devil_painter.import_textures('EXEC_DEFAULT', directory=str(library_dir), files=[dict(name='metals.blend'), dict(name='rust_plate.png')])
-    yield 0.4
+    yield from settle()
     library.rescan()
     yield from open_tab(window, region, 'MATERIALS')
     check('Painted Metal' in labels(), 'Import resources copies .blend files into the library so their materials stay')
     click(window, region, 'SCOPE.ALL')
-    yield 0.3
+    yield from settle()
 
     yield from open_tab(window, region, 'MATERIALS')
     click(window, region, 'ADD_PAINT')
-    yield 0.8
+    yield from settle()
     paint_uid = active_layer(data).uid
     before = order(data)
     start = spot(region, labels()['Steel'])
@@ -335,7 +333,7 @@ def journey():
     check(not has('DRAG_GHOST'), 'the drag preview goes away after the drop')
     yield from reveal(window, region, 'VALUE.roughness')
     click(window, region, 'VALUE.roughness', fx=.8)
-    yield 0.5
+    yield from settle()
     check(abs(find_layer(data, steel_uid).slots['roughness'].value - .8) < .05, 'the dropped material is tuned with its sliders')
     yield from open_tab(window, region, 'MASKS')
     yield from drag_to(window, spot(region, labels()['Dirt']), row_point(region, paint_uid, .5))
@@ -351,24 +349,24 @@ def journey():
     yield from open_tab(window, region, 'GENERATORS')
     yield from select_row(window, region, steel_uid)
     click(window, region, labels()['Metal edge wear'])
-    yield 0.6
+    yield from settle()
     check(find_layer(data, steel_uid).generator == 'METAL_EDGE_WEAR', 'clicking a generator masks the selected layer')
     yield from open_tab(window, region, 'ENVIRONMENTS')
     click(window, region, labels()['forest'])
-    yield 0.4
+    yield from settle()
     check(area.spaces.active.shading.studio_light.startswith('forest'), 'clicking a lighting preview lights the viewport with it')
 
     click(window, region, 'BAKE')
-    yield 0.4
+    yield from settle()
     for key in keys('BAKEMAP.'):
         if control(key).active != (key.removeprefix('BAKEMAP.') in {'ao', 'curvature'}):
             click(window, region, key)
-            yield 0.1
+            yield from settle()
     rect = control('BAKE_SAMPLES').rect
     press(window, 'LEFTMOUSE', region.x + rect.x + rect.w * .03, region.y + rect.y + rect.h / 2)
-    yield 0.2
+    yield from settle()
     click(window, region, 'BAKE_RUN')
-    yield 3.0
+    yield from settle()
     yield from open_tab(window, region, 'SMART')
     top = order(data)[-1]
     count = len(order(data))
@@ -390,38 +388,38 @@ def journey():
     stem = bpy.path.clean_name(find_layer(data, steel_uid).name)
     plain = png(export_dir / f'{stem}_BaseColor.png')
     click(window, region, 'VIEWPORT')
-    yield 0.4
+    yield from settle()
     check(has('CM_VIEW') and has('CM_LOOK') and has('CM_EXPOSURE') and has('CM_GAMMA'), 'the viewport card offers color management')
     click(window, region, 'CM_VIEW')
-    yield 0.3
+    yield from settle()
     check(has('SET_CM_VIEW.Standard') and has('SET_CM_VIEW.AgX'), 'the view transform menu lists the OpenColorIO transforms')
     click(window, region, 'SET_CM_VIEW.AgX')
-    yield 0.4
+    yield from settle()
     check(view.view_transform == 'AgX', 'picking AgX changes the viewport view transform')
     click(window, region, 'VIEWPORT')
-    yield 0.3
+    yield from settle()
     click(window, region, 'CM_LOOK')
-    yield 0.3
+    yield from settle()
     looks = keys('SET_CM_LOOK.')
     check(len(looks) > 2, 'the look menu lists the looks of the view transform')
     click(window, region, next(key for key in looks if 'None' not in key))
-    yield 0.4
+    yield from settle()
     check(view.look != 'None', 'picking a look applies it')
     click(window, region, 'VIEWPORT')
-    yield 0.3
+    yield from settle()
     click(window, region, 'CM_EXPOSURE', fx=.7)
-    yield 0.3
+    yield from settle()
     click(window, region, 'CM_GAMMA', fx=.6)
-    yield 0.3
+    yield from settle()
     check(abs(view.exposure - 2.0) < .1 and abs(view.gamma - 1.88) < .1, 'the exposure and gamma sliders set the display')
     press(window, 'ESC', *middle)
-    yield 0.3
+    yield from settle()
     yield from context_menu(window, region, steel_uid, 'EXPORT_LAYER')
     graded = png(export_dir / f'{stem}_BaseColor.png')
     check(numpy.abs(graded - plain).max() < 1e-6, 'exports keep the raw texture values whatever the viewport color management')
 
     click(window, region, 'CLOSE')
-    yield 0.6
+    yield from settle()
     check(editor._active is None, 'Devil Painter closes')
     devil_painter.unregister()
     check(not hasattr(bpy.types.Object, 'devil_painter'), 'Devil Painter unregisters cleanly')

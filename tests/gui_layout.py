@@ -15,6 +15,7 @@ from devil_painter import editor, library
 from devil_painter.privacy import MASK, masked_path
 from devil_painter.shell import COLUMNS, MAX_SIZE, PANELS, SECTIONS
 from tools.workspace import prepare_scratch
+from tests.gui_harness import settle
 
 TIMEOUT = 600
 STARTED = time.time()
@@ -189,16 +190,16 @@ def journey():
     settings_file.unlink(missing_ok=True)
     library._cache.clear()
     devil_painter.register()
-    yield 0.5
+    yield from settle()
     window, area, region = viewport()
     cube = bpy.data.objects['Cube']
     middle = (area.x + area.width / 2, area.y + area.height / 2)
     press(window, 'P', *middle, ctrl=True, alt=True)
-    yield 0.6
+    yield from settle()
     click(window, region, 'RES.0.1024')
-    yield 0.2
+    yield from settle()
     click(window, region, 'START')
-    yield 2.0
+    yield from settle()
     data = cube.devil_painter.sets[0]
     check(not escaped(), f'nothing spills out of its shell in the default layout {escaped()}')
 
@@ -206,7 +207,7 @@ def journey():
     sizes = set()
     for _ in range(24):
         click(window, region, 'ADD_PAINT')
-        yield 0.15
+        yield from settle()
         sizes.add((round(rect('LAYERS').h, 3), round(rect('LAYERS').y, 3)))
     check(len(data.layers) >= 25 and sizes == {(round(layers.h, 3), round(layers.y, 3))},
           f'adding 24 layers leaves the Layers shell at exactly the same size {sizes} {layers}')
@@ -217,54 +218,54 @@ def journey():
 
     before = rect('LAYERS').h
     drag(window, region, 'SIZE.LAYERS', 0, -70)
-    yield 0.5
+    yield from settle()
     grown = rect('LAYERS').h
     check(grown > before + 40, f'dragging the Layers bottom border makes the section taller {before} {grown}')
     drag(window, region, 'SIZE.LAYERS', 0, 40)
-    yield 0.5
+    yield from settle()
     check(rect('LAYERS').h < grown - 30, 'dragging the border back up makes it shorter')
     check(abs(saved_workspace(settings_file)['heights']['LAYERS'] - editor._active.state.section_heights['LAYERS']) < .01, 'the new size is saved to the library settings')
 
     sets = rect('SETS')
     move_section(window, region, 'MAPS', region.x + sets.x + sets.w / 2, region.y + sets.y + sets.h * .8)
-    yield 0.5
+    yield from settle()
     column = editor._active.state.strips['RIGHT'][0]['items']
     check(column[0] == 'MAPS' and not escaped(), f'dragging the Mesh maps title onto the top of the column moves it there {column}')
     click(window, region, 'PANEL_SETS', fx=.15)
-    yield 0.4
+    yield from settle()
     check('SETS' in editor._active.state.collapsed, 'clicking a panel title without dragging still collapses it')
     click(window, region, 'PANEL_SETS', fx=.15)
-    yield 0.4
+    yield from settle()
 
     inventory = {key: set() for key in SECTIONS}
     for key in SECTIONS:
         resize_section(window, region, key, -60)
-        yield 0.4
+        yield from settle()
         low = extent(key)
         resize_section(window, region, key, 60)
-        yield 0.4
+        yield from settle()
         high = extent(key)
         resize_section(window, region, key, -60)
-        yield 0.4
+        yield from settle()
         check(high > low and extent(key) < high and not escaped(), f'the {NAMES[key]} grows and shrinks by its border ({low:.0f} < {high:.0f} > {extent(key):.0f}) {escaped()}')
         inventory[key].add('resized')
     for key in ('BAR', 'STRIP'):
         for target in ('BOTTOM', 'TOP'):
             move_section(window, region, key, *stage_point(region, target))
-            yield 0.5
+            yield from settle()
             check(workspace().zones.places[key][0] == target and not escaped(),
                   f'dragging the {NAMES[key]} to the {target.lower()} edge of the viewport moves it there {escaped()}')
         inventory[key].add('rearranged')
     right = strip_of('LAYERS')[2]
     move_section(window, region, 'PROPERTIES', region.x + right.x + right.w - 8, region.y + right.y + right.h / 2)
-    yield 0.5
+    yield from settle()
     check(len(editor._active.state.strips['RIGHT']) == 2 and editor._active.state.strips['RIGHT'][0]['items'] == ['PROPERTIES'] and not escaped(),
           f'dropping Properties on the outer edge of the column splits it into its own column {editor._active.state.strips["RIGHT"]} {escaped()}')
     targets = dict(SHELF='LEFT', SETS='LEFT', LAYERS='LEFT', PROPERTIES='RIGHT', MAPS='RIGHT')
     for key in targets:
         before = strip_of(key)[0]
         move_section(window, region, key, *stage_point(region, targets[key]))
-        yield 0.5
+        yield from settle()
         side = workspace().zones.places[key][0]
         check(side == targets[key] and not escaped() and not has('SECTION_GHOST'),
               f'dragging the {NAMES[key]} to the {targets[key].lower()} edge of the viewport moves it there (from {before.lower()}) {escaped()}')
@@ -279,15 +280,15 @@ def journey():
     for key in SECTIONS:
         if key != 'SHELF':
             resize_section(window, region, key, -5000)
-            yield 0.3
+            yield from settle()
     check(not escaped(), f'at minimum sizes nothing overflows {escaped()}')
     click(window, region, 'EXPORT')
-    yield 0.4
+    yield from settle()
     check(not escaped(), f'the export card fits at minimum sizes {escaped()}')
     press(window, 'ESC', *middle)
-    yield 0.3
+    yield from settle()
     resize_section(window, region, 'LAYERS', 5000)
-    yield 0.4
+    yield from settle()
     side, index, _ = strip_of('LAYERS')
     bounds = editor._active.bounds
     check(not escaped() and editor._active.state.strips[side][index]['size'] <= MAX_SIZE
@@ -299,23 +300,23 @@ def journey():
     zones_before = snapshot()
     saved_before = saved_workspace(settings_file)
     click(window, region, 'CLOSE')
-    yield 0.6
+    yield from settle()
     devil_painter.unregister()
     library._cache.clear()
-    yield 0.3
+    yield from settle()
     devil_painter.register()
-    yield 0.5
+    yield from settle()
     press(window, 'P', *middle, ctrl=True, alt=True)
-    yield 1.0
+    yield from settle()
     check(snapshot() == zones_before and saved_workspace(settings_file) == saved_before,
           f'after a restart every section is back exactly where and how big the user left it {zones_before} {snapshot()}')
     check(not escaped(), f'the restored arrangement has no overflow {escaped()}')
 
     x, y = grab_point(region, 'BAR')
     press(window, 'RIGHTMOUSE', x, y)
-    yield 0.3
+    yield from settle()
     click(window, region, 'RESET_LAYOUT')
-    yield 0.5
+    yield from settle()
     check(editor._active.state.strips['RIGHT'][0]['items'] == list(PANELS) and workspace().zones.places['SHELF'][0] == 'BOTTOM'
           and workspace().zones.places['DOCK'][0] == 'LEFT' and not escaped(), 'Reset layout from the right-click menu brings back the default arrangement')
     texture_dir = scratch / 'Private Textures'
@@ -324,60 +325,60 @@ def journey():
     (scratch / 'Private Library').mkdir(exist_ok=True)
     check(library.add_library(str(scratch / 'Private Library')), 'a private library folder is added')
     click(window, region, 'SHELF_TAB.TEXTURES')
-    yield 0.5
+    yield from settle()
     field = control('TEXTURE_DIR').text
     check(field.startswith(MASK) and field == masked_path(str(texture_dir)) and 'Users' not in field and str(scratch) not in field,
           f'the texture folder field shows the path masked by default ({field})')
     click(window, region, 'TEXTURE_DIR')
-    yield 0.3
+    yield from settle()
     check(editor._active.state.text is not None and editor._active.state.text.text == str(texture_dir), 'clicking the field reveals the full path to edit')
     press(window, 'ESC', *middle)
-    yield 0.3
+    yield from settle()
     check(control('TEXTURE_DIR').text.startswith(MASK), 'the field is masked again after editing')
     click(window, region, 'LIBRARIES')
-    yield 0.4
+    yield from settle()
     label = control('LIBRARY.0').label
     check(label.startswith(MASK) and 'Users' not in label, f'library folders are masked by default ({label})')
     click(window, region, 'LIBRARY.0')
-    yield 0.3
+    yield from settle()
     check(control('LIBRARY.0').label == str(scratch / 'Private Library'), 'clicking a library folder reveals its full path')
     click(window, region, 'LIBRARY.0')
-    yield 0.3
+    yield from settle()
     check(control('LIBRARY.0').label.startswith(MASK), 'clicking it again masks it')
     press(window, 'ESC', *middle)
-    yield 0.3
+    yield from settle()
     export_dir = scratch / 'Private Export'
     cube.devil_painter.export_directory = str(export_dir)
     click(window, region, 'EXPORT')
-    yield 0.4
+    yield from settle()
     check(control('EXPORT_DIR').text == masked_path(str(export_dir)) and 'Users' not in control('EXPORT_DIR').text, 'the export folder is masked by default')
     click(window, region, 'EXPORT_DIR')
-    yield 0.3
+    yield from settle()
     check(editor._active.state.text.text == str(export_dir), 'clicking the export folder reveals it')
     press(window, 'ESC', *middle)
-    yield 0.3
+    yield from settle()
     click(window, region, 'BRIDGE_COMMAND')
-    yield 0.2
+    yield from settle()
     command = f'"{scratch / "Apps" / "viewer.exe"}" {{files}}'
     type_text(window, command, *spot(region, 'BRIDGE_COMMAND'))
-    yield 0.3
+    yield from settle()
     move(window, *spot(region, 'EXPORT_RUN'))
-    yield 0.3
+    yield from settle()
     shown_command = control('BRIDGE_COMMAND').text
     check(shown_command.endswith('{files}') and MASK in shown_command and 'Users' not in shown_command, f'the send-to-app command masks its path ({shown_command})')
     press(window, 'ESC', *middle)
-    yield 0.3
+    yield from settle()
     editor._active.message = f'Exported 3 textures to {export_dir}.'
     move(window, *middle)
-    yield 0.4
+    yield from settle()
     toast = editor._active.toast_rect
     check(toast is not None and not editor._active.toast_revealed, 'a message with a path shows as a masked toast')
     press(window, 'LEFTMOUSE', region.x + toast.x + toast.w / 2, region.y + toast.y + toast.h / 2)
-    yield 0.3
+    yield from settle()
     check(editor._active.toast_revealed, 'clicking the toast reveals the full path')
 
     click(window, region, 'CLOSE')
-    yield 0.6
+    yield from settle()
     check(editor._active is None, 'Devil Painter closes')
     devil_painter.unregister()
     check(not hasattr(bpy.types.Object, 'devil_painter'), 'Devil Painter unregisters cleanly')

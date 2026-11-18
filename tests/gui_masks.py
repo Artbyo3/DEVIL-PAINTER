@@ -16,6 +16,7 @@ import devil_painter
 from devil_painter import editor, library
 from devil_painter.document import active_effect, active_layer, find_layer
 from tools.workspace import prepare_scratch
+from tests.gui_harness import settle
 
 TIMEOUT = 600
 STARTED = time.time()
@@ -87,7 +88,7 @@ def reveal(window, region, key, panel='PROPERTIES'):
             x, y = region.x + viewport_rect.x + viewport_rect.w / 2, region.y + viewport_rect.y + viewport_rect.h / 2
             move(window, x, y)
             window.event_simulate(type=direction, value='PRESS', x=int(x), y=int(y))
-            yield 0.1
+            yield from settle()
             if direction == 'WHEELUPMOUSE' and editor._active.state.scroll.get(panel, 0.0) <= 0.0:
                 break
         if shown(key):
@@ -123,19 +124,19 @@ def nodes(data):
 
 def menu(window, region, opener, item):
     click(window, region, opener)
-    yield 0.3
+    yield from settle()
     check(has(item), f'{opener} offers {item}')
     click(window, region, item)
-    yield 0.5
+    yield from settle()
 
 
 def context_menu(window, region, uid, item):
     yield from reveal(window, region, 'ROW_' + uid, 'LAYERS')
     click(window, region, 'ROW_' + uid, kind='RIGHTMOUSE')
-    yield 0.3
+    yield from settle()
     check(has(item), f'the layer menu offers {item}')
     click(window, region, item)
-    yield 0.6
+    yield from settle()
 
 
 def add_effect(window, region, target, kind):
@@ -147,19 +148,19 @@ def add_effect(window, region, target, kind):
 def slide(window, region, key, fx):
     yield from reveal(window, region, key)
     click(window, region, key, fx=fx)
-    yield 0.4
+    yield from settle()
 
 
 def set_hex(window, region, opener, text):
     yield from reveal(window, region, opener)
     click(window, region, opener)
-    yield 0.3
+    yield from settle()
     click(window, region, 'COLOR_HEX')
-    yield 0.2
+    yield from settle()
     type_text(window, text, *spot(region, 'COLOR_HEX'))
-    yield 0.4
+    yield from settle()
     press(window, 'ESC', *spot(region, 'COLOR_HEX'))
-    yield 0.3
+    yield from settle()
 
 
 def build_mesh():
@@ -221,29 +222,29 @@ def toggle_maps(window, region, wanted):
     for key in keys('BAKEMAP.'):
         if control(key).active != (key.removeprefix('BAKEMAP.') in wanted):
             click(window, region, key)
-            yield 0.1
+            yield from settle()
 
 
 def pick_menu(window, region, opener, item):
     yield from reveal(window, region, opener)
     click(window, region, opener)
-    yield 0.3
+    yield from settle()
     check(has(item), f'{opener} offers {item}')
     click(window, region, item)
-    yield 0.4
+    yield from settle()
 
 
 def choose_effect(window, region, uid, effect_uid):
     key = f'FX_{uid}.{effect_uid}'
     yield from reveal(window, region, key, 'LAYERS')
     click(window, region, key, fx=.6)
-    yield 0.4
+    yield from settle()
     check(active_effect(editor._active.painted()[1]).uid == effect_uid, 'the effect row selects the effect')
 
 
 def fill_at(window, x, y):
     press(window, 'LEFTMOUSE', x, y)
-    yield 0.6
+    yield from settle()
     return editor._active.message
 
 
@@ -254,16 +255,16 @@ def journey():
     library._cache.clear()
     export_dir = scratch / 'mask_export'
     devil_painter.register()
-    yield 0.5
+    yield from settle()
     window, area, region = viewport()
     cube = build_mesh()
     middle = (area.x + area.width / 2, area.y + area.height / 2)
     press(window, 'P', *middle, ctrl=True, alt=True)
-    yield 0.6
+    yield from settle()
     click(window, region, 'RES.0.1024')
-    yield 0.2
+    yield from settle()
     click(window, region, 'START')
-    yield 3.0
+    yield from settle()
     project = cube.devil_painter
     data = project.sets[0]
     resolution = data.resolution
@@ -279,22 +280,22 @@ def journey():
     check(len(cube.data.uv_layers) == 1, 'Start painting unwraps the mesh into UV chunks')
 
     click(window, region, 'EXPORT')
-    yield 0.4
+    yield from settle()
     click(window, region, 'EXPORT_DIR')
-    yield 0.2
+    yield from settle()
     type_text(window, str(export_dir), *spot(region, 'EXPORT_DIR'))
-    yield 0.3
+    yield from settle()
     press(window, 'ESC', *middle)
-    yield 0.3
+    yield from settle()
 
     click(window, region, 'BAKE')
-    yield 0.4
+    yield from settle()
     yield from toggle_maps(window, region, {'ao', 'curvature', 'thickness', 'position', 'world_normal', 'id', 'uv_border'})
     rect = control('BAKE_SAMPLES').rect
     press(window, 'LEFTMOUSE', region.x + rect.x + rect.w * .03, region.y + rect.y + rect.h / 2)
-    yield 0.2
+    yield from settle()
     click(window, region, 'BAKE_RUN')
-    yield 6.0
+    yield from settle()
     check(all(key in data.maps and data.maps[key].image is not None for key in ('ao', 'curvature', 'position', 'world_normal', 'id', 'uv_border')),
           'the bake card bakes the maps generators read, including UV border distance')
     border = image_pixels(data.maps['uv_border'].image)
@@ -302,17 +303,17 @@ def journey():
     check(inside.min() < .05 and inside.max() > .95 and border[front_pixel][0] > .5, 'UV border distance is dark at UV chunk edges and bright inside')
 
     click(window, region, 'ADD_FILL')
-    yield 0.8
+    yield from settle()
     worn = active_layer(data)
     worn_uid = worn.uid
     yield from reveal(window, region, 'GENERATOR')
     click(window, region, 'GENERATOR')
-    yield 0.4
+    yield from settle()
     offered = [key.removeprefix('SET_GENERATOR.') for key in keys('SET_GENERATOR.') if key != 'SET_GENERATOR.NONE']
     check(len(offered) >= 21 and {'METAL_EDGE_WEAR', 'FIBERGLASS_EDGE_WEAR', 'BUILDER', 'UV_BORDER', 'SPHERICAL', 'GRADIENT_X', 'SIDES', 'NOISE'} <= set(offered),
           f'the generator menu offers {len(offered)} generators')
     press(window, 'ESC', *middle)
-    yield 0.3
+    yield from settle()
     for key in offered:
         yield from pick_menu(window, region, 'GENERATOR', 'SET_GENERATOR.' + key)
         layer = find_layer(data, worn_uid)
@@ -335,12 +336,12 @@ def journey():
     yield from add_effect(window, region, 'MASK', 'FILTER')
     yield from reveal(window, region, 'FX_FILTER')
     click(window, region, 'FX_FILTER')
-    yield 0.4
+    yield from settle()
     mask_filters = [key.removeprefix('SET_FXFILTER.') for key in keys('SET_FXFILTER.')]
     check(len(keys('HEADING.')) >= 6 and {'DILATE', 'ERODE', 'PIXELATE', 'SCRATCHES', 'AO_SHADE', 'INVERT'} <= set(mask_filters)
           and 'HSV' not in mask_filters, f'the mask filter menu groups {len(mask_filters)} filters under headings')
     click(window, region, 'SET_FXFILTER.INVERT')
-    yield 0.5
+    yield from settle()
     yield from context_menu(window, region, worn_uid, 'EXPORT_MASK')
     inverted = mask_png(export_dir, find_layer(data, worn_uid))
     island = border[..., 3] > .5
@@ -351,9 +352,9 @@ def journey():
     for key in mask_filters:
         yield from reveal(window, region, 'FX_FILTER')
         click(window, region, 'FX_FILTER')
-        yield 0.3
+        yield from settle()
         click(window, region, 'SET_FXFILTER.' + key)
-        yield 0.3
+        yield from settle()
         check(active_effect(data).filter == key and 'error' not in editor._active.message.lower(), f'the {key} mask filter builds')
     yield from pick_menu(window, region, 'FX_FILTER', 'SET_FXFILTER.DILATE')
     check(sum(1 for node in nodes(data) if node.type == 'MATH' and node.operation == 'MAXIMUM') >= 8, 'Dilate takes the maximum of a ring of taps')
@@ -364,34 +365,34 @@ def journey():
     yield from add_effect(window, region, 'CONTENT', 'FILTER')
     yield from reveal(window, region, 'FX_FILTER')
     click(window, region, 'FX_FILTER')
-    yield 0.4
+    yield from settle()
     content_filters = [key.removeprefix('SET_FXFILTER.') for key in keys('SET_FXFILTER.')]
     check(len(content_filters) >= 60 and {'HSV', 'COLOR_FRINGE', 'SEPIA', 'REPLACE_COLOR'} <= set(content_filters),
           f'the content filter menu offers {len(content_filters)} filters')
     press(window, 'ESC', *middle)
-    yield 0.3
+    yield from settle()
     for key in content_filters:
         yield from reveal(window, region, 'FX_FILTER')
         click(window, region, 'FX_FILTER')
-        yield 0.3
+        yield from settle()
         click(window, region, 'SET_FXFILTER.' + key)
-        yield 0.3
+        yield from settle()
         check(active_effect(data).filter == key and 'error' not in editor._active.message.lower(), f'the {key} content filter builds')
     yield from pick_menu(window, region, 'FX_FILTER', 'SET_FXFILTER.SCRATCHES')
     check(any(node.type == 'TEX_VORONOI' and node.feature == 'DISTANCE_TO_EDGE' for node in nodes(data)), 'Scratches draws thin voronoi lines')
     yield from pick_menu(window, region, 'FX_FILTER', 'SET_FXFILTER.AO_SHADE')
     check(any(node.type == 'TEX_IMAGE' and node.image == data.maps['ao'].image for node in nodes(data)), 'Occlusion shading reads the baked ambient occlusion')
     click(window, region, 'FX_DELETE')
-    yield 0.5
+    yield from settle()
 
     yield from add_effect(window, region, 'MASK', 'PAINT')
     click(window, region, 'POLYFILL')
-    yield 0.3
+    yield from settle()
     check(editor._active.state.poly_mode == 'FACE' and all(has('POLY.' + mode) for mode in ('TRIANGLE', 'FACE', 'ISLAND', 'UV', 'LOOP')),
           'the polygon fill tool offers triangle, face, mesh part, UV chunk, and loop')
     yield from set_hex(window, region, 'BRUSH_COLOR', '000000')
     message = yield from fill_at(window, *front_point)
-    yield 0.3
+    yield from settle()
     check(message.startswith('Filled face: 1 face'), 'polygon fill paints one face into the mask paint effect')
     yield from context_menu(window, region, worn_uid, 'EXPORT_MASK')
     refined = mask_png(export_dir, find_layer(data, worn_uid))
@@ -399,7 +400,7 @@ def journey():
           'the painted effect hides the generated mask on that face and leaves the rest')
 
     yield from context_menu(window, region, worn_uid, 'SAVE_SMART_MASK')
-    yield 1.0
+    yield from settle()
     saved = library.settings().get('smart_masks', [])
     check(len(saved) == 1 and len(saved[0]['effects']) == 2 and saved[0]['generator']['generator'] == 'EDGE_WEAR' and Path(saved[0]['preview']).is_file(),
           'Save mask as smart mask stores the generator, the effect stack, and a preview')
@@ -408,15 +409,15 @@ def journey():
     library._cache.clear()
     check(len(library.settings().get('smart_masks', [])) == 1, 'smart masks survive reloading the library')
     click(window, region, 'SHELF_TAB.MASKS')
-    yield 0.6
+    yield from settle()
     labels = {control(key).label: key for key in keys('ITEM.')}
     item_key = labels.get(saved[0]['name'])
     check(item_key is not None and control(item_key).preview is not None, 'the Masks shelf shows the saved smart mask with its preview')
     click(window, region, 'ADD_FILL')
-    yield 0.8
+    yield from settle()
     reused_uid = active_layer(data).uid
     click(window, region, item_key)
-    yield 1.0
+    yield from settle()
     reused = find_layer(data, reused_uid)
     check(reused.generator == 'EDGE_WEAR' and [effect.kind for effect in reused.effects if effect.target == 'MASK'] == ['FILTER', 'PAINT'],
           'clicking the smart mask gives another layer the same generator and effect stack')
@@ -424,21 +425,21 @@ def journey():
     check(numpy.abs(mask_png(export_dir, reused) - refined)[island].mean() < .02, 'the reused smart mask matches the original mask')
     labels = {control(key).label: key for key in keys('ITEM.')}
     click(window, region, labels[saved[0]['name']], kind='RIGHTMOUSE')
-    yield 0.3
+    yield from settle()
     click(window, region, 'DELETE_SMART_MASK.0')
-    yield 0.4
+    yield from settle()
     check(not library.settings().get('smart_masks') and saved[0]['name'] not in {control(key).label for key in keys('ITEM.')}, 'a smart mask can be deleted')
 
     click(window, region, 'ADD_FILL')
-    yield 0.8
+    yield from settle()
     picked_uid = active_layer(data).uid
     yield from add_effect(window, region, 'MASK', 'ID_COLOR')
     check(has('FX_PICK_ID') and has('FX_amount') and not has('FX_ID_MISSING'), 'the ID color effect offers a picker and a tolerance')
     yield from reveal(window, region, 'FX_PICK_ID')
     click(window, region, 'FX_PICK_ID')
-    yield 0.3
+    yield from settle()
     press(window, 'LEFTMOUSE', *front_point)
-    yield 0.8
+    yield from settle()
     id_map = image_pixels(data.maps['id'].image)
     check(numpy.abs(numpy.array(active_effect(data).color) - id_map[front_pixel][:3]).max() < .02, 'clicking the model picks the baked ID color')
     yield from context_menu(window, region, picked_uid, 'EXPORT_MASK')
@@ -448,7 +449,7 @@ def journey():
           f'the ID color mask keeps only the picked UV chunk ({selected[front_pixel]:.2f}, {selected[back_pixel]:.2f}, {selected[top_pixel]:.2f}, {colors} ID colors, {id_map[front_pixel]}, {id_map[back_pixel]})')
 
     click(window, region, 'ADD_PAINT')
-    yield 0.8
+    yield from settle()
     painted = active_layer(data)
     painted_uid = painted.uid
     yield from set_hex(window, region, 'BRUSH_COLOR', 'FF0000')
@@ -460,52 +461,52 @@ def journey():
     face_count = covered()
     check(message.startswith('Filled face: 1 face') and .8 * front_area < face_count < 2.5 * front_area + 400, 'Face fills exactly the clicked face')
     press(window, 'Z', *middle, ctrl=True)
-    yield 0.8
+    yield from settle()
     cube = bpy.data.objects['Cube']
     project = cube.devil_painter
     data = project.sets[0]
     check(covered() == 0, 'Ctrl+Z undoes a polygon fill')
     click(window, region, 'POLY.TRIANGLE')
-    yield 0.2
+    yield from settle()
     message = yield from fill_at(window, *point_toward_corner(region, area, cube, front, .3))
     check(message.startswith('Filled triangle') and covered() < .8 * face_count, 'Triangle fills half of the face')
     for mode, faces in (('UV', 16), ('LOOP', 16), ('ISLAND', 96)):
         click(window, region, 'POLY.' + mode)
-        yield 0.2
+        yield from settle()
         message = yield from fill_at(window, *front_point)
         check(f': {faces} faces' in message, f'{mode} fill picks {faces} faces: {message}')
     click(window, region, 'POLY_ERASE')
     click(window, region, 'POLY.FACE')
-    yield 0.2
+    yield from settle()
     message = yield from fill_at(window, *front_point)
     check(message.startswith('Erased face') and image_pixels(find_layer(data, painted_uid).image)[front_pixel][3] < .5, 'Erase clears the clicked face')
     click(window, region, 'POLY_ERASE')
-    yield 0.2
+    yield from settle()
 
     click(window, region, 'ADD_FILL')
-    yield 0.8
+    yield from settle()
     part_uid = active_layer(data).uid
     yield from context_menu(window, region, part_uid, 'ADD_MASK_BLACK')
     click(window, region, 'POLY.UV')
-    yield 0.2
+    yield from settle()
     message = yield from fill_at(window, *front_point)
     yield from context_menu(window, region, part_uid, 'EXPORT_MASK')
     part = mask_png(export_dir, find_layer(data, part_uid))
     check(part[front_pixel] > .9 and part[back_pixel] < .1 and part[top_pixel] < .1, 'polygon fill on a black mask restricts the layer to one UV chunk')
 
     click(window, region, 'QUICK_MASK')
-    yield 0.6
+    yield from settle()
     check(data.quick_mask is not None and has('QUICK_APPLY'), 'Quick mask turns on a temporary stencil')
     tint = [node for node in nodes(data) if node.type == 'MIX' and node.data_type == 'RGBA'
             and tuple(round(value, 2) for value in node.inputs[7].default_value) == (1.0, .08, .15, 1.0)]
     check(tint, 'the quick mask shows as a red overlay on the model')
     click(window, region, 'POLY.FACE')
-    yield 0.2
+    yield from settle()
     stencil_name = data.quick_mask.name
     yield from fill_at(window, *front_point)
     check(image_pixels(data.quick_mask)[front_pixel][3] > .5, 'polygon fill paints into the quick mask')
     click(window, region, 'ADD_FILL')
-    yield 0.8
+    yield from settle()
     quick_layer = active_layer(data)
     quick_uid = quick_layer.uid
     check(data.quick_mask is None and quick_layer.mask is not None and quick_layer.mask.name != stencil_name,
@@ -514,21 +515,21 @@ def journey():
     quick = mask_png(export_dir, find_layer(data, quick_uid))
     check(quick[front_pixel] > .9 and quick[back_pixel] < .1, 'the new layer shows only where the quick mask was painted')
     click(window, region, 'QUICK_MASK')
-    yield 0.5
+    yield from settle()
     click(window, region, 'POLY.UV')
-    yield 0.2
+    yield from settle()
     yield from fill_at(window, *front_point)
     click(window, region, 'QUICK_APPLY')
-    yield 0.6
+    yield from settle()
     applied = find_layer(data, quick_uid)
     check(data.quick_mask is None and any(effect.kind == 'PAINT' and effect.blend == 'MULTIPLY' for effect in applied.effects),
           'Mask selected layer adds the quick mask to a layer that already has a mask')
     click(window, region, 'POLYFILL')
-    yield 0.3
+    yield from settle()
     check(editor._active.state.poly_mode == '', 'the polygon fill tool turns off')
 
     click(window, region, 'CLOSE')
-    yield 0.6
+    yield from settle()
     check(editor._active is None, 'Devil Painter closes')
     devil_painter.unregister()
     check(not hasattr(bpy.types.Object, 'devil_painter'), 'Devil Painter unregisters cleanly')
