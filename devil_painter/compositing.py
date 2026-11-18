@@ -4,7 +4,7 @@ from .document import PROJECTORS, active_tile, children, geometry_attribute, iso
 from .effects import EFFECT_FIELDS
 from .filters import FILTER, content_warp, filter_color, filter_value, warp_vector, wrap_sampling
 from .masks import generator_mask, id_selection, write_generator
-from .nodes import gray, link_or_set, math_node, mix_color, mix_value, socket, vector_math
+from .nodes import gray, link_or_set, math_node, mix_color, socket, vector_math
 from .procedural import contrast_range, pattern_node, set_pattern_values
 from .tiles import numbers, variant
 
@@ -16,6 +16,7 @@ PREVIEW_TOOLS = {'PAINT', 'FILL', ''}
 BUMP_DISTANCE = .05
 DISPLAY_GAMMA = 2.2
 TRIPLANAR_BLEND = .2
+MASK_MIXES = {'MINIMUM': 'DARKEN', 'MAXIMUM': 'LIGHTEN'}
 SHADER_INPUTS = {'base_color': 'Base Color', 'roughness': 'Roughness', 'metallic': 'Metallic', 'emission': 'Emission Color',
                  'opacity': 'Alpha'}
 
@@ -156,7 +157,8 @@ def slot_signature(slot):
 
 def effect_signature(effect):
     values = '/'.join(str(getattr(effect, field)) if field not in {'texture'} else (effect.texture.name if effect.texture else '') for field in EFFECT_FIELDS)
-    return f'{effect.uid}={values}={effect.image.name if effect.image else ""}'
+    extra = ','.join(f'{value:.4f}' for item in effect.id_colors for value in item.color)
+    return f'{effect.uid}={values}={effect.image.name if effect.image else ""}={extra}'
 
 
 def layer_signature(layer):
@@ -208,7 +210,7 @@ def levels_value(build, value, effect):
     output = nodes.new('ShaderNodeMapRange')
     links.new(curved, output.inputs['Value'])
     output.inputs['To Min'].default_value, output.inputs['To Max'].default_value = effect.out_low, effect.out_high
-    return mix_value(build, value, output.outputs['Result'], effect.opacity)
+    return output.outputs['Result']
 
 
 def levels_color(build, color, effect):
@@ -234,14 +236,9 @@ def levels_color(build, color, effect):
 
 
 def combine_mask(build, value, other, blend, factor):
-    nodes, links = build.nodes, build.links
-    if blend == 'MIX':
-        result = other
-    elif blend == 'DIFFERENCE':
-        result = math_node(nodes, links, 'ABSOLUTE', math_node(nodes, links, 'SUBTRACT', value, other), 0.0)
-    else:
-        result = math_node(nodes, links, blend, value, other)
-    return mix_value(build, value, result, factor)
+    split = build.nodes.new('ShaderNodeSeparateColor')
+    build.links.new(mix_color(build, value, other, factor, MASK_MIXES.get(blend, blend)), split.inputs['Color'])
+    return split.outputs['Red']
 
 
 def fill_effect_value(build, effect):
@@ -250,18 +247,40 @@ def fill_effect_value(build, effect):
     if effect.source == 'IMAGE' and effect.texture is not None:
         node = build.nodes.new('ShaderNodeTexImage')
         node.image = effect.texture
-        build.links.new(build.sampler.uv(), node.inputs['Vector'])
+        if fill_projection(effect) == 'TRIPLANAR':
+            node.projection = 'BOX'
+            node.projection_blend = TRIPLANAR_BLEND
+        build.links.new(fill_vector(build, effect), node.inputs['Vector'])
         return gray(build, node.outputs['Color'])
     if effect.source == 'PATTERN':
-        coordinates = build.nodes.new('ShaderNodeTexCoord')
         texture, factor = pattern_node(build.nodes, effect.pattern, effect.uid + '.texture', (0, 0))
-        build.links.new(coordinates.outputs['Object'], texture.inputs['Vector'])
+        build.links.new(fill_vector(build, effect), texture.inputs['Vector'])
         set_pattern_values(texture, effect.pattern, effect.scale, effect.detail)
         ranged = build.nodes.new('ShaderNodeMapRange')
         build.links.new(factor, ranged.inputs['Value'])
         ranged.inputs['From Min'].default_value, ranged.inputs['From Max'].default_value = contrast_range(effect.pattern, effect.contrast)
         return ranged.outputs['Result']
     return None
+
+
+def fill_projection(effect):
+    if effect.projection != 'AUTO':
+        return effect.projection
+    return 'UV' if effect.source == 'IMAGE' else 'TRIPLANAR'
+
+
+def fill_vector(build, effect):
+    if fill_projection(effect) == 'UV':
+        source = build.sampler.uv()
+    else:
+        source = build.nodes.new('ShaderNodeTexCoord').outputs['Object']
+    mapping = build.nodes.new('ShaderNodeMapping')
+    mapping.name = effect.uid + '.mapping'
+    build.links.new(source, mapping.inputs['Vector'])
+    mapping.inputs['Location'].default_value = (effect.offset_u, effect.offset_v, 0.0)
+    mapping.inputs['Rotation'].default_value = (0.0, 0.0, math.radians(effect.angle))
+    mapping.inputs['Scale'].default_value = (effect.tiling,) * 3
+    return mapping.outputs['Vector']
 
 
 def anchor_value(build, effect):
@@ -293,15 +312,15 @@ def mask_value(build, layer):
     for effect in layer.effects:
         if not effect.enabled or effect.target != 'MASK':
             continue
-        if effect.kind == 'LEVELS':
-            value = levels_value(build, value, effect)
-        elif effect.kind == 'FILTER':
-            value = filter_value(build, value, effect)
-        elif effect.kind == 'PAINT' and effect.image is not None:
+        if effect.kind == 'PAINT' and effect.image is not None:
             color, alpha = sample(effect.image)
             value = combine_mask(build, value, gray(build, color), effect.blend, math_node(nodes, links, 'MULTIPLY', alpha, effect.opacity))
         else:
-            if effect.kind == 'FILL':
+            if effect.kind == 'LEVELS':
+                other = levels_value(build, value, effect)
+            elif effect.kind == 'FILTER':
+                other = filter_value(build, value, effect)
+            elif effect.kind == 'FILL':
                 other = fill_effect_value(build, effect)
             elif effect.kind == 'ID_COLOR':
                 other = id_selection(build, effect, sample)
@@ -796,6 +815,20 @@ def show_map(build, output, image):
     build.links.new(emission.outputs[0], output.inputs['Surface'])
 
 
+def viewed_mask(data):
+    uid = data.solo.removeprefix('mask:') if data.solo.startswith('mask:') else None
+    return next((layer for layer in resolved(data.layers) if layer.uid == uid), None)
+
+
+def show_mask(build, output, layer):
+    gamma = build.nodes.new('ShaderNodeGamma')
+    gamma.inputs['Gamma'].default_value = DISPLAY_GAMMA
+    link_or_set(build, gamma.inputs['Color'], mask_value(build, layer))
+    emission = build.nodes.new('ShaderNodeEmission')
+    build.links.new(gamma.outputs['Color'], emission.inputs['Color'])
+    build.links.new(emission.outputs[0], output.inputs['Surface'])
+
+
 def viewed_map(data):
     item = data.maps.get(data.solo.removeprefix('map:')) if data.solo.startswith('map:') else None
     return item.image if item is not None else None
@@ -818,6 +851,8 @@ def rebuild(data, solo=None, raw=False):
         show_map(build, output, data.cage_map if data.bake_paint == 'CAGE' else data.skew_map)
     elif not raw and solo is None and viewed_map(data) is not None:
         show_map(build, output, viewed_map(data))
+    elif not raw and solo is None and viewed_mask(data) is not None:
+        show_mask(build, output, viewed_mask(data))
     material[SIGNATURE_KEY] = '' if raw else signature(data)
 
 

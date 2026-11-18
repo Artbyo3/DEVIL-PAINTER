@@ -11,7 +11,7 @@ from .blending import BLEND_MODES, CHANNEL, CHANNELS, FOLDER_BLENDS, linear_to_s
 from .canvas import Layout, Rect
 from .document import (BAKE_ID_LABELS, DYNAMICS, NORMAL_FORMATS, PROJECTORS, STROKE_METHODS, TRANSPARENCY, NORMAL_SPACES, PROJECTIONS, RESOLUTIONS, SHADERS, active_effect, active_layer, children, editing_mask, find_layer, isolated_uids,
                        linked_layer, set_channels, slot_value, uses_coordinates)
-from .effects import EFFECT_ICONS, EFFECT_KINDS, MASK_BLENDS, effect_label
+from .effects import EFFECT_ICONS, EFFECT_KINDS, FILL_PROJECTIONS, MASK_BLEND_LABEL, effect_label
 from .filters import FILTER, FILTERS
 from .library import capture, libraries as library_folders, texture_folder
 from .exporting import FORMAT_LABELS, SOURCES, TOKENS, find_template, is_custom
@@ -209,6 +209,9 @@ def start_layout(layout, state, bounds, obj_name, setup):
 
 
 def view_label(data):
+    if data.solo.startswith('mask:'):
+        layer = find_layer(data, data.solo.removeprefix('mask:'))
+        return 'Mask · ' + layer.name if layer is not None else 'Material'
     if data.solo.startswith('map:'):
         return MESH_MAP[data.solo.removeprefix('map:')].label
     return CHANNEL[data.solo].label if data.solo else 'Material'
@@ -496,7 +499,8 @@ def fill_layers(layout, state, data, flow):
                      icon='DISCLOSURE' if folded else 'DOWN', tip='Show the layers in this folder' if folded else 'Hide the layers in this folder')
         if layer.mask is not None:
             flow.add(f'MASKTHUMB_{uid}', Rect(row.x + 34 * s + size, row.y + (row.h - size) / 2, size, size), 'THUMB',
-                     preview=layer.mask, active=selected and target == 'MASK', tip='Select the mask to paint and edit it')
+                     preview=layer.mask, active=selected and target == 'MASK',
+                     tip='Select the mask to paint and edit it; Alt-click to show the mask in the viewport')
 
 
 def layers_panel(layout, state, data):
@@ -553,15 +557,19 @@ EFFECT_SLIDERS = {'LEVELS': (('in_low', 'In low', 1.0), ('in_high', 'In high', 1
                              ('out_high', 'Out high', 1.0)),
                   'FILL': (('scale', 'Scale', 50.0), ('detail', 'Detail', 1.0), ('contrast', 'Contrast', .98)),
                   'ID_COLOR': (('amount', 'Tolerance', 1.0),)}
-FX_RANGES = {field: (top, floor) for group in (*EFFECT_SLIDERS.values(), *(item.sliders for item in FILTERS), (('opacity', 'Opacity', 1.0), ('value', 'Value', 1.0)))
-             for field, _, top in group for floor in ({'gamma': .05, 'radius': 1.0, 'scale': .1}.get(field, 0.0),)}
+FILL_TRANSFORM = (('tiling', 'Tiling', 8.0), ('angle', 'Rotation', 360.0), ('offset_u', 'Offset U', 1.0), ('offset_v', 'Offset V', 1.0))
+FX_RANGES = {field: (top, floor) for group in (*EFFECT_SLIDERS.values(), *(item.sliders for item in FILTERS), FILL_TRANSFORM,
+                                                (('opacity', 'Opacity', 1.0), ('value', 'Value', 1.0)))
+             for field, _, top in group for floor in ({'gamma': .05, 'radius': 1.0, 'scale': .1, 'tiling': .1}.get(field, 0.0),)}
 
 
 def effect_sliders(effect):
     if effect.kind == 'FILTER':
         return FILTER[effect.filter].sliders
     if effect.kind == 'FILL' and effect.source == 'PATTERN':
-        return EFFECT_SLIDERS['FILL']
+        return EFFECT_SLIDERS['FILL'] + FILL_TRANSFORM
+    if effect.kind == 'FILL' and effect.source == 'IMAGE':
+        return FILL_TRANSFORM
     if effect.kind == 'FILL' and effect.source == 'VALUE':
         return (('value', 'Value', 1.0),)
     return EFFECT_SLIDERS.get(effect.kind, ())
@@ -589,8 +597,8 @@ def effect_section(flow, data, layer, w):
     flow.add('FX_DELETE', Rect(x + w - 26 * s, y, 26 * s, h), 'ICON', icon='CLOSE', tip='Delete this effect')
     x, y, h = flow.field()
     half = (w - 4 * s) / 2
-    if effect.target == 'MASK' and effect.kind not in {'LEVELS', 'FILTER'}:
-        flow.add('FX_BLEND', Rect(x, y, half, h), 'DROPDOWN', label='Blend', text=dict(MASK_BLENDS)[effect.blend],
+    if effect.target == 'MASK' and not (effect.kind == 'FILTER' and FILTER[effect.filter].sampling):
+        flow.add('FX_BLEND', Rect(x, y, half, h), 'DROPDOWN', label='Blend', text=MASK_BLEND_LABEL[effect.blend],
                  tip='How this effect combines with the mask below it')
     else:
         flow.add('FX_KIND', Rect(x, y, half, h), 'NOTE', label=effect_label(effect))
@@ -605,6 +613,10 @@ def effect_section(flow, data, layer, w):
         flow.add('FX_SOURCE_NAME', Rect(x + h + 6 * s, y, w - h - 6 * s, h), 'NOTE',
                  label=sources[effect.source] + (' · ' + effect.pattern.title() if effect.source == 'PATTERN' else
                                                   ' · ' + effect.texture.name if effect.source == 'IMAGE' and effect.texture is not None else ''))
+        if effect.source != 'VALUE':
+            x, y, h = flow.field()
+            flow.add('FX_PROJECTION', Rect(x, y, w, h), 'DROPDOWN', label='Projection', text=dict(FILL_PROJECTIONS)[effect.projection],
+                     tip='Map the fill by UV or from three sides without seams; Automatic uses UV for textures and object space for patterns')
     if effect.kind == 'FILTER':
         x, y, h = flow.field()
         flow.add('FX_FILTER', Rect(x, y, w, h), 'DROPDOWN', label='Filter', text=FILTER[effect.filter].label, tip='Pick the filter')
@@ -622,6 +634,13 @@ def effect_section(flow, data, layer, w):
         flow.add('FXCOLOR.color', Rect(x, y, half, h), 'SWATCH', color=(*linear_to_srgb(numpy.array(effect.color)), 1.0), tip='The ID color this mask keeps')
         flow.add('FX_PICK_ID', Rect(x + half + 4 * s, y, half, h), 'CHIP', label='Pick on model',
                  tip='Click the model to pick a color from the baked ID map')
+        for index, item in enumerate(effect.id_colors):
+            x, y, h = flow.field()
+            flow.add(f'FX_ID_COLOR.{index}', Rect(x, y, half, h), 'SWATCH', color=(*linear_to_srgb(numpy.array(item.color)), 1.0),
+                     tip='Another ID color this mask keeps')
+            flow.add(f'FX_REMOVE_ID.{index}', Rect(x + half + 4 * s, y, half, h), 'CHIP', label='Remove', tip='Stop keeping this ID color')
+        x, y, h = flow.field()
+        flow.add('FX_ADD_ID', Rect(x, y, w, h), 'CHIP', label='Add color', tip='Click the model to keep one more ID color')
         if 'id' not in data.maps or data.maps['id'].image is None:
             x, y, h = flow.field()
             flow.add('FX_ID_MISSING', Rect(x, y, w - 106 * s, h), 'NOTE', label='Needs the ID map')
@@ -637,10 +656,10 @@ def effect_section(flow, data, layer, w):
 
 def effect_lines(data):
     effect = active_effect(data)
-    lines = 2 + (effect.kind in {'PAINT', 'FILL', 'FILTER', 'COMPARE', 'ANCHOR'})
+    lines = 2 + (effect.kind in {'PAINT', 'FILL', 'FILTER', 'COMPARE', 'ANCHOR'}) + (effect.kind == 'FILL' and effect.source != 'VALUE')
     lines += (len(effect_sliders(effect)) + 1) // 2
     if effect.kind == 'ID_COLOR':
-        lines += 1 + int('id' not in data.maps or data.maps['id'].image is None)
+        lines += 2 + len(effect.id_colors) + int('id' not in data.maps or data.maps['id'].image is None)
     return lines + int(effect.kind == 'FILTER' and bool(FILTER[effect.filter].colors))
 
 

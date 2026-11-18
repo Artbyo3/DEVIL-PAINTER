@@ -168,6 +168,22 @@ def tree_nodes(data):
     return data.material.node_tree.nodes
 
 
+def surface_source(data):
+    output = next(node for node in data.material.node_tree.nodes if node.type == 'OUTPUT_MATERIAL')
+    return output.inputs['Surface'].links[0].from_node
+
+
+def upstream_image(node):
+    pending, seen = [node], set()
+    while pending:
+        current = pending.pop()
+        if current.type == 'TEX_IMAGE':
+            return current.image
+        seen.add(current.name)
+        pending.extend(link.from_node for socket in current.inputs for link in socket.links if link.from_node.name not in seen)
+    return None
+
+
 def rendered_pixel(window, area, region, point):
     offscreen = gpu.types.GPUOffScreen(region.width, region.height)
     with offscreen.bind():
@@ -470,6 +486,27 @@ def journey():
     yield from settle()
     check(data.target == 'MASK' and has('MASK_INFO') and bpy.context.scene.tool_settings.image_paint.canvas == fill.mask,
           'clicking the mask thumbnail selects the mask for painting and editing')
+    press(window, 'LEFTMOUSE', *spot(region, 'MASKTHUMB_' + fill.uid), alt=True)
+    yield from settle()
+    check(data.solo == 'mask:' + fill.uid and control('VIEW').text == 'Mask · ' + fill.name and data.target == 'MASK',
+          'Alt-clicking the mask thumbnail shows that mask in the viewport and keeps it selected for painting')
+    check(surface_source(data).type == 'EMISSION' and upstream_image(surface_source(data)) == fill.mask,
+          'in mask view the material emits the layer mask instead of the shaded material')
+    press(window, 'LEFTMOUSE', *spot(region, 'MASKTHUMB_' + fill.uid), alt=True)
+    yield from settle()
+    check(data.solo == '' and surface_source(data).type == 'BSDF_PRINCIPLED' and control('VIEW').text == 'Material',
+          'Alt-clicking the mask thumbnail again goes back to the material')
+    click(window, region, 'VIEW')
+    yield from settle()
+    check(has('SOLO.mask:' + fill.uid), 'the View menu offers the mask of the selected layer')
+    click(window, region, 'SOLO.mask:' + fill.uid)
+    yield from settle()
+    check(data.solo == 'mask:' + fill.uid and surface_source(data).type == 'EMISSION', 'the View menu shows the mask in the viewport')
+    click(window, region, 'VIEW')
+    yield from settle()
+    click(window, region, 'SOLO.')
+    yield from settle()
+    check(data.solo == '' and surface_source(data).type == 'BSDF_PRINCIPLED', 'the View menu goes back to the material')
 
     row = control('ROW_' + paint_layer.uid).rect
     card = next(rect for rect, _ in editor._active.workspace.cards if rect.contains(row.x + row.w / 2, row.y + row.h / 2))
