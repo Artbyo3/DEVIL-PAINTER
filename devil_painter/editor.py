@@ -442,9 +442,10 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.finish_stroke(context)
         if event.type == 'TIMER':
             self.auto_bake(context)
-            for note in packs.poll():
-                self.message = note
-                self._area.tag_redraw()
+            for note in packs.poll() + [autosave.failure_notice()]:
+                if note:
+                    self.message = note
+                    self._area.tag_redraw()
             if packs.active():
                 self._area.tag_redraw()
             if thumbnails.waiting():
