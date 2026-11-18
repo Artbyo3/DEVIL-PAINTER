@@ -11,7 +11,7 @@ from .blending import BLEND_MODES, CHANNEL, CHANNELS, FOLDER_BLENDS, linear_to_s
 from .canvas import Layout, Rect
 from .document import (BAKE_ID_LABELS, DYNAMICS, NORMAL_FORMATS, PROJECTORS, STROKE_METHODS, TRANSPARENCY, NORMAL_SPACES, PROJECTIONS, RESOLUTIONS, SHADERS, active_effect, active_layer, children, editing_mask, find_layer, isolated_uids,
                        linked_layer, set_channels, slot_value, uses_coordinates)
-from .effects import EFFECT_ICONS, EFFECT_KINDS, FILL_PROJECTIONS, MASK_BLEND_LABEL, effect_label
+from .effects import EFFECT_ICONS, EFFECT_KINDS, FILL_PROJECTIONS, LEVEL_COMPONENTS, MASK_BLEND_LABEL, LevelsView, effect_label
 from .filters import FILTER, FILTERS
 from .library import capture, libraries as library_folders, texture_folder
 from .exporting import FORMAT_LABELS, SOURCES, TOKENS, find_template, is_custom
@@ -633,6 +633,14 @@ def effect_section(flow, data, layer, w):
             x, y, h = flow.field()
             flow.add('FX_PROJECTION', Rect(x, y, w, h), 'DROPDOWN', label='Projection', text=dict(FILL_PROJECTIONS)[effect.projection],
                      tip='Map the fill by UV or from three sides without seams; Automatic uses UV for textures and object space for patterns')
+    if effect.kind == 'LEVELS':
+        x, y, h = flow.field()
+        width = half if effect.target == 'CONTENT' else w
+        if effect.target == 'CONTENT':
+            flow.add('FX_COMPONENT', Rect(x, y, half, h), 'DROPDOWN', label='Channel', text=dict(LEVEL_COMPONENTS)[effect.levels_component],
+                     tip='Edit the levels of all color channels, or of red, green or blue on its own')
+        flow.add('FX_CLAMP', Rect(x + w - width, y, width, h), 'TOGGLE', label='Clamp', active=effect.clamp,
+                 tip='Keep values outside the input range at the output limits')
     if effect.kind == 'FILTER':
         x, y, h = flow.field()
         flow.add('FX_FILTER', Rect(x, y, w, h), 'DROPDOWN', label='Filter', text=FILTER[effect.filter].label, tip='Pick the filter')
@@ -661,7 +669,7 @@ def effect_section(flow, data, layer, w):
             x, y, h = flow.field()
             flow.add('FX_ID_MISSING', Rect(x, y, w - 106 * s, h), 'NOTE', label='Needs the ID map')
             flow.add('OPEN_BAKE', Rect(x + w - 100 * s, y, 100 * s, h), 'CHIP', label='Bake maps', tip='Open the bake card')
-    slider_rows(flow, 'FX_', effect, effect_sliders(effect), w)
+    slider_rows(flow, 'FX_', LevelsView(effect) if effect.kind == 'LEVELS' else effect, effect_sliders(effect), w)
     colors = FILTER[effect.filter].colors if effect.kind == 'FILTER' else ()
     if colors:
         x, y, h = flow.field()
@@ -672,7 +680,7 @@ def effect_section(flow, data, layer, w):
 
 def effect_lines(data):
     effect = active_effect(data)
-    lines = 2 + (effect.kind in {'PAINT', 'FILL', 'FILTER', 'COMPARE', 'ANCHOR'}) + (effect.kind == 'FILL' and effect.source != 'VALUE')
+    lines = 2 + (effect.kind in {'PAINT', 'FILL', 'FILTER', 'COMPARE', 'ANCHOR', 'LEVELS'}) + (effect.kind == 'FILL' and effect.source != 'VALUE')
     lines += (len(effect_sliders(effect)) + 1) // 2
     if effect.kind == 'ID_COLOR':
         lines += 2 + len(effect.id_colors) + int('id' not in data.maps or data.maps['id'].image is None)

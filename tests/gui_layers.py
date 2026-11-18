@@ -775,6 +775,38 @@ def journey():
     check(ramp.projection == 'TRIPLANAR' and any(node.bl_idname == 'ShaderNodeTexImage' and node.image == ramp.texture and node.projection == 'BOX'
                                                  for node in nodes(body)), 'Tri-planar projects the fill texture from three sides')
 
+    click(window, region, 'ADD_FILL')
+    yield from settle()
+    leveled = active_layer(body)
+    yield from set_hex(window, region, 'SWATCH.base_color', '#DADADA')
+    gray_value = leveled.slots['base_color'].color[0]
+    yield from add_effect(window, region, 'CONTENT', 'LEVELS')
+    levels = leveled.effects[-1]
+    check(has('FX_COMPONENT') and control('FX_COMPONENT').text == 'All' and has('FX_CLAMP') and control('FX_CLAMP').active,
+          'content levels offer a channel picker starting on All and a clamp toggle that starts on')
+    yield from reveal(window, region, 'FX_COMPONENT')
+    yield from menu(window, region, 'FX_COMPONENT', 'SET_FXCOMPONENT.R')
+    yield from slide(window, region, 'FX_out_high', .5)
+    check(abs(levels.comp_out_high[0] - .5) < .03 and levels.out_high == 1.0 and tuple(levels.comp_out_high)[1:] == (1.0, 1.0)
+          and control('FX_out_high').text == f'{levels.comp_out_high[0]:.2f}', 'with Red picked, the levels sliders edit the red channel only')
+    yield from context_menu(window, region, leveled.uid, 'EXPORT_LAYER')
+    exported = png(export_dir / f'{bpy.path.clean_name(leveled.name)}_{CHANNEL["base_color"].suffix}.png')
+    rgb = srgb_to_linear(numpy.median(exported[exported[:, 3] > .5, :3], axis=0))
+    wanted = (gray_value * levels.comp_out_high[0], gray_value, gray_value)
+    check(numpy.abs(rgb - wanted).max() < .012, f'red levels scale only the red channel of the export {tuple(round(float(value), 3) for value in rgb)} '
+          f'(expected {tuple(round(float(value), 3) for value in wanted)})')
+    yield from reveal(window, region, f'FX_{leveled.uid}.{levels.uid}', 'LAYERS')
+    click(window, region, f'FX_{leveled.uid}.{levels.uid}')
+    yield from settle()
+    yield from reveal(window, region, 'FX_COMPONENT')
+    yield from menu(window, region, 'FX_COMPONENT', 'SET_FXCOMPONENT.ALL')
+    check(control('FX_out_high').text == '1.00', 'back on All, the sliders show the levels of every channel again')
+    yield from reveal(window, region, 'FX_CLAMP')
+    click(window, region, 'FX_CLAMP')
+    yield from settle()
+    check(not levels.clamp and not control('FX_CLAMP').active and any(node.bl_idname == 'ShaderNodeMapRange' and not node.clamp for node in nodes(body)),
+          'turning clamp off lets the levels ranges extend past their limits')
+
     click(window, region, 'CLOSE')
     yield from settle()
     check(editor._active is None, 'Devil Painter closes')
