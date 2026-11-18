@@ -64,14 +64,10 @@ def copy(data, key, name):
     return copied
 
 
-def remove(data, key):
+def release(data, key):
     for index in range(len(data.tile_images) - 1, -1, -1):
-        item = data.tile_images[index]
-        if item.key == key:
-            if item.image is not None:
-                bpy.data.images.remove(item.image)
+        if data.tile_images[index].key == key:
             data.tile_images.remove(index)
-    bpy.data.images.remove(key)
 
 
 def every_image(data, keys):
