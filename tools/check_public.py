@@ -10,8 +10,9 @@ from zipfile import ZipFile
 ROOT = Path(__file__).resolve().parents[1]
 ALIAS = 'Artbyo3'
 EMAIL = '170281415+'+ALIAS+'@users.noreply.github.com'
+OWNER_MERGE_IDENTITY = ('o3', 'o3artcontact@gmail.com')
 FORBIDDEN_SUFFIXES = {'.blend','.blend1','.zip','.pyc','.pyo','.pem','.key'}
-PUBLIC_IDENTITIES = {(ALIAS, EMAIL), ('T3 Code', 't3code@users.noreply.github.com'),
+PUBLIC_IDENTITIES = {(ALIAS, EMAIL), OWNER_MERGE_IDENTITY, ('T3 Code', 't3code@users.noreply.github.com'),
                      ('github-actions[bot]', 'github-actions[bot]@users.noreply.github.com')}
 PUBLIC_COMMITTERS = PUBLIC_IDENTITIES | {('GitHub', 'noreply' + '@github.com')}
 

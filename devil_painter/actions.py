@@ -195,16 +195,10 @@ def move_to_set(context, obj, project, index):
     source = project.sets[project.active_set]
     target = project.sets[index]
     layer = active_layer(source)
-    doomed = doomed_layers(source, [layer.uid])
-    if not keeps_a_layer(source, doomed):
-        return LAST_LAYER
+    doomed_layers(source, [layer.uid])
     name = layer.name
     uid = transfer(obj, source, target, layer, '')
-    for position in range(len(source.layers) - 1, -1, -1):
-        if source.layers[position].uid in doomed:
-            remove_images(source, source.layers[position])
-            source.layers.remove(position)
-    source.active_uid = source.layers[-1].uid if source.layers else ''
+    remove_layers(source, [layer.uid])
     compositing.sync(source)
     target.active_uid = uid
     prepare(obj, target)
@@ -274,7 +268,7 @@ def delete_effect(context, obj, data):
     image = layer.effects[index].image
     layer.effects.remove(index)
     if image is not None and image.name.startswith('DP '):
-        tiles.remove(data, image)
+        tiles.release(data, image)
     data.target, data.active_effect = 'CONTENT', ''
     return refresh(context, obj, data, 'Effect deleted.')
 
@@ -321,24 +315,34 @@ def group_layers(context, obj, data, uids):
     return refresh(context, obj, data, f'Grouped {len(uids)} layers into a folder.')
 
 
-def keeps_a_layer(data, doomed):
-    return any(layer.uid not in doomed for layer in data.layers)
-
-
 def doomed_layers(data, uids):
     doomed = set(uids)
     for uid in uids:
         doomed |= set(descendants(data.layers, uid))
+    if all(layer.uid in doomed for layer in data.layers):
+        raise ValueError(LAST_LAYER)
     return doomed
+
+
+def successor(data, doomed):
+    if data.active_uid not in doomed:
+        return data.active_uid
+    parent = active_layer(data).parent
+    while parent in doomed:
+        parent = find_layer(data, parent).parent
+    siblings = [layer for layer in children(data.layers, parent) if layer.uid not in doomed]
+    return siblings[-1].uid if siblings else parent
 
 
 def remove_layers(data, uids):
     doomed = doomed_layers(data, uids)
+    data.active_uid = successor(data, doomed)
     for position in range(len(data.layers) - 1, -1, -1):
-        if data.layers[position].uid in doomed:
-            remove_images(data, data.layers[position])
+        layer = data.layers[position]
+        if layer.uid in doomed:
+            for image in owned_images(layer):
+                tiles.release(data, image)
             data.layers.remove(position)
-    data.active_uid = data.layers[-1].uid if data.layers else ''
     data.target = 'CONTENT'
 
 
@@ -349,8 +353,6 @@ def set_layers_visible(context, obj, data, uids, visible):
 
 
 def delete_layers(context, obj, data, uids):
-    if not keeps_a_layer(data, doomed_layers(data, uids)):
-        return LAST_LAYER
     remove_layers(data, uids)
     return refresh(context, obj, data, f'Deleted {len(uids)} layers.')
 
@@ -379,7 +381,7 @@ def paste_mask(context, obj, project, source_index, uid):
     origin, layer = find_layer(source, uid), active_layer(target)
     if origin.mask is not None:
         if layer.mask is not None:
-            tiles.remove(target, layer.mask)
+            tiles.release(target, layer.mask)
         layer.mask = carry(obj, source, target, origin.mask, f'DP {obj.name} {target.name} {layer.uid} mask')
     for field in GENERATOR_FIELDS + ('geo_mask',):
         setattr(layer, field, getattr(origin, field))
@@ -607,27 +609,9 @@ def owned_images(layer):
     return [image for image in (layer.image, layer.mask, *canvases, *painted) if image is not None]
 
 
-def remove_images(data, layer):
-    for image in owned_images(layer):
-        tiles.remove(data, image)
-
-
 def delete_layer(context, obj, data):
-    index = layer_index(data, data.active_uid)
-    if index < 0:
-        return 'No layer to delete.'
-    layer = data.layers[index]
-    name, parent = layer.name, layer.parent
-    doomed = {layer.uid, *descendants(data.layers, layer.uid)}
-    if not keeps_a_layer(data, doomed):
-        return LAST_LAYER
-    for position in range(len(data.layers) - 1, -1, -1):
-        if data.layers[position].uid in doomed:
-            remove_images(data, data.layers[position])
-            data.layers.remove(position)
-    siblings = children(data.layers, parent)
-    data.active_uid = siblings[-1].uid if siblings else find_layer(data, parent).uid if parent else data.layers[-1].uid if data.layers else ''
-    data.target = 'CONTENT'
+    name = active_layer(data).name
+    remove_layers(data, [data.active_uid])
     return refresh(context, obj, data, f'Deleted {name}.')
 
 
@@ -958,7 +942,7 @@ def remove_mask(context, obj, data):
     mask = layer.mask
     layer.mask = None
     if mask is not None:
-        tiles.remove(data, mask)
+        tiles.release(data, mask)
     data.target = 'CONTENT'
     return refresh(context, obj, data, f'Mask removed from {layer.name}.')
 
