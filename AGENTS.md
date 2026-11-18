@@ -34,6 +34,7 @@
 - Keep shipping reports brief while retaining the required verification, package, merge, and cleanup facts. Documentation-only changes do not require an artificial artist test.
 
 ## ARCHITECTURE & IMPLEMENTATION PRINCIPLES
+- Fix the root cause. A change that only hides a symptom — guards, retries, swallowed errors, special cases — does not count as a fix. If the root cause sits outside the task's scope, report it instead of patching around it.
 1. **Layer & Painting Pipeline Integrity**:
    - MVP stage: the layer stack on each mesh object (`document.py`) is the source of truth. `compositing.py` turns it into the live Material Preview and the exported PNGs with the same blending math (`blending.py`), `painting.py` drives Blender's native texture paint brushes, and `actions.py` holds every stack edit. The Devil workspace shell ported from Devil Designer lives in `ui.py`, `editor.py`, `canvas.py`, `shell.py`, `minimal.py`, `draw.py`, `ui_system.py`, `icons.py`, and `assets/icons/`.
    - Once painting features are designed, keep the non-destructive layer document as the source of truth and composited textures as downstream outputs.
