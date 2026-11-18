@@ -627,7 +627,7 @@ def compose_layer(build, channels, layer, results, x):
             continue
         name = f'{layer.uid}.{channel.key}'
         y = 300 - 250 * row
-        reach = 1.0 if slot.blend == 'REPLACE' else coverage
+        reach = coverage
         if layer.kind == 'PAINT' and channel.key != 'base_color' and slot.source == 'IMAGE' and slot.image is not None:
             reach = math_node(nodes, links, 'MULTIPLY', coverage, sampling(build, layer, 'CONTENT')(slot.image)[1], x - 150, y - 60)
         factor = math_node(nodes, links, 'MULTIPLY', reach, 1.0, x - 100, y - 60, name + '.opacity')
