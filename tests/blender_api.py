@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+import shutil
 import sys
 import bpy
 import numpy
@@ -62,6 +63,29 @@ check(written and all(Path(path).is_file() for path in written), 'export() write
 base = next(path for path in written if 'BaseColor' in path or 'Base' in path)
 pixels = png(base)
 check(pixels[:, 0].max() > .9 and pixels[:, 2].max() < pixels[:, 0].max(), 'the exported base color is gold')
+mesh = cube.data.copy()
+mesh.materials.clear()
+mesh.materials.append(bpy.data.materials.new('Body'))
+mesh.materials.append(bpy.data.materials.new('Trim'))
+for index, polygon in enumerate(mesh.polygons):
+    polygon.material_index = index % 2
+two = bpy.data.objects.new('Two', mesh)
+bpy.context.scene.collection.objects.link(two)
+bpy.context.view_layer.objects.active = two
+check(len(api.start(two, resolution=64)) == 2, 'a mesh with two materials starts with two texture sets')
+clash_dir = prepare_scratch() / 'api_export_clash'
+shutil.rmtree(clash_dir, ignore_errors=True)
+two.devil_painter.export_pattern = '{mesh}_{output}'
+try:
+    api.export(two, clash_dir)
+    check(False, 'an export whose names collide is refused')
+except ValueError as refusal:
+    check('{set}' in str(refusal) and 'Body' in str(refusal) and 'Trim' in str(refusal), f'an export whose file names collide is refused with a clear message: {refusal}')
+check(not clash_dir.exists() or not any(clash_dir.iterdir()), 'the refused export writes no files')
+two.devil_painter.export_pattern = '{mesh}_{set}_{output}'
+written = api.export(two, clash_dir)
+check(len(written) == len({path.lower() for path in written}) and all(Path(path).is_file() for path in written) and len(list(clash_dir.iterdir())) == len(written),
+      f'with {{set}} in the pattern every texture set exports its own {len(written)} files')
 try:
     api.layers(bpy.data.objects.new('Empty', bpy.data.meshes.new('Empty')))
     check(False, 'an object without a project is refused')
