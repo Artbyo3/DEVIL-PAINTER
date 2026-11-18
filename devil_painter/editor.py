@@ -152,6 +152,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         self.last_click = ('', 0.0)
         self.modifiers = (False, False)
         self._closed = False
+        self.failure = None
         self.saved_regions = {}
         self.hide_regions()
         obj = context.view_layer.objects.active
@@ -406,7 +407,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         self.saved_mask = None
 
     def draw_overlay(self):
-        if self._closed:
+        if self._closed or self.failure is not None:
             return
         context = bpy.context
         if context.area != self._area or context.region != self._region or context.window != self._window:
@@ -416,13 +417,21 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
                 thumbnails.begin_frame()
                 self.workspace = self.make_layout()
                 self.renderer.draw(self)
-        except Exception as exc:
-            self.message = f"Render error: {exc}"
-            traceback.print_exc()
+        except Exception as failure:
+            traceback.print_exception(failure)
+            self.failure = failure
+            self._area.tag_redraw()
+
+    def fail(self, failure):
+        self.cleanup()
+        self.report({'WARNING'}, f'Devil Painter closed after an internal error ({type(failure).__name__}: {failure}). Your work is kept; reopen it with Ctrl+Alt+P.')
+        return {'CANCELLED'}
 
     def modal(self, context, event):
         if self._closed:
             return {'FINISHED'}
+        if self.failure is not None:
+            return self.fail(self.failure)
         try:
             with thumbnails.foreground():
                 return self.handle_event(context, event)
@@ -430,10 +439,9 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.cleanup()
             self.report({'WARNING'}, 'Devil Painter closed because the view or scene it was using is gone. Reopen it from View > Devil Painter.')
             return {'CANCELLED'}
-        except Exception as exc:
-            traceback.print_exc()
-            self.message = f"Editor error: {exc}"
-            return {'RUNNING_MODAL'}
+        except Exception as failure:
+            traceback.print_exception(failure)
+            return self.fail(failure)
 
     def handle_event(self, context, event):
         if self._area not in list(self._window.screen.areas) or self._area.type != 'VIEW_3D':

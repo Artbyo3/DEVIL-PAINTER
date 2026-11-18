@@ -1,3 +1,4 @@
+import io
 import json
 import os
 import sys
@@ -84,6 +85,38 @@ def opens(window, where):
     yield from until(lambda: open_now(window) and not any(regions(window).values()), 'Blender to finish hiding its regions')
     check(open_now(window) and editor._active.workspace is not None and not regions_shown(window),
           f'Ctrl+Alt+P opens Devil Painter {where} and hides the Blender regions')
+
+
+def fails_once(window, where, patch):
+    yield from opens(window, f'before the {where} fault')
+    cls = editor.DEVIL_PAINTER_OT_editor
+    original = getattr(cls, patch)
+    calls = []
+
+    def broken(self, *args):
+        calls.append(time.monotonic())
+        raise KeyError('probe fault')
+
+    console = io.StringIO()
+    stderr = sys.stderr
+    setattr(cls, patch, broken)
+    sys.stderr = console
+    try:
+        for _ in range(10):
+            wiggle(window)
+            yield from settle()
+    finally:
+        sys.stderr = stderr
+        setattr(cls, patch, original)
+    printed = console.getvalue()
+    check(closed_now(window) and regions_shown(window), f'an unexpected {where} error closes Devil Painter through its normal cleanup and gives back the regions')
+    check(len(calls) == 1, f'the failing {where} code runs once instead of on every frame or event ({len(calls)} calls)')
+    check(printed.count('Traceback (most recent call last)') == 1 and "KeyError: 'probe fault'" in printed,
+          f'the {where} fault prints exactly one traceback ({printed.count("Traceback (most recent call last)")} printed)')
+    yield from opens(window, f'again after the {where} fault')
+    press(window, 'P', ctrl=True, alt=True)
+    yield from settle()
+    check(closed_now(window), f'Devil Painter closes normally after the {where} fault')
 
 
 def damaged_settings(window):
@@ -184,6 +217,8 @@ def journey():
         check(closed_now(window) and regions_shown(window), 'the close button still closes it cleanly')
 
     yield from damaged_settings(window)
+    yield from fails_once(window, 'layout', 'make_layout')
+    yield from fails_once(window, 'event', 'handle_event')
     devil_painter.unregister()
     check(not hasattr(bpy.types.Object, 'devil_painter'), 'Devil Painter unregisters cleanly')
     print('ALL GUI REOPEN CHECKS PASSED', bpy.app.version_string)
