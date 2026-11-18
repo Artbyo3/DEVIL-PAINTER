@@ -518,6 +518,20 @@ def journey():
     with bpy.data.libraries.load(str(saved)) as (source, _):
         names = list(source.images)
     check(find_layer(data, ribbon_uid).image.name in names, 'the autosave holds the painted layer images')
+    saved.unlink()
+    saved.mkdir()
+    autosave._state['last'] -= 3600
+    yield from until(lambda: editor._active.message.startswith('Autosave failed'), 'the blocked autosave to report its failure')
+    check(bpy.app.timers.is_registered(autosave.tick), f'a failed autosave is reported and the autosave timer keeps running: {editor._active.message!r}')
+    move(window, *middle)
+    yield from settle()
+    yield from card(window, region, 'PROJECT', 'AUTOSAVE_INFO', 'PROJECT')
+    check(control('AUTOSAVE_INFO').label.startswith('Autosave failed at'), f'the project card says the last autosave failed: {control("AUTOSAVE_INFO").label!r}')
+    yield from close(window, middle)
+    saved.rmdir()
+    autosave._state['last'] -= 3600
+    yield from until(lambda: saved.is_file(), 'the next autosave to succeed once the cause is fixed')
+    check(saved.is_file(), 'the next autosave succeeds once the cause is fixed')
     move(window, *middle)
     yield from settle()
     yield from card(window, region, 'PROJECT', 'AUTOSAVE_INFO', 'PROJECT')
