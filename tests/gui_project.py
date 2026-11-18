@@ -130,6 +130,41 @@ def screen_point(region, area, cube, face):
     return point.x, point.y
 
 
+def reimport_without_body(window, region, cube, project):
+    body, trim = project.sets[0], project.sets[1]
+    check((body.name, trim.name) == ('Body', 'Trim'), 'the project has the Body and Trim sets before the reimport')
+    body_layers, trim_layers = len(body.layers), len(trim.layers)
+    swapped = cube.data.copy()
+    swapped.name = 'Cube v3'
+    swapped.materials.clear()
+    swapped.materials.append(trim.material)
+    swapped.materials.append(bpy.data.materials.new('Strap'))
+    for index, polygon in enumerate(swapped.polygons):
+        polygon.material_index = index % 2
+    update = bpy.data.objects.new('CubeV3', swapped)
+    bpy.context.scene.collection.objects.link(update)
+    click(window, region, 'PROJECT')
+    yield from settle()
+    click(window, region, 'REIMPORT_OBJECT')
+    yield from settle()
+    click(window, region, 'REIMPORT_FROM.CubeV3')
+    yield from settle()
+    message = editor._active.message
+    body, trim = project.sets['Body'], project.sets['Trim']
+    slots = [data.slot for data in project.sets]
+    used = {polygon.material_index for polygon in cube.data.polygons}
+    print('sets after', [(data.name, data.slot) for data in project.sets], 'slots', [slot.material.name if slot.material else '' for slot in cube.material_slots])
+    check(len(set(slots)) == len(slots), f'no two texture sets share a material slot after the reimport: {slots}')
+    check(trim.slot == 0 and cube.material_slots[0].material == trim.material and len(trim.layers) == trim_layers, 'Trim keeps its layers on the slot that now holds its material')
+    check(body.slot not in used and cube.material_slots[body.slot].material == body.material and len(body.layers) == body_layers,
+          'Body keeps its layers on an empty slot of its own, so it masks and paints no faces')
+    strap = next((data for data in project.sets if data.slot == 1), None)
+    check(strap is not None and strap.name == 'Strap' and cube.material_slots[1].material == strap.material and len(strap.layers) == 1,
+          'the new Strap slot gets its own texture set with a paint layer')
+    check(project.sets[project.active_set].slot in used, 'the active texture set has faces to paint')
+    check('Body has no faces' in message and 'New texture set Strap' in message, f'the message names the faceless set and the new one: {message!r}')
+
+
 def journey():
     scratch = prepare_scratch()
     check(library.library_root().resolve().is_relative_to(scratch.resolve()), 'the test library lives in scratch, not the user library')
@@ -420,6 +455,7 @@ def journey():
     yield from settle()
     check(cube.material_slots[0].material == project.sets[0].material and cube.data.uv_layers and len(project.sets) == 2,
           'reimporting from an OBJ file keeps the texture sets')
+    yield from reimport_without_body(window, region, cube, project)
 
     click(window, region, 'CLOSE')
     yield from settle()

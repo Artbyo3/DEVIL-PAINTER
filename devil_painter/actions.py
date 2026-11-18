@@ -63,15 +63,7 @@ def start(context, obj, resolutions, use_udim, template_name, normal_format, nor
     if not obj.material_slots:
         obj.data.materials.append(None)
     for index, (name, found) in enumerate(layout):
-        data = project.sets.add()
-        data.name, data.slot = name, index
-        data.resolution = resolutions[index] if index < len(resolutions) else resolutions[-1]
-        for number in found:
-            data.tiles.add().number = number
-        prepare(obj, data)
-        projects.apply_template(project, data, template)
-        data.material = bpy.data.materials.new(f'Devil Painter {obj.name} {name}')
-        obj.material_slots[index].material = data.material
+        add_set(obj, project, index, name, found, resolutions[index] if index < len(resolutions) else resolutions[-1], template)
     project.enabled = True
     painting.enter_paint_mode(context, obj)
     for data in project.sets:
@@ -85,6 +77,17 @@ def start(context, obj, resolutions, use_udim, template_name, normal_format, nor
     brushes.sync(context, project.sets[0])
     tile_count = sum(len(tiles.numbers(data)) for data in project.sets)
     return f'Painting {obj.name}: {len(project.sets)} texture sets, {tile_count} tiles.' + unwrapped
+
+
+def add_set(obj, project, index, name, found, resolution, template):
+    data = project.sets.add()
+    data.name, data.slot, data.resolution = name, index, resolution
+    for number in found:
+        data.tiles.add().number = number
+    prepare(obj, data)
+    projects.apply_template(project, data, template)
+    data.material = bpy.data.materials.new(f'Devil Painter {obj.name} {name}')
+    obj.material_slots[index].material = data.material
 
 
 def activate(context, obj, project, index, tile):
@@ -210,15 +213,28 @@ def reimport_mesh(context, obj, project, mesh):
     mode = obj.mode
     if mode != 'OBJECT':
         bpy.ops.object.mode_set(mode='OBJECT')
-    kept = projects.swap_mesh(obj, project, mesh)
+    faceless, new_slots = projects.swap_mesh(obj, project, mesh)
+    labels = sets.slot_names(obj)
+    template, resolution = projects.find_template(project.template), project.sets[project.active_set].resolution
+    use_udim, first = tiles.numbers(project.sets[0]) != [tiles.FIRST_TILE], len(project.sets)
+    for index in new_slots:
+        found = tiles.slot_tiles(obj.data, project.uv_map, index, use_udim) if project.uv_map else [tiles.FIRST_TILE]
+        add_set(obj, project, index, labels[index] if index < len(labels) else f'Slot {index + 1}', found, resolution, template)
+    added = list(project.sets)[first:]
     for data in project.sets:
         prepare(obj, data)
         strokes.ensure_canvases(obj, data)
         data.material[compositing.SIGNATURE_KEY] = ''
         compositing.sync(data)
     painting.enter_paint_mode(context, obj)
+    for data in added:
+        add_layer(context, obj, data, 'PAINT')
+    if project.sets[project.active_set].name in faceless and len(faceless) < len(project.sets):
+        project.active_set = next(index for index, data in enumerate(project.sets) if data.name not in faceless)
     sets.mask_faces(obj, project)
-    return refresh(context, obj, project.sets[project.active_set], f'Reimported the mesh. {kept} texture sets kept their layers.')
+    notes = [f'{name} has no faces now, its layers are kept.' for name in faceless]
+    notes += [f'New texture set {data.name}.' for data in added]
+    return refresh(context, obj, project.sets[project.active_set], ' '.join(['Reimported.', *notes]))
 
 
 def add_effect(context, obj, data, kind, target):

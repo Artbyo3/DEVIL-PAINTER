@@ -1,7 +1,7 @@
 import math
 import bpy
 from .document import add_set_channels
-from .tiles import adopt, numbers, slot_tiles
+from .tiles import adopt, face_slots, numbers, slot_tiles
 
 BASIC = ['base_color', 'roughness', 'metallic', 'normal', 'height']
 PROJECT_TEMPLATES = (
@@ -66,6 +66,18 @@ def add_tiles(data, found):
                 adopt(data, key, (0.0, 0.0, 0.0, 0.0) if not key.colorspace_settings.is_data else (0.5, 0.5, 0.5, 1.0))
 
 
+def slot_matches(names, slot_materials):
+    matches = {}
+    for index, name in enumerate(slot_materials):
+        match = next((position for position, item in enumerate(names) if name and name in item and position not in matches.values()), None)
+        if match is not None:
+            matches[index] = match
+    for index in range(len(slot_materials)):
+        if index not in matches and index < len(names) and index not in matches.values():
+            matches[index] = index
+    return matches
+
+
 def swap_mesh(obj, project, mesh):
     names = [{data.name, data.material.name if data.material else ''} for data in project.sets]
     old = obj.data
@@ -74,23 +86,21 @@ def swap_mesh(obj, project, mesh):
         bpy.data.meshes.remove(old)
     uv = mesh.uv_layers.active
     project.uv_map = uv.name if uv is not None else ''
-    while len(obj.material_slots) < len(project.sets):
-        mesh.materials.append(None)
-    claimed = set()
-    for index, slot in enumerate(obj.material_slots):
-        name = slot.material.name if slot.material is not None else ''
-        match = next((position for position, item in enumerate(names) if name in item and position not in claimed), None)
-        if match is None and index < len(names) and index not in claimed:
-            match = index
-        if match is None:
-            continue
-        claimed.add(match)
-        data = project.sets[match]
+    matches = slot_matches(names, [slot.material.name if slot.material is not None else '' for slot in obj.material_slots])
+    new_slots = [index for index in range(len(obj.material_slots)) if index not in matches]
+    for position in range(len(project.sets)):
+        if position not in matches.values():
+            mesh.materials.append(None)
+            matches[len(obj.material_slots) - 1] = position
+    used = set(face_slots(mesh).tolist())
+    for index, position in matches.items():
+        data = project.sets[position]
         data.slot = index
-        slot.material = data.material
-        if uv is not None:
+        obj.material_slots[index].material = data.material
+        if uv is not None and index in used:
             add_tiles(data, slot_tiles(mesh, uv.name, index, numbers(data) != [1001]))
-    return len(claimed)
+    faceless = [project.sets[position].name for index, position in sorted(matches.items()) if index not in used]
+    return faceless, new_slots
 
 
 def imported_mesh(filepath):
