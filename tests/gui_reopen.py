@@ -1,3 +1,4 @@
+import io
 import json
 import os
 import sys
@@ -96,15 +97,22 @@ def fails_once(window, where, patch):
         calls.append(time.monotonic())
         raise KeyError('probe fault')
 
+    console = io.StringIO()
+    stderr = sys.stderr
     setattr(cls, patch, broken)
+    sys.stderr = console
     try:
         for _ in range(10):
             wiggle(window)
             yield from settle()
     finally:
+        sys.stderr = stderr
         setattr(cls, patch, original)
+    printed = console.getvalue()
     check(closed_now(window) and regions_shown(window), f'an unexpected {where} error closes Devil Painter through its normal cleanup and gives back the regions')
     check(len(calls) == 1, f'the failing {where} code runs once instead of on every frame or event ({len(calls)} calls)')
+    check(printed.count('Traceback (most recent call last)') == 1 and "KeyError: 'probe fault'" in printed,
+          f'the {where} fault prints exactly one traceback ({printed.count("Traceback (most recent call last)")} printed)')
     yield from opens(window, f'again after the {where} fault')
     press(window, 'P', ctrl=True, alt=True)
     yield from settle()
