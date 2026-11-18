@@ -1,6 +1,6 @@
 import bpy
-from .blending import BLEND_MODES, CHANNEL, CHANNELS, FOLDER_BLENDS
-from .effects import EFFECT_KINDS, MASK_BLENDS
+from .blending import BLEND_MODES, CHANNEL, CHANNELS, FOLDER_BLENDS, STORED_BLENDS
+from .effects import EFFECT_KINDS, FILL_PROJECTIONS, MASK_BLENDS
 from .filters import FILTERS
 from .masks import GENERATORS
 from .procedural import PATTERNS
@@ -25,7 +25,7 @@ class DEVIL_PAINTER_PG_slot(bpy.types.PropertyGroup):
     enabled: bpy.props.BoolProperty(default=False)
     color: bpy.props.FloatVectorProperty(size=3, default=(0.8, 0.8, 0.8), min=0.0, max=1.0)
     value: bpy.props.FloatProperty(default=0.5, min=0.0, max=1.0)
-    blend: bpy.props.EnumProperty(items=[(key, label, '') for key, label in BLEND_MODES])
+    blend: bpy.props.EnumProperty(items=[(key, label, '', STORED_BLENDS.index(key)) for key, label in BLEND_MODES], default='MIX')
     opacity: bpy.props.FloatProperty(default=1.0, min=0.0, max=1.0)
     source: bpy.props.EnumProperty(items=SOURCES)
     image: bpy.props.PointerProperty(type=bpy.types.Image)
@@ -59,6 +59,10 @@ class DEVIL_PAINTER_PG_channel_blend(bpy.types.PropertyGroup):
     blend: bpy.props.EnumProperty(items=[(key, label, '') for key, label in FOLDER_BLENDS])
 
 
+class DEVIL_PAINTER_PG_id_color(bpy.types.PropertyGroup):
+    color: bpy.props.FloatVectorProperty(size=3, default=(1.0, 1.0, 1.0), min=0.0, max=1.0)
+
+
 def is_mesh(self, obj):
     return obj.type == 'MESH'
 
@@ -68,7 +72,7 @@ class DEVIL_PAINTER_PG_effect(bpy.types.PropertyGroup):
     kind: bpy.props.EnumProperty(items=[(key, label, '') for key, label, _ in EFFECT_KINDS])
     target: bpy.props.EnumProperty(items=(('MASK', 'Mask', ''), ('CONTENT', 'Content', '')))
     enabled: bpy.props.BoolProperty(default=True)
-    blend: bpy.props.EnumProperty(items=[(key, label, '') for key, label in MASK_BLENDS])
+    blend: bpy.props.EnumProperty(items=[(key, label, '', number) for key, label, number in MASK_BLENDS], default='MULTIPLY')
     opacity: bpy.props.FloatProperty(default=1.0, min=0.0, max=1.0)
     image: bpy.props.PointerProperty(type=bpy.types.Image)
     source: bpy.props.EnumProperty(items=SOURCES)
@@ -94,6 +98,11 @@ class DEVIL_PAINTER_PG_effect(bpy.types.PropertyGroup):
     color_b: bpy.props.FloatVectorProperty(size=3, default=(0.0, 0.0, 0.0), min=0.0, max=1.0)
     other: bpy.props.StringProperty()
     channel: bpy.props.StringProperty(default='ALL')
+    projection: bpy.props.EnumProperty(items=[(key, label, '') for key, label in FILL_PROJECTIONS])
+    tiling: bpy.props.FloatProperty(default=1.0, min=0.1, max=32.0)
+    offset_u: bpy.props.FloatProperty(default=0.0, min=0.0, max=1.0)
+    offset_v: bpy.props.FloatProperty(default=0.0, min=0.0, max=1.0)
+    id_colors: bpy.props.CollectionProperty(type=DEVIL_PAINTER_PG_id_color)
 
 
 class DEVIL_PAINTER_PG_layer(bpy.types.PropertyGroup):
@@ -150,6 +159,7 @@ class DEVIL_PAINTER_PG_texture_set(bpy.types.PropertyGroup):
     target: bpy.props.EnumProperty(items=(('CONTENT', 'Content', ''), ('MASK', 'Mask', ''), ('EFFECT', 'Effect', '')))
     active_effect: bpy.props.StringProperty()
     solo: bpy.props.StringProperty()
+    isolate: bpy.props.StringProperty()
     material: bpy.props.PointerProperty(type=bpy.types.Material)
     serial: bpy.props.IntProperty(default=0)
     stroke: bpy.props.PointerProperty(type=bpy.types.Image)
@@ -226,7 +236,7 @@ class DEVIL_PAINTER_PG_project(bpy.types.PropertyGroup):
 
 
 CLASSES = (DEVIL_PAINTER_PG_slot, DEVIL_PAINTER_PG_channel, DEVIL_PAINTER_PG_map, DEVIL_PAINTER_PG_tile, DEVIL_PAINTER_PG_tile_image,
-           DEVIL_PAINTER_PG_effect, DEVIL_PAINTER_PG_channel_blend, DEVIL_PAINTER_PG_layer, DEVIL_PAINTER_PG_texture_set, DEVIL_PAINTER_PG_project)
+           DEVIL_PAINTER_PG_id_color, DEVIL_PAINTER_PG_effect, DEVIL_PAINTER_PG_channel_blend, DEVIL_PAINTER_PG_layer, DEVIL_PAINTER_PG_texture_set, DEVIL_PAINTER_PG_project)
 
 
 def project_of(obj):
@@ -308,6 +318,12 @@ def descendants(layers, uid):
                 found.append(layer.uid)
                 pending.append(layer.uid)
     return found
+
+
+def isolated_uids(data):
+    if find_layer(data, data.isolate) is None:
+        return None
+    return {data.isolate, *descendants(data.layers, data.isolate)}
 
 
 def shown_layers(layers):

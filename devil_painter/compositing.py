@@ -1,10 +1,10 @@
 import math
-from .blending import NORMAL_DETAIL
-from .document import PROJECTORS, active_tile, children, folder_mode, geometry_attribute, linked_layer, set_channels, shown_layers, slot_value, uses_coordinates
+from .blending import MIX_NODE_BLENDS
+from .document import PROJECTORS, active_tile, children, folder_mode, geometry_attribute, isolated_uids, linked_layer, set_channels, shown_layers, slot_value, uses_coordinates
 from .effects import EFFECT_FIELDS
 from .filters import FILTER, content_warp, filter_color, filter_value, warp_vector, wrap_sampling
 from .masks import generator_mask, id_selection, write_generator
-from .nodes import gray, link_or_set, math_node, mix_color, mix_value, socket, vector_math
+from .nodes import gray, link_or_set, math_node, mix_color, socket, vector_math
 from .procedural import contrast_range, pattern_node, set_pattern_values
 from .tiles import numbers, variant
 
@@ -16,6 +16,7 @@ PREVIEW_TOOLS = {'PAINT', 'FILL', ''}
 BUMP_DISTANCE = .05
 DISPLAY_GAMMA = 2.2
 TRIPLANAR_BLEND = .2
+MASK_MIXES = {'MINIMUM': 'DARKEN', 'MAXIMUM': 'LIGHTEN'}
 SHADER_INPUTS = {'base_color': 'Base Color', 'roughness': 'Roughness', 'metallic': 'Metallic', 'emission': 'Emission Color',
                  'opacity': 'Alpha'}
 
@@ -156,7 +157,8 @@ def slot_signature(slot):
 
 def effect_signature(effect):
     values = '/'.join(str(getattr(effect, field)) if field not in {'texture'} else (effect.texture.name if effect.texture else '') for field in EFFECT_FIELDS)
-    return f'{effect.uid}={values}={effect.image.name if effect.image else ""}'
+    extra = ','.join(f'{value:.4f}' for item in effect.id_colors for value in item.color)
+    return f'{effect.uid}={values}={effect.image.name if effect.image else ""}={extra}'
 
 
 def layer_signature(layer):
@@ -177,7 +179,7 @@ def signature(data):
     project = data.id_data.devil_painter
     shading = f'{data.visible}{data.shader}{project.normal_format}{project.normal_space}'
     quick = data.quick_mask.name if data.quick_mask is not None else ''
-    return f'{channels};{data.solo};{layers};{owner};{maps};{tiles};{project.uv_map};{shading};{quick};{data.bake_paint}'
+    return f'{channels};{data.solo};{data.isolate};{layers};{owner};{maps};{tiles};{project.uv_map};{shading};{quick};{data.bake_paint}'
 
 
 def stroke_over(build, image, alpha, color, x):
@@ -209,7 +211,7 @@ def levels_value(build, value, effect):
     output = nodes.new('ShaderNodeMapRange')
     links.new(curved, output.inputs['Value'])
     output.inputs['To Min'].default_value, output.inputs['To Max'].default_value = effect.out_low, effect.out_high
-    return mix_value(build, value, output.outputs['Result'], effect.opacity)
+    return output.outputs['Result']
 
 
 def levels_color(build, color, effect):
@@ -235,14 +237,9 @@ def levels_color(build, color, effect):
 
 
 def combine_mask(build, value, other, blend, factor):
-    nodes, links = build.nodes, build.links
-    if blend == 'MIX':
-        result = other
-    elif blend == 'DIFFERENCE':
-        result = math_node(nodes, links, 'ABSOLUTE', math_node(nodes, links, 'SUBTRACT', value, other), 0.0)
-    else:
-        result = math_node(nodes, links, blend, value, other)
-    return mix_value(build, value, result, factor)
+    split = build.nodes.new('ShaderNodeSeparateColor')
+    build.links.new(mix_color(build, value, other, factor, MASK_MIXES.get(blend, blend)), split.inputs['Color'])
+    return split.outputs['Red']
 
 
 def fill_effect_value(build, effect):
@@ -251,18 +248,40 @@ def fill_effect_value(build, effect):
     if effect.source == 'IMAGE' and effect.texture is not None:
         node = build.nodes.new('ShaderNodeTexImage')
         node.image = effect.texture
-        build.links.new(build.sampler.uv(), node.inputs['Vector'])
+        if fill_projection(effect) == 'TRIPLANAR':
+            node.projection = 'BOX'
+            node.projection_blend = TRIPLANAR_BLEND
+        build.links.new(fill_vector(build, effect), node.inputs['Vector'])
         return gray(build, node.outputs['Color'])
     if effect.source == 'PATTERN':
-        coordinates = build.nodes.new('ShaderNodeTexCoord')
         texture, factor = pattern_node(build.nodes, effect.pattern, effect.uid + '.texture', (0, 0))
-        build.links.new(coordinates.outputs['Object'], texture.inputs['Vector'])
+        build.links.new(fill_vector(build, effect), texture.inputs['Vector'])
         set_pattern_values(texture, effect.pattern, effect.scale, effect.detail)
         ranged = build.nodes.new('ShaderNodeMapRange')
         build.links.new(factor, ranged.inputs['Value'])
         ranged.inputs['From Min'].default_value, ranged.inputs['From Max'].default_value = contrast_range(effect.pattern, effect.contrast)
         return ranged.outputs['Result']
     return None
+
+
+def fill_projection(effect):
+    if effect.projection != 'AUTO':
+        return effect.projection
+    return 'UV' if effect.source == 'IMAGE' else 'TRIPLANAR'
+
+
+def fill_vector(build, effect):
+    if fill_projection(effect) == 'UV':
+        source = build.sampler.uv()
+    else:
+        source = build.nodes.new('ShaderNodeTexCoord').outputs['Object']
+    mapping = build.nodes.new('ShaderNodeMapping')
+    mapping.name = effect.uid + '.mapping'
+    build.links.new(source, mapping.inputs['Vector'])
+    mapping.inputs['Location'].default_value = (effect.offset_u, effect.offset_v, 0.0)
+    mapping.inputs['Rotation'].default_value = (0.0, 0.0, math.radians(effect.angle))
+    mapping.inputs['Scale'].default_value = (effect.tiling,) * 3
+    return mapping.outputs['Vector']
 
 
 def anchor_value(build, effect):
@@ -294,15 +313,15 @@ def mask_value(build, layer):
     for effect in layer.effects:
         if not effect.enabled or effect.target != 'MASK':
             continue
-        if effect.kind == 'LEVELS':
-            value = levels_value(build, value, effect)
-        elif effect.kind == 'FILTER':
-            value = filter_value(build, value, effect)
-        elif effect.kind == 'PAINT' and effect.image is not None:
+        if effect.kind == 'PAINT' and effect.image is not None:
             color, alpha = sample(effect.image)
             value = combine_mask(build, value, gray(build, color), effect.blend, math_node(nodes, links, 'MULTIPLY', alpha, effect.opacity))
         else:
-            if effect.kind == 'FILL':
+            if effect.kind == 'LEVELS':
+                other = levels_value(build, value, effect)
+            elif effect.kind == 'FILTER':
+                other = filter_value(build, value, effect)
+            elif effect.kind == 'FILL':
                 other = fill_effect_value(build, effect)
             elif effect.kind == 'ID_COLOR':
                 other = id_selection(build, effect, sample)
@@ -542,6 +561,62 @@ def channel_mix(nodes, links, name, below, factor, mode, x, y):
     return node
 
 
+def blended(slot):
+    return slot.enabled and slot.blend != 'DISABLE'
+
+
+def per_component(build, below, above, formula):
+    nodes, links = build.nodes, build.links
+    parts = []
+    for color in (below, above):
+        split = nodes.new('ShaderNodeSeparateColor')
+        links.new(color, split.inputs['Color'])
+        parts.append(split.outputs)
+
+    def op(operation, first, second):
+        return math_node(nodes, links, operation, first, second)
+    join = nodes.new('ShaderNodeCombineColor')
+    for index in range(3):
+        links.new(formula(op, parts[0][index], parts[1][index]), join.inputs[index])
+    return join.outputs['Color']
+
+
+def chosen(op, low, high, above):
+    return op('ADD', low, op('MULTIPLY', op('GREATER_THAN', above, .5), op('SUBTRACT', high, low)))
+
+
+BLEND_FORMULAS = {
+    'INVERSE_DIVIDE': lambda op, a, b: op('DIVIDE', b, op('MAXIMUM', a, 1e-4)),
+    'INVERSE_SUBTRACT': lambda op, a, b: op('SUBTRACT', b, a),
+    'SIGNED_ADD': lambda op, a, b: op('ADD', a, op('SUBTRACT', op('MULTIPLY', b, 2.0), 1.0)),
+    'LINEAR_BURN': lambda op, a, b: op('SUBTRACT', op('ADD', a, b), 1.0),
+    'HARD_LIGHT': lambda op, a, b: chosen(op, op('MULTIPLY', op('MULTIPLY', a, b), 2.0),
+                                          op('SUBTRACT', 1.0, op('MULTIPLY', op('MULTIPLY', op('SUBTRACT', 1.0, a), op('SUBTRACT', 1.0, b)), 2.0)), b),
+    'VIVID_LIGHT': lambda op, a, b: chosen(op, op('SUBTRACT', 1.0, op('DIVIDE', op('SUBTRACT', 1.0, a), op('MAXIMUM', op('MULTIPLY', b, 2.0), 1e-4))),
+                                           op('DIVIDE', a, op('MAXIMUM', op('SUBTRACT', 2.0, op('MULTIPLY', b, 2.0)), 1e-4)), b),
+    'PIN_LIGHT': lambda op, a, b: chosen(op, op('MINIMUM', a, op('MULTIPLY', b, 2.0)), op('MAXIMUM', a, op('SUBTRACT', op('MULTIPLY', b, 2.0), 1.0)), b),
+}
+
+
+def combine_normals(nodes, links, base, detail):
+    unpacked = [vector_math(nodes, links, 'MULTIPLY_ADD', color, (2.0, 2.0, 2.0), (-1.0, -1.0, -1.0)) for color in (base, detail)]
+    summed = vector_math(nodes, links, 'ADD', unpacked[0], vector_math(nodes, links, 'MULTIPLY', unpacked[1], (1.0, 1.0, 0.0)))
+    normalized = vector_math(nodes, links, 'NORMALIZE', summed)
+    return vector_math(nodes, links, 'MULTIPLY_ADD', normalized, (.5, .5, .5), (.5, .5, .5))
+
+
+def custom_blend(build, mode, below, above):
+    if mode == 'REPLACE':
+        return above
+    if mode == 'NORMAL_DETAIL':
+        return blend_normals(build.nodes, build.links, below, above)
+    if mode == 'NORMAL_INVERSE_DETAIL':
+        return blend_normals(build.nodes, build.links, above, below)
+    if mode == 'NORMAL_COMBINE':
+        return combine_normals(build.nodes, build.links, below, above)
+    return per_component(build, below, above, BLEND_FORMULAS[mode])
+
+
 def compose_layer(build, channels, layer, results, x):
     nodes, links, stroke = build.nodes, build.links, build.stroke
     owner = stroke is not None and stroke[0] == layer.uid
@@ -549,7 +624,7 @@ def compose_layer(build, channels, layer, results, x):
     vector = layer_coordinates(nodes, links, layer, x) if uses_coordinates(layer) else None
     for row, channel in enumerate(channels):
         slot = layer.slots[channel.key]
-        if not slot.enabled:
+        if not blended(slot):
             continue
         name = f'{layer.uid}.{channel.key}'
         y = 300 - 250 * row
@@ -557,8 +632,8 @@ def compose_layer(build, channels, layer, results, x):
         if layer.kind == 'PAINT' and channel.key != 'base_color' and slot.source == 'IMAGE' and slot.image is not None:
             reach = math_node(nodes, links, 'MULTIPLY', coverage, sampling(build, layer, 'CONTENT')(slot.image)[1], x - 150, y - 60)
         factor = math_node(nodes, links, 'MULTIPLY', reach, 1.0, x - 100, y - 60, name + '.opacity')
-        detail = slot.blend == NORMAL_DETAIL
-        node = channel_mix(nodes, links, name, results[channel.key], factor, 'MIX' if detail else slot.blend, x, y)
+        native = slot.blend in MIX_NODE_BLENDS
+        node = channel_mix(nodes, links, name, results[channel.key], factor, slot.blend if native else 'MIX', x, y)
         content = painted if channel.key == 'base_color' and painted is not None else slot_content(build, layer, slot, vector, name, x, y)
         if owner and channel.key != 'base_color' and channel.key in stroke[2]:
             brushed = nodes.new('ShaderNodeMix')
@@ -570,14 +645,14 @@ def compose_layer(build, channels, layer, results, x):
                 links.new(content, socket(brushed.inputs, 'A', 'RGBA'))
             content = socket(brushed.outputs, 'Result', 'RGBA')
         effects = content_effects_for(layer, channel.key)
-        if content is None and (effects or detail):
+        if content is None and (effects or not native):
             constant = nodes.new('ShaderNodeRGB')
             constant.name = name + '.const'
             content = constant.outputs[0]
         for effect in effects:
             content = levels_color(build, content, effect) if effect.kind == 'LEVELS' else filter_color(build, content, effect)
-        if detail:
-            content = blend_normals(nodes, links, results[channel.key], content)
+        if not native:
+            content = custom_blend(build, slot.blend, results[channel.key], content)
         if content is not None:
             links.new(content, socket(node.inputs, 'B', 'RGBA'))
         results[channel.key] = socket(node.outputs, 'Result', 'RGBA')
@@ -668,6 +743,14 @@ def isolated_tree(data, tree, roots, key, mask_uid=''):
     link_or_set(build, emission.inputs['Color'], value)
 
 
+def stack_layers(data, raw):
+    layers = resolved(data.layers) if data.visible else []
+    kept = None if raw else isolated_uids(data)
+    if kept is None:
+        return layers
+    return [Rooted(layer) if layer.uid == data.isolate else layer for layer in layers if layer.uid in kept]
+
+
 def ancestor_in(layers, layer, chosen):
     by_uid = {item.uid: item for item in layers}
     parent = by_uid.get(layer.parent)
@@ -743,10 +826,12 @@ def write_values(nodes, channels, layers, brush=None):
                 projector.inputs['Scale'].default_value = (layer.proj_size,) * 3
         for channel in channels:
             slot = layer.slots[channel.key]
-            if not slot.enabled:
+            if not blended(slot):
                 continue
             name = f'{layer.uid}.{channel.key}'
             nodes[name + '.opacity'].inputs[1].default_value = slot.opacity
+            if slot.blend == 'REPLACE':
+                nodes[name + '.opacity'].inputs[0].default_value = layer.opacity
             if brush is not None and name + '.stroke' in nodes:
                 brushed = nodes[name + '.stroke']
                 socket(brushed.inputs, 'B', 'RGBA').default_value = rgba(brush[1][channel.key])
@@ -791,6 +876,20 @@ def show_map(build, output, image):
     build.links.new(emission.outputs[0], output.inputs['Surface'])
 
 
+def viewed_mask(data):
+    uid = data.solo.removeprefix('mask:') if data.solo.startswith('mask:') else None
+    return next((layer for layer in resolved(data.layers) if layer.uid == uid), None)
+
+
+def show_mask(build, output, layer):
+    gamma = build.nodes.new('ShaderNodeGamma')
+    gamma.inputs['Gamma'].default_value = DISPLAY_GAMMA
+    link_or_set(build, gamma.inputs['Color'], mask_value(build, layer))
+    emission = build.nodes.new('ShaderNodeEmission')
+    build.links.new(gamma.outputs['Color'], emission.inputs['Color'])
+    build.links.new(emission.outputs[0], output.inputs['Surface'])
+
+
 def viewed_map(data):
     item = data.maps.get(data.solo.removeprefix('map:')) if data.solo.startswith('map:') else None
     return item.image if item is not None else None
@@ -808,19 +907,21 @@ def rebuild(data, solo=None, raw=False):
     material = data.material
     build = set_build(data, material.node_tree, raw)
     channels = set_channels(data)
-    output = build_tree(build, channels, resolved(data.layers) if data.visible else [], solo or solo_channel(data), raw)
+    output = build_tree(build, channels, stack_layers(data, raw), solo or solo_channel(data), raw)
     if not raw and solo is None and data.bake_paint:
         show_map(build, output, data.cage_map if data.bake_paint == 'CAGE' else data.skew_map)
     elif not raw and solo is None and viewed_map(data) is not None:
         show_map(build, output, viewed_map(data))
+    elif not raw and solo is None and viewed_mask(data) is not None:
+        show_mask(build, output, viewed_mask(data))
     material[SIGNATURE_KEY] = '' if raw else signature(data)
 
 
-def update_values(data):
+def update_values(data, raw=False):
     nodes = data.material.node_tree.nodes
     if not data.visible:
         return
-    write_values(nodes, set_channels(data), resolved(data.layers), brush_values(data))
+    write_values(nodes, set_channels(data), stack_layers(data, raw), brush_values(data))
     if 'shader.normal_map' in nodes:
         nodes['shader.normal_map'].inputs['Strength'].default_value = data.normal_strength
     if 'shader.bump' in nodes:
@@ -829,7 +930,7 @@ def update_values(data):
         nodes['shader.bsdf'].inputs['Emission Strength'].default_value = data.emission_strength
     obj = data.id_data
     project = obj.devil_painter
-    for layer in shown_layers(resolved(data.layers)):
+    for layer in shown_layers(stack_layers(data, raw)):
         mapping = nodes.get(layer.uid + '.mapping')
         if mapping is not None and layer.projection == 'TRIPLANAR' and project.use_physical:
             mapping.inputs['Scale'].default_value = tuple(layer.tiling * axis / project.physical_size for axis in obj.scale)

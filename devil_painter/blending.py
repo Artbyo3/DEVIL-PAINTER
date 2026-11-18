@@ -1,13 +1,20 @@
 from dataclasses import dataclass
 import numpy
 
-BLEND_MODES = (('MIX', 'Normal'), ('DARKEN', 'Darken'), ('MULTIPLY', 'Multiply'), ('BURN', 'Color burn'), ('LIGHTEN', 'Lighten'),
-               ('SCREEN', 'Screen'), ('DODGE', 'Color dodge'), ('ADD', 'Linear dodge (Add)'), ('OVERLAY', 'Overlay'), ('SOFT_LIGHT', 'Soft light'),
-               ('LINEAR_LIGHT', 'Linear light'), ('DIFFERENCE', 'Difference'), ('EXCLUSION', 'Exclusion'), ('SUBTRACT', 'Subtract'),
-               ('DIVIDE', 'Divide'), ('HUE', 'Hue'), ('SATURATION', 'Saturation'), ('COLOR', 'Color'), ('VALUE', 'Value'),
-               ('NORMAL_DETAIL', 'Normal map detail'))
+BLEND_MODES = (('DISABLE', 'Disable'), ('REPLACE', 'Replace'), ('MIX', 'Normal'), ('MULTIPLY', 'Multiply'), ('DIVIDE', 'Divide'),
+               ('INVERSE_DIVIDE', 'Inverse divide'), ('DARKEN', 'Darken'), ('LIGHTEN', 'Lighten'), ('ADD', 'Linear dodge (Add)'),
+               ('SUBTRACT', 'Subtract'), ('INVERSE_SUBTRACT', 'Inverse subtract'), ('DIFFERENCE', 'Difference'), ('EXCLUSION', 'Exclusion'),
+               ('SIGNED_ADD', 'Signed addition'), ('OVERLAY', 'Overlay'), ('SCREEN', 'Screen'), ('LINEAR_BURN', 'Linear burn'),
+               ('BURN', 'Color burn'), ('DODGE', 'Color dodge'), ('SOFT_LIGHT', 'Soft light'), ('HARD_LIGHT', 'Hard light'),
+               ('VIVID_LIGHT', 'Vivid light'), ('LINEAR_LIGHT', 'Linear light'), ('PIN_LIGHT', 'Pin light'), ('SATURATION', 'Saturation'),
+               ('COLOR', 'Color'), ('VALUE', 'Value'), ('HUE', 'Hue'), ('NORMAL_COMBINE', 'Normal map combine'),
+               ('NORMAL_DETAIL', 'Normal map detail'), ('NORMAL_INVERSE_DETAIL', 'Normal map inverse detail'))
+STORED_BLENDS = ('MIX', 'DARKEN', 'MULTIPLY', 'BURN', 'LIGHTEN', 'SCREEN', 'DODGE', 'ADD', 'OVERLAY', 'SOFT_LIGHT', 'LINEAR_LIGHT', 'DIFFERENCE',
+                 'EXCLUSION', 'SUBTRACT', 'DIVIDE', 'HUE', 'SATURATION', 'COLOR', 'VALUE', 'NORMAL_DETAIL', 'DISABLE', 'REPLACE', 'INVERSE_DIVIDE',
+                 'INVERSE_SUBTRACT', 'SIGNED_ADD', 'LINEAR_BURN', 'HARD_LIGHT', 'VIVID_LIGHT', 'PIN_LIGHT', 'NORMAL_COMBINE', 'NORMAL_INVERSE_DETAIL')
+MIX_NODE_BLENDS = frozenset(STORED_BLENDS[:19])
 NORMAL_DETAIL = 'NORMAL_DETAIL'
-FOLDER_BLENDS = (('PASSTHROUGH', 'Passthrough'),) + tuple(item for item in BLEND_MODES if item[0] != NORMAL_DETAIL)
+FOLDER_BLENDS = (('PASSTHROUGH', 'Passthrough'),) + tuple((key, dict(BLEND_MODES)[key]) for key in STORED_BLENDS[:19])
 
 
 @dataclass(frozen=True)

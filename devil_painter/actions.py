@@ -703,6 +703,11 @@ def toggle_visible(context, obj, data, uid):
     return refresh(context, obj, data, f'{layer.name} {"shown" if layer.visible else "hidden"}.')
 
 
+def toggle_isolate(context, obj, data, uid):
+    data.isolate = '' if data.isolate == uid else uid
+    return refresh(context, obj, data, f'Showing only {find_layer(data, uid).name}.' if data.isolate else 'Showing every layer.')
+
+
 def set_blend(context, obj, data, key, mode):
     layer = active_layer(data)
     layer.slots[key].blend = mode
@@ -829,12 +834,14 @@ def commit_value(context, obj, data, label):
 
 def set_solo(context, obj, data, key):
     data.solo = key
+    if key.startswith('mask:'):
+        return refresh(context, obj, data, f'Viewing the mask of {find_layer(data, key.removeprefix("mask:")).name}.')
     if key.startswith('map:'):
         return refresh(context, obj, data, f'Viewing the {MESH_MAP[key.removeprefix("map:")].label.lower()} map.')
     return refresh(context, obj, data, f'Viewing {CHANNEL[key].label} only.' if key else 'Viewing the full material.')
 
 
-def pick_id_color(context, obj, data, effect_uid, face, location):
+def pick_id_color(context, obj, data, effect_uid, face, location, add):
     item = data.maps.get('id')
     if item is None or item.image is None:
         return 'Bake the ID map first.'
@@ -847,8 +854,18 @@ def pick_id_color(context, obj, data, effect_uid, face, location):
     start = (row * width + column) * 4
     color = tuple(image.pixels[start:start + 3])
     layer = active_layer(data)
-    find_effect(layer, effect_uid).color = color
+    effect = find_effect(layer, effect_uid)
+    if add:
+        effect.id_colors.add().color = color
+        return refresh(context, obj, data, f'{layer.name} also keeps the picked ID color.')
+    effect.color = color
     return refresh(context, obj, data, f'{layer.name} keeps the picked ID color.')
+
+
+def remove_id_color(context, obj, data, index):
+    layer = active_layer(data)
+    find_effect(layer, data.active_effect).id_colors.remove(index)
+    return refresh(context, obj, data, f'{layer.name} no longer keeps that ID color.')
 
 
 def paint_bake_map(context, obj, data, kind):
