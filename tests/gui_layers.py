@@ -15,6 +15,7 @@ sys.path.insert(0, str(ROOT))
 import devil_painter
 from devil_painter import editor, library
 from devil_painter.blending import BLEND_MODES, CHANNEL, FOLDER_BLENDS
+from devil_painter.effects import MASK_BLENDS
 from devil_painter.document import active_layer, find_layer, geometry_attribute
 from tools.workspace import prepare_scratch
 from tests.gui_harness import settle, until
@@ -355,7 +356,12 @@ def journey():
     yield from slide(window, region, 'FX_scale', .3)
     check(abs(layer.effects[0].scale - 15.0) < 1.5, 'the fill effect scale slider edits the pattern scale')
     yield from reveal(window, region, 'FX_BLEND')
-    yield from menu(window, region, 'FX_BLEND', 'SET_FXBLEND.SUBTRACT')
+    click(window, region, 'FX_BLEND')
+    yield from settle()
+    check(len(keys('SET_FXBLEND.')) == len(MASK_BLENDS) == len(BLEND_MODES) - 1,
+          f'mask effects offer the full layer blend list ({len(keys("SET_FXBLEND."))} modes)')
+    click(window, region, 'SET_FXBLEND.SUBTRACT')
+    yield from settle()
     check(layer.effects[0].blend == 'SUBTRACT', 'mask effects pick how they combine with the mask below')
 
     textures = scratch / 'textures'
@@ -399,6 +405,12 @@ def journey():
     yield from settle()
     threshold = layer.effects[-1].uid
     check(any(node.bl_idname == 'ShaderNodeMath' and node.operation == 'GREATER_THAN' for node in nodes(body)), 'the threshold filter cuts the mask')
+    check(has('FX_BLEND') and control('FX_BLEND').text == 'Replace', 'a mask filter has a blend dropdown and starts on Replace')
+    yield from reveal(window, region, 'FX_FILTER')
+    yield from menu(window, region, 'FX_FILTER', 'SET_FXFILTER.BLUR')
+    check(not has('FX_BLEND'), 'a blur filter resamples the mask and has no blend dropdown')
+    yield from reveal(window, region, 'FX_FILTER')
+    yield from menu(window, region, 'FX_FILTER', 'SET_FXFILTER.THRESHOLD')
     yield from reveal(window, region, f'FXEYE_{fill_uid}.{threshold}', 'LAYERS')
     click(window, region, f'FXEYE_{fill_uid}.{threshold}')
     yield from settle()
@@ -481,6 +493,47 @@ def journey():
     yield from context_menu(window, region, compare_uid, 'EXPORT_MASK')
     compared = png(export_dir / f'{bpy.path.clean_name(compare_layer.name)}_Mask.png')
     check(numpy.abs(compared[:, 0] - mask[:, 0]).mean() < .02, 'a compare mask reuses the mask of the other layer pixel for pixel')
+    yield from select_row(window, region, paint_uid)
+    yield from add_effect(window, region, 'MASK', 'FILL')
+    yield from reveal(window, region, 'FX_SOURCE')
+    yield from menu(window, region, 'FX_SOURCE', 'SET_FXSOURCE.VALUE')
+    yield from slide(window, region, 'FX_value', .5)
+    yield from reveal(window, region, 'FX_BLEND')
+    yield from menu(window, region, 'FX_BLEND', 'SET_FXBLEND.SCREEN')
+    screen = find_layer(body, paint_uid).effects[-1]
+    check(screen.blend == 'SCREEN' and control('FX_BLEND').text == 'Screen', 'a mask fill effect can blend with Screen')
+    yield from context_menu(window, region, paint_uid, 'EXPORT_MASK')
+    screened = png(mask_file)
+    covered = screened[:, 0] > screen.value / 2
+    error = numpy.abs(screened[covered, 0] - (1 - (1 - mask[covered, 0]) * (1 - screen.value)))
+    check(covered.mean() > .2 and numpy.percentile(error, 99) < .02,
+          f'on the baked UV area the exported mask is the Screen of the mask below and the fill value {screen.value:.2f} '
+          f'(99th percentile error {numpy.percentile(error, 99):.4f} over {int(covered.sum())} pixels)')
+    yield from reveal(window, region, f'FX_{paint_uid}.{screen.uid}', 'LAYERS')
+    click(window, region, f'FX_{paint_uid}.{screen.uid}')
+    yield from settle()
+    yield from reveal(window, region, 'FX_DELETE')
+    click(window, region, 'FX_DELETE')
+    yield from settle()
+    yield from select_row(window, region, paint_uid)
+    yield from add_effect(window, region, 'MASK', 'LEVELS')
+    squared = find_layer(body, paint_uid).effects[-1]
+    check(control('FX_BLEND').text == 'Replace', 'a mask levels effect has a blend dropdown and starts on Replace')
+    yield from reveal(window, region, 'FX_BLEND')
+    yield from menu(window, region, 'FX_BLEND', 'SET_FXBLEND.MULTIPLY')
+    check(squared.blend == 'MULTIPLY', 'a mask levels effect can blend with Multiply')
+    yield from context_menu(window, region, paint_uid, 'EXPORT_MASK')
+    multiplied = png(mask_file)
+    covered = multiplied[:, 0] > .05
+    error = numpy.abs(multiplied[covered, 0] - mask[covered, 0] ** 2)
+    check(covered.mean() > .005 and numpy.percentile(error, 99) < .02,
+          f'neutral levels in Multiply squares the mask below (99th percentile error {numpy.percentile(error, 99):.4f} over {int(covered.sum())} pixels)')
+    yield from reveal(window, region, f'FX_{paint_uid}.{squared.uid}', 'LAYERS')
+    click(window, region, f'FX_{paint_uid}.{squared.uid}')
+    yield from settle()
+    yield from reveal(window, region, 'FX_DELETE')
+    click(window, region, 'FX_DELETE')
+    yield from settle()
     yield from select_row(window, region, compare_uid)
     yield from add_effect(window, region, 'MASK', 'ANCHOR')
     yield from reveal(window, region, 'FX_OTHER')
