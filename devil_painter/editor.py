@@ -150,7 +150,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         self.load_column()
         self.message = library.settings_notice()
         self.last_click = ('', 0.0)
-        self.modifiers = (False, False)
+        self.modifiers = (False, False, False)
         self._closed = False
         self.failure = None
         self.saved_regions = {}
@@ -596,7 +596,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
                 self.state.popover = Popover('MENU', control.rect, items=tuple(items))
             return {'RUNNING_MODAL'}
         if control is not None and event.type == 'LEFTMOUSE' and event.value in {'PRESS', 'DOUBLE_CLICK'}:
-            self.modifiers = (event.ctrl, event.shift)
+            self.modifiers = (event.ctrl, event.shift, event.alt)
             try:
                 result = self.act(context, control, event.value == 'DOUBLE_CLICK')
             except (ValueError, RuntimeError) as failure:
@@ -1065,7 +1065,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         self.message = actions.move_effect(context, obj, data, uid, effect, index)
 
     def select_row(self, context, obj, data, uid, control, double):
-        ctrl, shift = self.modifiers
+        ctrl, shift, _ = self.modifiers
         if shift and data.active_uid:
             order = [layer.uid for layer, _, effect in layer_rows(data, self.state.collapsed) if effect is None]
             start, end = sorted((order.index(data.active_uid), order.index(uid))) if data.active_uid in order else (order.index(uid),) * 2
@@ -1218,7 +1218,8 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             items.append(('DELETE_SELECTED', f'Delete {len(uids)} layers', False))
             self.state.popover = Popover('MENU', anchor, items=tuple(items))
             return
-        items = [('RENAME', 'Rename', False), ('DUPLICATE', 'Duplicate', False), ('COPY_LAYERS', 'Copy', False)]
+        items = [('RENAME', 'Rename', False), ('DUPLICATE', 'Duplicate', False), ('COPY_LAYERS', 'Copy', False),
+                 ('ISOLATE', 'Show all layers' if data.isolate == layer.uid else 'Show only this layer', False)]
         if self.state.clipboard:
             items += [('PASTE_LAYERS', 'Paste layers', False), ('PASTE_MASK', 'Paste mask', False), ('PASTE_EFFECTS', 'Paste effects', False)]
         if layer.kind == 'INSTANCE':
@@ -1988,8 +1989,12 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.message = actions.duplicate_layer(context, obj, data)
         elif key.startswith('ROW_'):
             self.message = self.select_row(context, obj, data, key.removeprefix('ROW_'), control, double)
+        elif key.startswith('EYE_') and self.modifiers[2]:
+            self.message = actions.toggle_isolate(context, obj, data, key.removeprefix('EYE_'))
         elif key.startswith('EYE_'):
             self.message = actions.toggle_visible(context, obj, data, key.removeprefix('EYE_'))
+        elif key == 'ISOLATE':
+            self.message = actions.toggle_isolate(context, obj, data, data.active_uid)
         elif key.startswith('FOLD_'):
             self.state.collapsed ^= {key}
         elif key == 'MOVE_INTO':

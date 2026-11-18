@@ -9,7 +9,7 @@ from .bridge import command as bridge_command
 from pathlib import Path
 from .blending import BLEND_MODES, CHANNEL, CHANNELS, FOLDER_BLENDS, linear_to_srgb
 from .canvas import Layout, Rect
-from .document import (BAKE_ID_LABELS, DYNAMICS, NORMAL_FORMATS, PROJECTORS, STROKE_METHODS, TRANSPARENCY, NORMAL_SPACES, PROJECTIONS, RESOLUTIONS, SHADERS, active_effect, active_layer, children, editing_mask, find_layer,
+from .document import (BAKE_ID_LABELS, DYNAMICS, NORMAL_FORMATS, PROJECTORS, STROKE_METHODS, TRANSPARENCY, NORMAL_SPACES, PROJECTIONS, RESOLUTIONS, SHADERS, active_effect, active_layer, children, editing_mask, find_layer, isolated_uids,
                        linked_layer, set_channels, slot_value, uses_coordinates)
 from .effects import EFFECT_ICONS, EFFECT_KINDS, MASK_BLENDS, effect_label
 from .filters import FILTER, FILTERS
@@ -459,6 +459,7 @@ def fill_layers(layout, state, data, flow):
     s = layout.scale
     target = selection(data)
     size = THUMBNAIL * s
+    isolated = isolated_uids(data)
     for layer, depth, effect in layer_rows(data, state.collapsed):
         uid = layer.uid
         line = flow.line(ROW_HEIGHT * s)
@@ -486,8 +487,9 @@ def fill_layers(layout, state, data, flow):
             opened = 'FX_OPEN_' + uid not in state.collapsed
             flow.add('FX_OPEN_' + uid, Rect(row.x + row.w - 90 * s, row.y + 8 * s, 22 * s, row.h - 16 * s), 'ICON',
                      icon='DOWN' if opened else 'DISCLOSURE', tip='Hide the effects of this layer' if opened else 'Show the effects of this layer')
-        flow.add(f'EYE_{uid}', Rect(row.x + 4 * s, row.y + 8 * s, 22 * s, row.h - 16 * s), 'ICON',
-                 icon='HIDE_OFF' if layer.visible else 'HIDE_ON', tip='Hide layer' if layer.visible else 'Show layer')
+        shown = (layer.visible or uid == data.isolate) and (isolated is None or uid in isolated)
+        flow.add(f'EYE_{uid}', Rect(row.x + 4 * s, row.y + 8 * s, 22 * s, row.h - 16 * s), 'ICON', icon='HIDE_OFF' if shown else 'HIDE_ON',
+                 tip=('Hide layer' if layer.visible else 'Show layer') + '; Alt-click to show only this layer')
         if layer.kind == 'FOLDER':
             folded = 'FOLD_' + uid in state.collapsed
             flow.add('FOLD_' + uid, Rect(row.x + row.w - 64 * s, row.y + 8 * s, 22 * s, row.h - 16 * s), 'ICON',

@@ -1,6 +1,6 @@
 import math
 from .blending import NORMAL_DETAIL
-from .document import PROJECTORS, active_tile, children, geometry_attribute, linked_layer, set_channels, shown_layers, slot_value, uses_coordinates
+from .document import PROJECTORS, active_tile, children, geometry_attribute, isolated_uids, linked_layer, set_channels, shown_layers, slot_value, uses_coordinates
 from .effects import EFFECT_FIELDS
 from .filters import FILTER, content_warp, filter_color, filter_value, warp_vector, wrap_sampling
 from .masks import generator_mask, id_selection, write_generator
@@ -176,7 +176,7 @@ def signature(data):
     project = data.id_data.devil_painter
     shading = f'{data.visible}{data.shader}{project.normal_format}{project.normal_space}'
     quick = data.quick_mask.name if data.quick_mask is not None else ''
-    return f'{channels};{data.solo};{layers};{owner};{maps};{tiles};{project.uv_map};{shading};{quick};{data.bake_paint}'
+    return f'{channels};{data.solo};{data.isolate};{layers};{owner};{maps};{tiles};{project.uv_map};{shading};{quick};{data.bake_paint}'
 
 
 def stroke_over(build, image, alpha, color, x):
@@ -665,6 +665,14 @@ def isolated_tree(data, tree, roots, key, mask_uid=''):
     link_or_set(build, emission.inputs['Color'], value)
 
 
+def stack_layers(data, raw):
+    layers = resolved(data.layers) if data.visible else []
+    kept = None if raw else isolated_uids(data)
+    if kept is None:
+        return layers
+    return [Rooted(layer) if layer.uid == data.isolate else layer for layer in layers if layer.uid in kept]
+
+
 def ancestor_in(layers, layer, chosen):
     by_uid = {item.uid: item for item in layers}
     parent = by_uid.get(layer.parent)
@@ -805,7 +813,7 @@ def rebuild(data, solo=None, raw=False):
     material = data.material
     build = set_build(data, material.node_tree, raw)
     channels = set_channels(data)
-    output = build_tree(build, channels, resolved(data.layers) if data.visible else [], solo or solo_channel(data), raw)
+    output = build_tree(build, channels, stack_layers(data, raw), solo or solo_channel(data), raw)
     if not raw and solo is None and data.bake_paint:
         show_map(build, output, data.cage_map if data.bake_paint == 'CAGE' else data.skew_map)
     elif not raw and solo is None and viewed_map(data) is not None:
@@ -813,11 +821,11 @@ def rebuild(data, solo=None, raw=False):
     material[SIGNATURE_KEY] = '' if raw else signature(data)
 
 
-def update_values(data):
+def update_values(data, raw=False):
     nodes = data.material.node_tree.nodes
     if not data.visible:
         return
-    write_values(nodes, set_channels(data), resolved(data.layers), brush_values(data))
+    write_values(nodes, set_channels(data), stack_layers(data, raw), brush_values(data))
     if 'shader.normal_map' in nodes:
         nodes['shader.normal_map'].inputs['Strength'].default_value = data.normal_strength
     if 'shader.bump' in nodes:
@@ -826,7 +834,7 @@ def update_values(data):
         nodes['shader.bsdf'].inputs['Emission Strength'].default_value = data.emission_strength
     obj = data.id_data
     project = obj.devil_painter
-    for layer in shown_layers(resolved(data.layers)):
+    for layer in shown_layers(stack_layers(data, raw)):
         mapping = nodes.get(layer.uid + '.mapping')
         if mapping is not None and layer.projection == 'TRIPLANAR' and project.use_physical:
             mapping.inputs['Scale'].default_value = tuple(layer.tiling * axis / project.physical_size for axis in obj.scale)
