@@ -4,7 +4,7 @@ from .document import PROJECTORS, active_tile, children, geometry_attribute, lin
 from .effects import EFFECT_FIELDS
 from .filters import FILTER, content_warp, filter_color, filter_value, warp_vector, wrap_sampling
 from .masks import generator_mask, id_selection, write_generator
-from .nodes import gray, link_or_set, math_node, mix_color, mix_value, socket, vector_math
+from .nodes import gray, link_or_set, math_node, mix_color, socket, vector_math
 from .procedural import contrast_range, pattern_node, set_pattern_values
 from .tiles import numbers, variant
 
@@ -209,7 +209,7 @@ def levels_value(build, value, effect):
     output = nodes.new('ShaderNodeMapRange')
     links.new(curved, output.inputs['Value'])
     output.inputs['To Min'].default_value, output.inputs['To Max'].default_value = effect.out_low, effect.out_high
-    return mix_value(build, value, output.outputs['Result'], effect.opacity)
+    return output.outputs['Result']
 
 
 def levels_color(build, color, effect):
@@ -289,15 +289,15 @@ def mask_value(build, layer):
     for effect in layer.effects:
         if not effect.enabled or effect.target != 'MASK':
             continue
-        if effect.kind == 'LEVELS':
-            value = levels_value(build, value, effect)
-        elif effect.kind == 'FILTER':
-            value = filter_value(build, value, effect)
-        elif effect.kind == 'PAINT' and effect.image is not None:
+        if effect.kind == 'PAINT' and effect.image is not None:
             color, alpha = sample(effect.image)
             value = combine_mask(build, value, gray(build, color), effect.blend, math_node(nodes, links, 'MULTIPLY', alpha, effect.opacity))
         else:
-            if effect.kind == 'FILL':
+            if effect.kind == 'LEVELS':
+                other = levels_value(build, value, effect)
+            elif effect.kind == 'FILTER':
+                other = filter_value(build, value, effect)
+            elif effect.kind == 'FILL':
                 other = fill_effect_value(build, effect)
             elif effect.kind == 'ID_COLOR':
                 other = id_selection(build, effect, sample)

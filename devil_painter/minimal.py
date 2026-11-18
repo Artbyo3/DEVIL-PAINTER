@@ -587,7 +587,7 @@ def effect_section(flow, data, layer, w):
     flow.add('FX_DELETE', Rect(x + w - 26 * s, y, 26 * s, h), 'ICON', icon='CLOSE', tip='Delete this effect')
     x, y, h = flow.field()
     half = (w - 4 * s) / 2
-    if effect.target == 'MASK' and effect.kind not in {'LEVELS', 'FILTER'}:
+    if effect.target == 'MASK' and not (effect.kind == 'FILTER' and FILTER[effect.filter].sampling):
         flow.add('FX_BLEND', Rect(x, y, half, h), 'DROPDOWN', label='Blend', text=MASK_BLEND_LABEL[effect.blend],
                  tip='How this effect combines with the mask below it')
     else:
