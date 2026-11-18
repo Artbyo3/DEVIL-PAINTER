@@ -148,6 +148,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         self.toast_revealed = False
         self.state = WorkspaceState()
         self.load_column()
+        self.message = library.settings_notice()
         self.last_click = ('', 0.0)
         self.modifiers = (False, False)
         self._closed = False
