@@ -1,7 +1,7 @@
 import math
 from .blending import NORMAL_DETAIL
 from .document import PROJECTORS, active_tile, children, geometry_attribute, linked_layer, set_channels, shown_layers, slot_value, uses_coordinates
-from .effects import EFFECT_FIELDS
+from .effects import COMPONENT_FIELDS, EFFECT_FIELDS
 from .filters import FILTER, content_warp, filter_color, filter_value, warp_vector, wrap_sampling
 from .masks import generator_mask, id_selection, write_generator
 from .nodes import gray, link_or_set, math_node, mix_color, mix_value, socket, vector_math
@@ -156,7 +156,8 @@ def slot_signature(slot):
 
 def effect_signature(effect):
     values = '/'.join(str(getattr(effect, field)) if field not in {'texture'} else (effect.texture.name if effect.texture else '') for field in EFFECT_FIELDS)
-    return f'{effect.uid}={values}={effect.image.name if effect.image else ""}'
+    components = ','.join(f'{value:.4f}' for field in COMPONENT_FIELDS for value in getattr(effect, field))
+    return f'{effect.uid}={values}={effect.image.name if effect.image else ""}={components}'
 
 
 def layer_signature(layer):
@@ -201,20 +202,41 @@ def sampling(build, layer, target):
 
 def levels_value(build, value, effect):
     nodes, links = build.nodes, build.links
+    return mix_value(build, value, leveled(build, value, (effect.in_low, effect.in_high, effect.gamma, effect.out_low, effect.out_high), effect.clamp),
+                     effect.opacity)
+
+
+def leveled(build, value, levels, clamp):
+    nodes, links = build.nodes, build.links
+    in_low, in_high, gamma, out_low, out_high = levels
     ranged = nodes.new('ShaderNodeMapRange')
+    ranged.clamp = clamp
     link_or_set(build, ranged.inputs['Value'], value)
-    ranged.inputs['From Min'].default_value, ranged.inputs['From Max'].default_value = effect.in_low, max(effect.in_high, effect.in_low + 1e-3)
-    curved = math_node(nodes, links, 'POWER', ranged.outputs['Result'], 1.0 / effect.gamma)
+    ranged.inputs['From Min'].default_value, ranged.inputs['From Max'].default_value = in_low, max(in_high, in_low + 1e-3)
+    curved = math_node(nodes, links, 'POWER', ranged.outputs['Result'], 1.0 / gamma)
     output = nodes.new('ShaderNodeMapRange')
+    output.clamp = clamp
     links.new(curved, output.inputs['Value'])
-    output.inputs['To Min'].default_value, output.inputs['To Max'].default_value = effect.out_low, effect.out_high
-    return mix_value(build, value, output.outputs['Result'], effect.opacity)
+    output.inputs['To Min'].default_value, output.inputs['To Max'].default_value = out_low, out_high
+    return output.outputs['Result']
+
+
+def component_levels(build, color, effect):
+    split = build.nodes.new('ShaderNodeSeparateColor')
+    build.links.new(color, split.inputs['Color'])
+    join = build.nodes.new('ShaderNodeCombineColor')
+    for index in range(3):
+        levels = tuple(getattr(effect, field)[index] for field in COMPONENT_FIELDS)
+        result = split.outputs[index] if levels == (0.0, 1.0, 1.0, 0.0, 1.0) else leveled(build, split.outputs[index], levels, effect.clamp)
+        build.links.new(result, join.inputs[index])
+    return join.outputs['Color']
 
 
 def levels_color(build, color, effect):
     nodes, links = build.nodes, build.links
     ranged = nodes.new('ShaderNodeMapRange')
     ranged.data_type = 'FLOAT_VECTOR'
+    ranged.clamp = effect.clamp
     links.new(color, socket(ranged.inputs, 'Vector', 'VECTOR'))
     socket(ranged.inputs, 'From Min', 'VECTOR').default_value = (effect.in_low,) * 3
     socket(ranged.inputs, 'From Max', 'VECTOR').default_value = (max(effect.in_high, effect.in_low + 1e-3),) * 3
@@ -225,12 +247,13 @@ def levels_color(build, color, effect):
     curve.inputs['Gamma'].default_value = 1.0 / effect.gamma
     output = nodes.new('ShaderNodeMapRange')
     output.data_type = 'FLOAT_VECTOR'
+    output.clamp = effect.clamp
     links.new(curve.outputs['Color'], socket(output.inputs, 'Vector', 'VECTOR'))
     socket(output.inputs, 'From Min', 'VECTOR').default_value = (0.0,) * 3
     socket(output.inputs, 'From Max', 'VECTOR').default_value = (1.0,) * 3
     socket(output.inputs, 'To Min', 'VECTOR').default_value = (effect.out_low,) * 3
     socket(output.inputs, 'To Max', 'VECTOR').default_value = (effect.out_high,) * 3
-    return mix_color(build, color, socket(output.outputs, 'Vector', 'VECTOR'), effect.opacity)
+    return mix_color(build, color, component_levels(build, socket(output.outputs, 'Vector', 'VECTOR'), effect), effect.opacity)
 
 
 def combine_mask(build, value, other, blend, factor):

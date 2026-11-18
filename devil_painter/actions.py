@@ -4,7 +4,7 @@ import bpy
 import numpy
 from . import baking, bridge, brushes, compositing, exporting, library, meshmaps, painting, projects, sets, smart, strokes, tiles
 from .blending import linear_to_srgb
-from .effects import EFFECT_LABEL, copy_effect, find_effect, mask_effects
+from .effects import EFFECT_LABEL, copy_effect, find_effect, level_target, mask_effects
 from .masks import GENERATOR, GENERATOR_FIELDS
 from .meshmaps import MESH_MAP
 from .blending import BLEND_MODES, CHANNEL, NORMAL_DETAIL
@@ -265,7 +265,13 @@ def select_effect(context, obj, data, uid, effect_uid):
 
 def edit_effect(context, obj, data, field, value, commit):
     layer = active_layer(data)
-    setattr(find_effect(layer, data.active_effect), field, value)
+    effect = find_effect(layer, data.active_effect)
+    field, index = level_target(effect, field)
+    if index is not None:
+        values = list(getattr(effect, field))
+        values[index] = value
+        value = tuple(values)
+    setattr(effect, field, value)
     if commit:
         return refresh(context, obj, data, f'{layer.name} effect updated.')
     compositing.sync(data)
