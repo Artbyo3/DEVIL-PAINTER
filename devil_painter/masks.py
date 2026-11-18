@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from .nodes import mesh_signal
+from .nodes import math_node, mesh_signal
 
 GENERATOR_FIELDS = ('generator', 'gen_level', 'gen_contrast', 'gen_noise', 'gen_scale', 'gen_invert', 'gen_edges', 'gen_dirt', 'gen_top')
 BUILDER_SLIDERS = (('GEN_EDGES', 'Edges', 'gen_edges'), ('GEN_DIRT', 'Dirt', 'gen_dirt'), ('GEN_TOP', 'Top', 'gen_top'))
@@ -142,15 +142,23 @@ def generator_mask(nodes, links, layer, build, sample):
 def id_selection(build, effect, sample):
     if not build.live and 'id' not in build.maps:
         return None
-    distance = build.nodes.new('ShaderNodeVectorMath')
-    distance.operation = 'DISTANCE'
-    build.links.new(mesh_signal(build, 'id', None, sample), distance.inputs[0])
-    distance.inputs[1].default_value = tuple(effect.color)
-    ranged = build.nodes.new('ShaderNodeMapRange')
-    build.links.new(distance.outputs['Value'], ranged.inputs['Value'])
+    signal = mesh_signal(build, 'id', None, sample)
     tolerance = max(effect.amount, .01)
-    ranged.inputs['From Min'].default_value, ranged.inputs['From Max'].default_value = tolerance, tolerance * .5
-    return ranged.outputs['Result']
+    kept = None
+    for color in id_colors(effect):
+        distance = build.nodes.new('ShaderNodeVectorMath')
+        distance.operation = 'DISTANCE'
+        build.links.new(signal, distance.inputs[0])
+        distance.inputs[1].default_value = tuple(color)
+        ranged = build.nodes.new('ShaderNodeMapRange')
+        build.links.new(distance.outputs['Value'], ranged.inputs['Value'])
+        ranged.inputs['From Min'].default_value, ranged.inputs['From Max'].default_value = tolerance, tolerance * .5
+        kept = ranged.outputs['Result'] if kept is None else math_node(build.nodes, build.links, 'MAXIMUM', kept, ranged.outputs['Result'])
+    return kept
+
+
+def id_colors(effect):
+    return (effect.color, *(item.color for item in effect.id_colors))
 
 
 def write_generator(nodes, layer):

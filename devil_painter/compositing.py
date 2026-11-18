@@ -156,7 +156,8 @@ def slot_signature(slot):
 
 def effect_signature(effect):
     values = '/'.join(str(getattr(effect, field)) if field not in {'texture'} else (effect.texture.name if effect.texture else '') for field in EFFECT_FIELDS)
-    return f'{effect.uid}={values}={effect.image.name if effect.image else ""}'
+    extra = ','.join(f'{value:.4f}' for item in effect.id_colors for value in item.color)
+    return f'{effect.uid}={values}={effect.image.name if effect.image else ""}={extra}'
 
 
 def layer_signature(layer):

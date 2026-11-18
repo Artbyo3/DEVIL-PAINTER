@@ -38,3 +38,6 @@ def copy_effect(source, target):
     for field in EFFECT_FIELDS:
         setattr(target, field, getattr(source, field))
     target.image = source.image
+    target.id_colors.clear()
+    for item in source.id_colors:
+        target.id_colors.add().color = item.color
