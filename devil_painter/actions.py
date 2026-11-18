@@ -14,6 +14,7 @@ from .document import PROJECTIONS, PROJECTORS, SLOT_FIELDS, geometry_attribute, 
 KIND_NAMES = {'PAINT': 'Paint', 'FILL': 'Fill', 'FOLDER': 'Folder'}
 LAYER_FIELDS = ('kind', 'visible', 'opacity', 'projection', 'tiling', 'proj_offset', 'proj_rotation', 'proj_size', 'tile_match', 'material', 'folder_blend', 'geo_mask', 'link_set', 'link_uid') + GENERATOR_FIELDS
 ID_TOLERANCE = .15
+LAST_LAYER = 'A texture set keeps at least one layer. Add another layer before removing this one.'
 EFFECT_BLENDS = {'PAINT': 'MIX', 'FILL': 'MULTIPLY', 'COMPARE': 'MULTIPLY', 'ANCHOR': 'MULTIPLY', 'LEVELS': 'MIX', 'FILTER': 'MIX', 'ID_COLOR': 'MULTIPLY'}
 
 
@@ -194,9 +195,11 @@ def move_to_set(context, obj, project, index):
     source = project.sets[project.active_set]
     target = project.sets[index]
     layer = active_layer(source)
+    doomed = doomed_layers(source, [layer.uid])
+    if not keeps_a_layer(source, doomed):
+        return LAST_LAYER
     name = layer.name
     uid = transfer(obj, source, target, layer, '')
-    doomed = {layer.uid, *descendants(source.layers, layer.uid)}
     for position in range(len(source.layers) - 1, -1, -1):
         if source.layers[position].uid in doomed:
             remove_images(source, source.layers[position])
@@ -318,10 +321,19 @@ def group_layers(context, obj, data, uids):
     return refresh(context, obj, data, f'Grouped {len(uids)} layers into a folder.')
 
 
-def remove_layers(data, uids):
+def keeps_a_layer(data, doomed):
+    return any(layer.uid not in doomed for layer in data.layers)
+
+
+def doomed_layers(data, uids):
     doomed = set(uids)
     for uid in uids:
         doomed |= set(descendants(data.layers, uid))
+    return doomed
+
+
+def remove_layers(data, uids):
+    doomed = doomed_layers(data, uids)
     for position in range(len(data.layers) - 1, -1, -1):
         if data.layers[position].uid in doomed:
             remove_images(data, data.layers[position])
@@ -337,6 +349,8 @@ def set_layers_visible(context, obj, data, uids, visible):
 
 
 def delete_layers(context, obj, data, uids):
+    if not keeps_a_layer(data, doomed_layers(data, uids)):
+        return LAST_LAYER
     remove_layers(data, uids)
     return refresh(context, obj, data, f'Deleted {len(uids)} layers.')
 
@@ -605,6 +619,8 @@ def delete_layer(context, obj, data):
     layer = data.layers[index]
     name, parent = layer.name, layer.parent
     doomed = {layer.uid, *descendants(data.layers, layer.uid)}
+    if not keeps_a_layer(data, doomed):
+        return LAST_LAYER
     for position in range(len(data.layers) - 1, -1, -1):
         if data.layers[position].uid in doomed:
             remove_images(data, data.layers[position])
