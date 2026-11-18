@@ -494,7 +494,7 @@ def filter_color(build, color, effect):
 def filter_value(build, value, effect):
     item = FILTER[effect.filter]
     if item.sampling or item.color_only:
-        return value
+        return None
     nodes, links = build.nodes, build.links
     if item.group == 'Surface finish':
         result = math_node(nodes, links, 'MULTIPLY', value, inverted(build, math_node(nodes, links, 'MULTIPLY', surface_pattern(build, effect), effect.amount)))
@@ -510,7 +510,7 @@ def filter_value(build, value, effect):
                                                                   effect.amount * 2))
     else:
         result = gray(build, adjusted(build, as_color(build, value), effect))
-    return mix_value(build, value, result, effect.opacity)
+    return result
 
 
 def content_warp(effects):
