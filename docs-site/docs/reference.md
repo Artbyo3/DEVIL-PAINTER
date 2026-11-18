@@ -5,23 +5,31 @@
 | Action | Shortcut | Notes |
 | :--- | :--- | :--- |
 | Open or close Devil Painter | <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>P</kbd> | Works when a 3D Viewport is active |
-| Paint tool | <kbd>B</kbd> | Multi-channel stroke painting |
-| Erase tool | <kbd>E</kbd> | Erases color and mask coverage |
-| Fill tool | <kbd>G</kbd> | Flood-fills paint or mask canvas |
-| Adjust brush size | <kbd>F</kbd> | Native Blender radial size control |
-| Adjust brush opacity / strength | <kbd>Shift</kbd> + <kbd>F</kbd> | Native Blender radial strength control |
+| Paint tool | <kbd>B</kbd> | Customizable in **Project > Shortcuts** |
+| Erase tool | <kbd>E</kbd> | Customizable in **Project > Shortcuts** |
+| Fill tool | <kbd>G</kbd> | Customizable in **Project > Shortcuts** |
+| Smaller / larger brush | <kbd>[</kbd> / <kbd>]</kbd> | Customizable in **Project > Shortcuts** |
+| Adjust brush size / opacity | <kbd>F</kbd> / <kbd>Shift</kbd> + <kbd>F</kbd> | Native Blender radial size and strength controls |
 | Undo / Redo | <kbd>Ctrl</kbd> + <kbd>Z</kbd> / <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Z</kbd> | Keeps the Devil Painter workspace open |
+| Copy / paste layer(s) | <kbd>Ctrl</kbd> + <kbd>C</kbd> / <kbd>Ctrl</kbd> + <kbd>V</kbd> | While hovering a layer row |
+| Apply / undo point (**Path** tool) | <kbd>Enter</kbd> / <kbd>Backspace</kbd> | Paints the ribbon or filled shape, or removes the last point |
+| Cancel / close popover | <kbd>Esc</kbd> | Cancels shelf picking, text edits, or closes popovers |
+
+**Blur**, **Smear**, **Clone**, **Toggle the 2D view**, and **Show or hide the shelf** can also be bound under **Project > Shortcuts**.
 
 ## Dock Tools
 
 | Tool | Behavior |
 | :--- | :--- |
-| **Paint** | Paints base color and enabled brush channels into the stroke buffer, merging cleanly at stroke end |
-| **Erase** | Removes painted pixels on the active paint layer or mask |
-| **Fill** | Fills the active paint layer or mask canvas |
-| **Blur** | Softens painted detail directly on the active canvas |
-| **Smear** | Smudges existing pixels along the stroke |
-| **Clone** | Copies image detail onto the active canvas |
+| **Paint** | Paints base color and enabled brush channels through the stroke buffer, merging cleanly at stroke end |
+| **Erase** | Erases painted pixels and enabled brush channels on the active paint layer or mask |
+| **Fill** | Flood-fills the active paint layer or mask canvas across enabled brush channels |
+| **Blur** | Softens painted detail across enabled channels on the active canvas |
+| **Smear** | Smudges existing pixels along the stroke across enabled channels |
+| **Clone** | Copies image detail onto the active canvas across enabled channels |
+| **Polygon fill** | Click to fill or erase a **Triangle**, **Face**, **Mesh part**, **UV chunk**, or **Loop** |
+| **Path** | Place points on the model to paint a **Ribbon** curve or **Filled** shape |
+| **Undo** / **Redo** | Step backward or forward through Devil Painter history |
 
 ## Channels & Export Maps
 
@@ -34,31 +42,38 @@
 | **Height** | `Height` | Non-Color | Yes |
 | **Emission** | `Emission` | sRGB | No |
 | **Opacity** | `Opacity` | Non-Color | No |
+| **Ambient Occlusion** | `AmbientOcclusion` | Non-Color | No |
+| **Flow map** | `FlowMap` | Non-Color | No (export only) |
+| **User 1** – **User 4** | `User1` – `User4` | Non-Color | No (export only) |
+
+Built-in export templates are **Standard PBR**, **glTF**, **Unreal Engine**, **Unity HDRP**, **Unity URP**, **USD Preview Surface**, and **Linear EXR** (or copy any template to customize packed outputs). Supported formats are **PNG** (`8`/`16`-bit), **TGA** (`8`-bit), **TIFF** (`8`/`16`-bit), and **EXR** (`16`/`32`-bit). Filename tokens: `{mesh}`, `{set}`, `{output}`, `{udim}`, `{material}`, `{resolution}`.
 
 ## Blend Modes
 
 Each channel slot on a layer supports independent enable, opacity, source, and blend mode:
 
-- **Normal**
-- **Multiply**
-- **Screen**
-- **Overlay**
-- **Add**
+- **Normal**, **Darken**, **Multiply**, **Color burn**, **Lighten**, **Screen**, **Color dodge**, **Linear dodge (Add)**, **Overlay**, **Soft light**, **Linear light**, **Difference**, **Exclusion**, **Subtract**, **Divide**, **Hue**, **Saturation**, **Color**, **Value**, **Normal map detail**
+
+Folders also support **Passthrough** (in addition to layer blend modes except Normal map detail). Mask effects support **Multiply**, **Add**, **Subtract**, **Replace**, **Darken**, **Lighten**, and **Difference**.
 
 ## Procedural Patterns
 
-Fill layer channels set to **Pattern** support **UV** or **Tri-planar** projection with **Tiling**, two values/colors, **Scale**, **Detail**, and **Contrast**:
+Fill layer channels set to **Pattern** support **UV**, **Tri-planar**, **Planar**, **Spherical**, and **Cylindrical** projection with **Tiling**, two values/colors, **Scale**, **Detail**, and **Contrast**:
 
 - **Noise**, **Grunge**, **Cells**, **Cracks**, **Wood**, **Stripes**, **Bricks**, **Checker**
 
 ## Baked Mesh Maps & Mask Generators
 
-| Mesh Map | Driven Generator(s) | Notes |
+| Mesh Map | Driven Generator(s) / Effect | Notes |
 | :--- | :--- | :--- |
-| **Ambient occlusion** | **Dirt** | Self-occlusion shading |
-| **Curvature** | **Edge wear**, **Cavity** | Convex and concave surface detail |
+| **Ambient occlusion** | **Ambient occlusion**, **Dirt**, **Grime streaks**, **Mask builder** | Self-occlusion shading |
+| **Curvature** | **Curvature**, **Edge wear**, **Metal edge wear**, **Fiberglass edge wear**, **Cavity**, **Mask builder** | Convex and concave surface detail |
 | **Thickness** | **Thickness** | Inverted internal occlusion |
-| **Position** | **Ground gradient** | Normalized object bounding-box coordinates |
-| **World normal** | — | World-space surface normals |
-| **ID** | — | Distinct color per UV island |
-| **Normal** | — | Tangent-space normal baked from a chosen high-poly mesh |
+| **Position** | **Ground gradient**, **3D gradient X**, **3D gradient Y**, **3D gradient Z**, **3D spherical gradient** | Normalized object bounding-box coordinates |
+| **World normal** | **Top surfaces**, **Bottom surfaces**, **Side surfaces**, **Mask builder** | World-space surface normals |
+| **ID** | **ID color** mask effect | Colored by UV islands, Materials, Objects, or Vertex colors |
+| **Normal** | — | Tangent-space normal from high-poly, or rounded edges from the mesh itself |
+| **Height** | **Height** | Height difference baked from a high-poly mesh |
+| **UV border distance** | **UV border distance** | Distance from UV island seams |
+
+**Noise** and **Scratches** generators work procedurally without baked maps.

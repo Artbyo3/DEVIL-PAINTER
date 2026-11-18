@@ -1,6 +1,6 @@
 # Quickstart: Start > Paint > Export
 
-This walkthrough takes a mesh from an empty scene to a multi-layer painted material and exported PNG texture maps.
+This walkthrough takes a mesh from an empty scene to a multi-layer painted material and exported texture maps.
 
 ## Step 1: Open Devil Painter
 
@@ -9,28 +9,29 @@ This walkthrough takes a mesh from an empty scene to a multi-layer painted mater
 
 ## Step 2: Start Painting
 
-1. On the start card, choose a texture resolution: **1K**, **2K**, or **4K**.
-2. Click **Start painting**.
+1. On the **New Devil Painter project** start card, pick a **Template** (such as **PBR Metal Rough**, **Unreal Engine**, or **Hand-painted Unlit**), **Normal map** format (**OpenGL** / **DirectX**) and tangent mode, and a **1K**, **2K**, or **4K** resolution per material-slot texture set.
+2. If your mesh has no UVs, choose **Smart UV** or **Hard surface** unwrapping. If UDIM tiles are detected, toggle **Use UDIM tiles from the UV layout** as needed.
+3. Click **Start painting**.
 
-Devil Painter automatically unwraps meshes that lack UVs, assigns a live preview material, switches the viewport to **Material Preview**, and enters **Texture Paint** mode with an initial Paint layer selected.
+Devil Painter creates one texture set per material slot with an initial Paint layer, assigns live preview materials, switches the viewport to **Material Preview**, and enters **Texture Paint** mode.
 
 ## Step 3: Paint on the Model
 
-1. Choose **Paint** (<kbd>B</kbd>) or **Fill** (<kbd>G</kbd>) from the left tool dock.
-2. Pick a brush color in the tool strip, adjust **Size** (<kbd>F</kbd>) and **Opacity** (<kbd>Shift</kbd> + <kbd>F</kbd>), and paint directly onto the mesh in the 3D Viewport.
-3. Open **Brush** in the tool strip to configure flow, spacing, hardness, smoothing, jitter, pen pressure, and which channels each stroke paints simultaneously (such as roughness, metallic, or height alongside base color).
+1. Choose **Paint** (<kbd>B</kbd>), **Fill** (<kbd>G</kbd>), **Erase** (<kbd>E</kbd>), **Blur**, **Smear**, **Clone**, **Polygon fill**, or **Path** from the left tool dock.
+2. Pick a brush color in the tool strip, adjust **Size** (<kbd>F</kbd> or <kbd>[</kbd> / <kbd>]</kbd>) and **Opacity** (<kbd>Shift</kbd> + <kbd>F</kbd>), and paint directly onto the mesh in the 3D Viewport.
+3. Open **Brush** in the tool strip to configure flow, spacing, hardness, **Lazy mouse**, jitter, angle, stroke method, dynamics, pen pressure, and which channels each stroke paints and erases simultaneously. Use **Symmetry** for mirror or radial strokes, **Stencil** to paint through or project images/text/SVGs, and **Quick mask** for temporary masks.
 
 ## Step 4: Add Fill Layers, Materials, and Masks
 
-1. Open the bottom **Shelf** to add a **Material**, **Smart** material, **Pattern**, or **Texture** directly as a fill layer.
-2. Or use the **Layers** panel header buttons to add a **Paint** layer, **Fill** layer, or **Folder**.
-3. In **Properties**, add a **White mask** or **Black mask**, click the mask thumbnail in **Layers** to select it, and paint with **Paint** or **Erase** (<kbd>E</kbd>) to reveal or hide areas.
+1. Open the bottom **Shelf** to click or drag a **Material**, **Smart** material, **Texture**, **Pattern**, **Mask**, **Generator**, or **Filter** onto the layer stack.
+2. Or use the **Layers** panel header buttons to add a **Folder**, **Fill** layer, or **Paint** layer.
+3. In **Properties**, add a **White mask** or **Black mask**, a **Geometry mask**, or **Mask** and **Content** effects (**Paint**, **Fill**, **Levels**, **Filter**, **Compare mask**, **Anchor**, **ID color**). Click a mask thumbnail in **Layers** to select and paint it.
 
 ## Step 5: Bake Mesh Maps & Use Generators (Optional)
 
 1. Click **Bake maps** in the top workspace bar.
-2. Select the maps you want (**Ambient occlusion**, **Curvature**, **Thickness**, **Position**, **World normal**, **ID**, or **Normal** from a high-poly source) and click **Bake**.
-3. On any layer or folder mask, choose a **Generator** (**Edge wear**, **Cavity**, **Dirt**, **Ground gradient**, or **Thickness**) or apply a preset from the **Masks** shelf tab.
+2. Select from the nine mesh maps (**Ambient occlusion**, **Curvature**, **Thickness**, **Position**, **World normal**, **ID**, **Normal**, **Height** from a high-poly mesh, and **UV border distance**), set high-poly/cage options if needed, and click **Bake**.
+3. On any layer or folder, choose one of the **22** **Generators** (such as **Edge wear**, **Cavity**, **Dirt**, **Ground gradient**, **Thickness**, or **Mask builder**) or apply a preset from the **Masks** shelf tab.
 
 ## Step 6: Inspect in 2D View
 
@@ -39,9 +40,9 @@ Click **2D view** in the top workspace bar to dock Blender's Image Editor in Pai
 ## Step 7: Export Textures
 
 1. Click **Export textures** in the top workspace bar.
-2. Type an output path or click **Browse** to pick a folder.
-3. Click **Export** to write one padded PNG per enabled channel (`BaseColor`, `Roughness`, `Metallic`, `Normal`, `Height`, `Emission`, `Opacity`).
+2. Pick an **Export template** (**Standard PBR**, **glTF**, **Unreal Engine**, **Unity HDRP**, **Unity URP**, **USD Preview Surface**, **Linear EXR**, or a custom copy), choose which texture sets to include, and adjust **Depth**, **Size**, **Padding**, and filename **Pattern** tokens.
+3. Type an output folder or click **Browse**, then click **Export** (or **Export & send** to open the files in another app).
 
 ## Step 8: Save Your Work
 
-Save your `.blend` file to pack all painted layer images and masks directly into the Blender file, then click the close icon (`×`) or press <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>P</kbd> to restore Blender's standard UI.
+Save your `.blend` file to pack all painted layer images, channel canvases, baked maps, and masks directly into the Blender file (or enable **Autosave** under **Project** for background packed backups). Click the close icon (`×`) or press <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>P</kbd> to restore Blender's standard UI.
