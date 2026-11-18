@@ -8,6 +8,33 @@ from .document import set_channels
 BAKE_MARGIN = 16
 BAKE_SAMPLES = 1
 DUMMY_SIZE = 8
+GPU_BACKENDS = ('OPTIX', 'CUDA', 'HIP', 'ONEAPI', 'METAL')
+
+
+def usable_gpu(preferences):
+    return any(device.use and device.type == preferences.compute_device_type for device in preferences.devices)
+
+
+@contextmanager
+def gpu_device(scene):
+    preferences = bpy.context.preferences.addons['cycles'].preferences
+    saved_type, saved_device = preferences.compute_device_type, scene.cycles.device
+    try:
+        for backend in GPU_BACKENDS if saved_type == 'NONE' else ():
+            try:
+                preferences.compute_device_type = backend
+            except TypeError:
+                continue
+            preferences.refresh_devices()
+            if usable_gpu(preferences):
+                break
+        else:
+            preferences.compute_device_type = saved_type
+        if preferences.compute_device_type != 'NONE' and usable_gpu(preferences):
+            scene.cycles.device = 'GPU'
+        yield
+    finally:
+        preferences.compute_device_type, scene.cycles.device = saved_type, saved_device
 
 
 @contextmanager
@@ -30,7 +57,8 @@ def bake_scene(context, obj, samples=BAKE_SAMPLES, extra=()):
         context.view_layer.objects.active = obj
         scene.render.engine = 'CYCLES'
         scene.cycles.samples = samples
-        yield
+        with gpu_device(scene):
+            yield
     finally:
         scene.render.engine, scene.cycles.samples = engine, saved_samples
         for item in (obj, *extra):
