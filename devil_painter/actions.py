@@ -7,7 +7,7 @@ from .blending import linear_to_srgb
 from .effects import EFFECT_LABEL, copy_effect, find_effect, level_target, mask_effects
 from .masks import GENERATOR, GENERATOR_FIELDS
 from .meshmaps import MESH_MAP
-from .blending import BLEND_MODES, CHANNEL, NORMAL_DETAIL
+from .blending import BLEND_MODES, CHANNEL, FOLDER_BLENDS, NORMAL_DETAIL
 from .procedural import PATTERN
 from .document import PROJECTIONS, PROJECTORS, SLOT_FIELDS, geometry_attribute, active_layer, add_set_channels, add_slots, children, descendants, fill_slots, find_layer, layer_index, set_slot_value
 
@@ -15,6 +15,7 @@ KIND_NAMES = {'PAINT': 'Paint', 'FILL': 'Fill', 'FOLDER': 'Folder'}
 LAYER_FIELDS = ('kind', 'visible', 'opacity', 'projection', 'tiling', 'proj_offset', 'proj_rotation', 'proj_size', 'tile_match', 'material', 'folder_blend', 'geo_mask', 'link_set', 'link_uid') + GENERATOR_FIELDS
 ID_TOLERANCE = .15
 LAST_LAYER = 'A texture set keeps at least one layer. Add another layer before removing this one.'
+SAME_AS_FOLDER = 'FOLDER'
 EFFECT_BLENDS = {'PAINT': 'MIX', 'FILL': 'MULTIPLY', 'COMPARE': 'MULTIPLY', 'ANCHOR': 'MULTIPLY', 'LEVELS': 'MIX', 'FILTER': 'MIX', 'ID_COLOR': 'MULTIPLY'}
 
 
@@ -178,10 +179,17 @@ def transfer(obj, source, target, layer, parent):
         copy.image = carry(obj, source, target, layer.image, base)
     if layer.mask is not None:
         copy.mask = carry(obj, source, target, layer.mask, base + ' mask')
+    copy_channel_blends(layer, copy)
     copy_effects(obj, source, target, layer.effects, copy)
     for child in children(source.layers, layer.uid):
         transfer(obj, source, target, child, uid)
     return uid
+
+
+def copy_channel_blends(source, target):
+    for item in source.channel_blends:
+        copy = target.channel_blends.add()
+        copy.name, copy.blend = item.name, item.blend
 
 
 def copy_effects(obj, source, target, effects, copy):
@@ -471,6 +479,18 @@ def edit_geometry(context, obj, data, operation):
     return refresh(context, obj, data, f'Geometry mask {"cleared" if operation == "CLEAR" else "inverted"}.')
 
 
+def set_channel_blend(context, obj, data, key, mode):
+    layer = active_layer(data)
+    index = layer.channel_blends.find(key)
+    if mode == SAME_AS_FOLDER:
+        if index >= 0:
+            layer.channel_blends.remove(index)
+    else:
+        item = layer.channel_blends[index] if index >= 0 else layer.channel_blends.add()
+        item.name, item.blend = key, mode
+    return refresh(context, obj, data, f'{CHANNEL[key].label} of {layer.name} now blends with {"the folder" if mode == SAME_AS_FOLDER else dict(FOLDER_BLENDS)[mode]}.')
+
+
 def set_layer_field(context, obj, data, field, value):
     layer = active_layer(data)
     setattr(layer, field, value)
@@ -689,6 +709,11 @@ def toggle_visible(context, obj, data, uid):
     return refresh(context, obj, data, f'{layer.name} {"shown" if layer.visible else "hidden"}.')
 
 
+def toggle_isolate(context, obj, data, uid):
+    data.isolate = '' if data.isolate == uid else uid
+    return refresh(context, obj, data, f'Showing only {find_layer(data, uid).name}.' if data.isolate else 'Showing every layer.')
+
+
 def set_blend(context, obj, data, key, mode):
     layer = active_layer(data)
     layer.slots[key].blend = mode
@@ -705,6 +730,7 @@ def copy_layer(obj, data, source, parent, position):
     data.serial += 1
     values = {key: getattr(source, key) for key in LAYER_FIELDS}
     slots = [(slot.name, {key: getattr(slot, key) for key in SLOT_FIELDS + ('image',)}) for slot in source.slots]
+    blends = [(item.name, item.blend) for item in source.channel_blends]
     images = {key: getattr(source, key) for key in ('image', 'mask')}
     name, uid = source.name, source.uid
     layer = data.layers.add()
@@ -721,6 +747,9 @@ def copy_layer(obj, data, source, parent, position):
     for key, image in images.items():
         if image is not None:
             setattr(layer, key, tiles.copy(data, image, f'DP {obj.name} {data.name} {layer.uid}' + (' mask' if key == 'mask' else '')))
+    for key, blend in blends:
+        item = layer.channel_blends.add()
+        item.name, item.blend = key, blend
     copy_effects(obj, data, data, list(source.effects), layer)
     new_uid = layer.uid
     if position is not None:
@@ -811,12 +840,14 @@ def commit_value(context, obj, data, label):
 
 def set_solo(context, obj, data, key):
     data.solo = key
+    if key.startswith('mask:'):
+        return refresh(context, obj, data, f'Viewing the mask of {find_layer(data, key.removeprefix("mask:")).name}.')
     if key.startswith('map:'):
         return refresh(context, obj, data, f'Viewing the {MESH_MAP[key.removeprefix("map:")].label.lower()} map.')
     return refresh(context, obj, data, f'Viewing {CHANNEL[key].label} only.' if key else 'Viewing the full material.')
 
 
-def pick_id_color(context, obj, data, effect_uid, face, location):
+def pick_id_color(context, obj, data, effect_uid, face, location, add):
     item = data.maps.get('id')
     if item is None or item.image is None:
         return 'Bake the ID map first.'
@@ -829,8 +860,18 @@ def pick_id_color(context, obj, data, effect_uid, face, location):
     start = (row * width + column) * 4
     color = tuple(image.pixels[start:start + 3])
     layer = active_layer(data)
-    find_effect(layer, effect_uid).color = color
+    effect = find_effect(layer, effect_uid)
+    if add:
+        effect.id_colors.add().color = color
+        return refresh(context, obj, data, f'{layer.name} also keeps the picked ID color.')
+    effect.color = color
     return refresh(context, obj, data, f'{layer.name} keeps the picked ID color.')
+
+
+def remove_id_color(context, obj, data, index):
+    layer = active_layer(data)
+    find_effect(layer, data.active_effect).id_colors.remove(index)
+    return refresh(context, obj, data, f'{layer.name} no longer keeps that ID color.')
 
 
 def paint_bake_map(context, obj, data, kind):

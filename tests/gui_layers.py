@@ -15,11 +15,18 @@ sys.path.insert(0, str(ROOT))
 import devil_painter
 from devil_painter import editor, library
 from devil_painter.blending import BLEND_MODES, CHANNEL, FOLDER_BLENDS, srgb_to_linear
+from devil_painter.effects import MASK_BLENDS
 from devil_painter.document import active_layer, find_layer, geometry_attribute
 from tools.workspace import prepare_scratch
 from tests.gui_harness import settle, until
 
 TIMEOUT = 600
+NEW_BLENDS = {'DISABLE': lambda a, b: a, 'REPLACE': lambda a, b: b, 'INVERSE_DIVIDE': lambda a, b: b / a, 'INVERSE_SUBTRACT': lambda a, b: b - a,
+              'SIGNED_ADD': lambda a, b: a + 2 * b - 1, 'LINEAR_BURN': lambda a, b: a + b - 1,
+              'HARD_LIGHT': lambda a, b: 2 * a * b if b < .5 else 1 - 2 * (1 - a) * (1 - b),
+              'VIVID_LIGHT': lambda a, b: 1 - (1 - a) / (2 * b) if b < .5 else a / (2 - 2 * b),
+              'PIN_LIGHT': lambda a, b: min(a, 2 * b) if b < .5 else max(a, 2 * b - 1)}
+RAMP_SIZE = 64
 STARTED = time.time()
 
 
@@ -126,6 +133,36 @@ def write_png(path, color):
     image.file_format = 'PNG'
     image.save()
     bpy.data.images.remove(image)
+
+
+def write_ramp(path):
+    image = bpy.data.images.new(path.stem, RAMP_SIZE, RAMP_SIZE, alpha=False)
+    ramp = (numpy.arange(RAMP_SIZE, dtype=numpy.float32) + .5) / RAMP_SIZE
+    values = numpy.ones((RAMP_SIZE, RAMP_SIZE, 4), dtype=numpy.float32)
+    values[..., :3] = ramp[None, :, None]
+    image.pixels.foreach_set(values.ravel())
+    image.filepath_raw = str(path)
+    image.file_format = 'PNG'
+    image.save()
+    bpy.data.images.remove(image)
+
+
+def uv_interior(mesh, slot, width, margin):
+    uv = mesh.uv_layers.active.data
+    centers = (numpy.arange(width) + .5) / width
+    x, y = numpy.meshgrid(centers, centers)
+    inside = numpy.zeros((width, width), dtype=bool)
+    edge = margin / width
+    for triangle in (item for item in mesh.loop_triangles if item.material_index == slot):
+        corners = numpy.array([tuple(uv[loop].uv) for loop in triangle.loops])
+        signs = []
+        for index in range(3):
+            a, b = corners[index], corners[(index + 1) % 3]
+            length = max(numpy.hypot(*(b - a)), 1e-9)
+            signs.append(((b[0] - a[0]) * (y - a[1]) - (b[1] - a[1]) * (x - a[0])) / length)
+        signs = numpy.array(signs)
+        inside |= numpy.all(signs > edge, axis=0) | numpy.all(signs < -edge, axis=0)
+    return inside.ravel()
 
 
 def nodes(data):
@@ -303,6 +340,28 @@ def journey():
     yield from settle()
     check(find_layer(body, folder_uid).folder_blend == 'MULTIPLY' and nodes(body)[f'{folder_uid}.base_color'].blend_type == 'MULTIPLY',
           'an isolated folder merges its children first, then multiplies onto the stack')
+    check(control('FOLDER_CHBLEND.roughness').text == 'Same as folder', 'each folder channel starts on Same as folder')
+    yield from reveal(window, region, 'FOLDER_CHBLEND.roughness')
+    yield from menu(window, region, 'FOLDER_CHBLEND.roughness', 'SET_FOLDERCH.roughness.SCREEN')
+    check(nodes(body)[f'{folder_uid}.roughness'].blend_type == 'SCREEN' and nodes(body)[f'{folder_uid}.base_color'].blend_type == 'MULTIPLY'
+          and control('FOLDER_CHBLEND.roughness').text == 'Screen', 'a folder can screen its roughness while its base color still multiplies')
+    yield from context_menu(window, region, folder_uid, 'EXPORT_LAYER')
+    folder_stem = bpy.path.clean_name(find_layer(body, folder_uid).name)
+    rough = png(export_dir / f'{folder_stem}_{CHANNEL["roughness"].suffix}.png')
+    got = float(numpy.median(rough[rough[:, 3] > .5, 0]))
+    inner = find_layer(body, fill_uid).slots['roughness'].value
+    wanted = 1 - (1 - CHANNEL['roughness'].default[0]) * (1 - inner)
+    check(abs(got - wanted) < .01, f'the exported folder roughness is the Screen of its child {inner:.3f} over the default ({got:.3f}, expected {wanted:.3f})')
+    yield from select_row(window, region, folder_uid)
+    yield from reveal(window, region, 'FOLDER_CHBLEND.base_color')
+    yield from menu(window, region, 'FOLDER_CHBLEND.base_color', 'SET_FOLDERCH.base_color.PASSTHROUGH')
+    check(nodes(body)[f'{folder_uid}.base_color'].blend_type == 'MIX' and nodes(body)[f'{folder_uid}.roughness'].blend_type == 'SCREEN',
+          'one channel of a folder can pass through while another merges')
+    for key in ('roughness', 'base_color'):
+        yield from reveal(window, region, 'FOLDER_CHBLEND.' + key)
+        yield from menu(window, region, 'FOLDER_CHBLEND.' + key, f'SET_FOLDERCH.{key}.FOLDER')
+    check(len(find_layer(body, folder_uid).channel_blends) == 0 and nodes(body)[f'{folder_uid}.roughness'].blend_type == 'MULTIPLY',
+          'Same as folder drops the channel override')
     yield from drag_row(window, region, 'ROW_' + paint_uid, 'ROW_' + folder_uid, .9,
                         (('DROP_LINE', 'dragging a layer near the top edge of a row shows the insertion line'),))
     order = [layer.uid for layer in body.layers]
@@ -324,12 +383,18 @@ def journey():
     yield from slide(window, region, 'FX_scale', .3)
     check(abs(layer.effects[0].scale - 15.0) < 1.5, 'the fill effect scale slider edits the pattern scale')
     yield from reveal(window, region, 'FX_BLEND')
-    yield from menu(window, region, 'FX_BLEND', 'SET_FXBLEND.SUBTRACT')
+    click(window, region, 'FX_BLEND')
+    yield from settle()
+    check(len(keys('SET_FXBLEND.')) == len(MASK_BLENDS) == 19,
+          f'mask effects offer the full layer blend list ({len(keys("SET_FXBLEND."))} modes)')
+    click(window, region, 'SET_FXBLEND.SUBTRACT')
+    yield from settle()
     check(layer.effects[0].blend == 'SUBTRACT', 'mask effects pick how they combine with the mask below')
 
     textures = scratch / 'textures'
     textures.mkdir(exist_ok=True)
     write_png(textures / 'lone.png', (.3, .3, .3, 1.0))
+    write_ramp(textures / 'ramp.png')
     click(window, region, 'SHELF_TAB.TEXTURES')
     yield from settle()
     click(window, region, 'TEXTURE_DIR')
@@ -367,6 +432,12 @@ def journey():
     yield from settle()
     threshold = layer.effects[-1].uid
     check(any(node.bl_idname == 'ShaderNodeMath' and node.operation == 'GREATER_THAN' for node in nodes(body)), 'the threshold filter cuts the mask')
+    check(has('FX_BLEND') and control('FX_BLEND').text == 'Replace', 'a mask filter has a blend dropdown and starts on Replace')
+    yield from reveal(window, region, 'FX_FILTER')
+    yield from menu(window, region, 'FX_FILTER', 'SET_FXFILTER.BLUR')
+    check(not has('FX_BLEND'), 'a blur filter resamples the mask and has no blend dropdown')
+    yield from reveal(window, region, 'FX_FILTER')
+    yield from menu(window, region, 'FX_FILTER', 'SET_FXFILTER.THRESHOLD')
     yield from reveal(window, region, f'FXEYE_{fill_uid}.{threshold}', 'LAYERS')
     click(window, region, f'FXEYE_{fill_uid}.{threshold}')
     yield from settle()
@@ -449,6 +520,47 @@ def journey():
     yield from context_menu(window, region, compare_uid, 'EXPORT_MASK')
     compared = png(export_dir / f'{bpy.path.clean_name(compare_layer.name)}_Mask.png')
     check(numpy.abs(compared[:, 0] - mask[:, 0]).mean() < .02, 'a compare mask reuses the mask of the other layer pixel for pixel')
+    yield from select_row(window, region, paint_uid)
+    yield from add_effect(window, region, 'MASK', 'FILL')
+    yield from reveal(window, region, 'FX_SOURCE')
+    yield from menu(window, region, 'FX_SOURCE', 'SET_FXSOURCE.VALUE')
+    yield from slide(window, region, 'FX_value', .5)
+    yield from reveal(window, region, 'FX_BLEND')
+    yield from menu(window, region, 'FX_BLEND', 'SET_FXBLEND.SCREEN')
+    screen = find_layer(body, paint_uid).effects[-1]
+    check(screen.blend == 'SCREEN' and control('FX_BLEND').text == 'Screen', 'a mask fill effect can blend with Screen')
+    yield from context_menu(window, region, paint_uid, 'EXPORT_MASK')
+    screened = png(mask_file)
+    covered = screened[:, 0] > screen.value / 2
+    error = numpy.abs(screened[covered, 0] - (1 - (1 - mask[covered, 0]) * (1 - screen.value)))
+    check(covered.mean() > .2 and numpy.percentile(error, 99) < .02,
+          f'on the baked UV area the exported mask is the Screen of the mask below and the fill value {screen.value:.2f} '
+          f'(99th percentile error {numpy.percentile(error, 99):.4f} over {int(covered.sum())} pixels)')
+    yield from reveal(window, region, f'FX_{paint_uid}.{screen.uid}', 'LAYERS')
+    click(window, region, f'FX_{paint_uid}.{screen.uid}')
+    yield from settle()
+    yield from reveal(window, region, 'FX_DELETE')
+    click(window, region, 'FX_DELETE')
+    yield from settle()
+    yield from select_row(window, region, paint_uid)
+    yield from add_effect(window, region, 'MASK', 'LEVELS')
+    squared = find_layer(body, paint_uid).effects[-1]
+    check(control('FX_BLEND').text == 'Replace', 'a mask levels effect has a blend dropdown and starts on Replace')
+    yield from reveal(window, region, 'FX_BLEND')
+    yield from menu(window, region, 'FX_BLEND', 'SET_FXBLEND.MULTIPLY')
+    check(squared.blend == 'MULTIPLY', 'a mask levels effect can blend with Multiply')
+    yield from context_menu(window, region, paint_uid, 'EXPORT_MASK')
+    multiplied = png(mask_file)
+    covered = multiplied[:, 0] > .05
+    error = numpy.abs(multiplied[covered, 0] - mask[covered, 0] ** 2)
+    check(covered.mean() > .005 and numpy.percentile(error, 99) < .02,
+          f'neutral levels in Multiply squares the mask below (99th percentile error {numpy.percentile(error, 99):.4f} over {int(covered.sum())} pixels)')
+    yield from reveal(window, region, f'FX_{paint_uid}.{squared.uid}', 'LAYERS')
+    click(window, region, f'FX_{paint_uid}.{squared.uid}')
+    yield from settle()
+    yield from reveal(window, region, 'FX_DELETE')
+    click(window, region, 'FX_DELETE')
+    yield from settle()
     yield from select_row(window, region, compare_uid)
     yield from add_effect(window, region, 'MASK', 'ANCHOR')
     yield from reveal(window, region, 'FX_OTHER')
@@ -597,6 +709,71 @@ def journey():
     yield from context_menu(window, region, paint_uid, 'FLATTEN')
     check(find_layer(body, paint_uid) is None and find_layer(body, compare_uid) is None and active_layer(body).kind == 'PAINT',
           'Flatten merges a multi-selection into one paint layer')
+
+    click(window, region, 'ADD_FILL')
+    yield from settle()
+    blend_layer = active_layer(body)
+    stem = bpy.path.clean_name(blend_layer.name)
+    below = CHANNEL['base_color'].default[0]
+    for color, modes in (('#959595', tuple(NEW_BLENDS)), ('#DADADA', ('HARD_LIGHT', 'VIVID_LIGHT', 'PIN_LIGHT'))):
+        yield from set_hex(window, region, 'SWATCH.base_color', color)
+        above = blend_layer.slots['base_color'].color[0]
+        for mode in modes:
+            formula = NEW_BLENDS[mode]
+            yield from reveal(window, region, 'BLEND.base_color')
+            yield from menu(window, region, 'BLEND.base_color', f'SET_BLEND.base_color.{mode}')
+            check(blend_layer.slots['base_color'].blend == mode and control('BLEND.base_color').text == dict(BLEND_MODES)[mode],
+                  f'the base color blend dropdown sets {dict(BLEND_MODES)[mode]}')
+            yield from context_menu(window, region, blend_layer.uid, 'EXPORT_LAYER')
+            exported = png(export_dir / f'{stem}_{CHANNEL["base_color"].suffix}.png')
+            got = float(srgb_to_linear(numpy.median(exported[exported[:, 3] > .5, 0])))
+            wanted = min(max(formula(below, above), 0.0), 1.0)
+            check(abs(got - wanted) < .012, f'{dict(BLEND_MODES)[mode]} of {above:.3f} over {below:.3f} exports {got:.3f} (expected {wanted:.3f})')
+    yield from reveal(window, region, 'USE.normal')
+    click(window, region, 'USE.normal')
+    yield from settle()
+    for mode in ('NORMAL_COMBINE', 'NORMAL_INVERSE_DETAIL'):
+        yield from reveal(window, region, 'BLEND.normal')
+        yield from menu(window, region, 'BLEND.normal', f'SET_BLEND.normal.{mode}')
+        yield from context_menu(window, region, blend_layer.uid, 'EXPORT_LAYER')
+        normal = png(export_dir / f'{stem}_{CHANNEL["normal"].suffix}.png')
+        flat = numpy.median(normal[normal[:, 3] > .5, :3], axis=0)
+        check(blend_layer.slots['normal'].blend == mode and numpy.abs(flat - (.5, .5, 1.0)).max() < .01,
+              f'{dict(BLEND_MODES)[mode]} of two flat normals exports a flat normal {tuple(round(float(value), 3) for value in flat)}')
+    ramp_uid = body.active_uid
+    yield from add_effect(window, region, 'MASK', 'FILL')
+    yield from reveal(window, region, 'FX_SOURCE')
+    yield from menu(window, region, 'FX_SOURCE', 'FX_PICK_TEXTURE')
+    ramp_item = next(key for key in keys('ITEM.') if control(key).label.startswith('ramp'))
+    click(window, region, ramp_item)
+    yield from settle()
+    ramp = find_layer(body, ramp_uid).effects[-1]
+    check(ramp.source == 'IMAGE' and ramp.texture.name.startswith('ramp') and has('FX_PROJECTION') and control('FX_PROJECTION').text == 'Automatic',
+          'a texture fill effect shows its projection, starting on Automatic')
+    yield from slide(window, region, 'FX_tiling', .25)
+    yield from slide(window, region, 'FX_offset_u', .25)
+    mapping = nodes(body)[ramp.uid + '.mapping']
+    check(abs(ramp.tiling - 2.0) < .15 and abs(ramp.offset_u - .25) < .05 and tuple(mapping.inputs['Scale'].default_value)[0] == ramp.tiling
+          and abs(mapping.inputs['Location'].default_value[0] - ramp.offset_u) < 1e-6,
+          f'the tiling and offset sliders drive the fill effect mapping (tiling {ramp.tiling:.2f}, offset {ramp.offset_u:.2f})')
+    yield from context_menu(window, region, ramp_uid, 'EXPORT_MASK')
+    tiled = png(export_dir / f'{bpy.path.clean_name(find_layer(body, ramp_uid).name)}_Mask.png')
+    width = int(round(len(tiled) ** .5))
+    u = (numpy.arange(width) + .5) / width
+    expected = numpy.broadcast_to(numpy.mod(u * ramp.tiling + ramp.offset_u, 1.0)[None, :], (width, width)).ravel()
+    away = (expected > .05) & (expected < .95) & uv_interior(cube.data, body.slot, width, 2.0)
+    error = numpy.abs(tiled[away, 0] - expected[away])
+    check(away.mean() > .15 and numpy.percentile(error, 99) < .03,
+          f'the exported mask is the ramp texture at frac({ramp.tiling:.2f} u + {ramp.offset_u:.2f}) '
+          f'(99th percentile error {numpy.percentile(error, 99):.4f} over {int(away.sum())} pixels)')
+    (textures / 'ramp.png').unlink()
+    yield from reveal(window, region, f'FX_{ramp_uid}.{ramp.uid}', 'LAYERS')
+    click(window, region, f'FX_{ramp_uid}.{ramp.uid}')
+    yield from settle()
+    yield from reveal(window, region, 'FX_PROJECTION')
+    yield from menu(window, region, 'FX_PROJECTION', 'SET_FXPROJECTION.TRIPLANAR')
+    check(ramp.projection == 'TRIPLANAR' and any(node.bl_idname == 'ShaderNodeTexImage' and node.image == ramp.texture and node.projection == 'BOX'
+                                                 for node in nodes(body)), 'Tri-planar projects the fill texture from three sides')
 
     click(window, region, 'ADD_FILL')
     yield from settle()
