@@ -1,6 +1,6 @@
 import bpy
 from .blending import BLEND_MODES, CHANNEL, CHANNELS, FOLDER_BLENDS
-from .effects import EFFECT_KINDS, MASK_BLENDS
+from .effects import EFFECT_KINDS, FILL_PROJECTIONS, MASK_BLENDS
 from .filters import FILTERS
 from .masks import GENERATORS
 from .procedural import PATTERNS
@@ -90,6 +90,10 @@ class DEVIL_PAINTER_PG_effect(bpy.types.PropertyGroup):
     color_b: bpy.props.FloatVectorProperty(size=3, default=(0.0, 0.0, 0.0), min=0.0, max=1.0)
     other: bpy.props.StringProperty()
     channel: bpy.props.StringProperty(default='ALL')
+    projection: bpy.props.EnumProperty(items=[(key, label, '') for key, label in FILL_PROJECTIONS])
+    tiling: bpy.props.FloatProperty(default=1.0, min=0.1, max=32.0)
+    offset_u: bpy.props.FloatProperty(default=0.0, min=0.0, max=1.0)
+    offset_v: bpy.props.FloatProperty(default=0.0, min=0.0, max=1.0)
 
 
 class DEVIL_PAINTER_PG_layer(bpy.types.PropertyGroup):

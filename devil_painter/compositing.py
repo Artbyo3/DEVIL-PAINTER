@@ -250,18 +250,40 @@ def fill_effect_value(build, effect):
     if effect.source == 'IMAGE' and effect.texture is not None:
         node = build.nodes.new('ShaderNodeTexImage')
         node.image = effect.texture
-        build.links.new(build.sampler.uv(), node.inputs['Vector'])
+        if fill_projection(effect) == 'TRIPLANAR':
+            node.projection = 'BOX'
+            node.projection_blend = TRIPLANAR_BLEND
+        build.links.new(fill_vector(build, effect), node.inputs['Vector'])
         return gray(build, node.outputs['Color'])
     if effect.source == 'PATTERN':
-        coordinates = build.nodes.new('ShaderNodeTexCoord')
         texture, factor = pattern_node(build.nodes, effect.pattern, effect.uid + '.texture', (0, 0))
-        build.links.new(coordinates.outputs['Object'], texture.inputs['Vector'])
+        build.links.new(fill_vector(build, effect), texture.inputs['Vector'])
         set_pattern_values(texture, effect.pattern, effect.scale, effect.detail)
         ranged = build.nodes.new('ShaderNodeMapRange')
         build.links.new(factor, ranged.inputs['Value'])
         ranged.inputs['From Min'].default_value, ranged.inputs['From Max'].default_value = contrast_range(effect.pattern, effect.contrast)
         return ranged.outputs['Result']
     return None
+
+
+def fill_projection(effect):
+    if effect.projection != 'AUTO':
+        return effect.projection
+    return 'UV' if effect.source == 'IMAGE' else 'TRIPLANAR'
+
+
+def fill_vector(build, effect):
+    if fill_projection(effect) == 'UV':
+        source = build.sampler.uv()
+    else:
+        source = build.nodes.new('ShaderNodeTexCoord').outputs['Object']
+    mapping = build.nodes.new('ShaderNodeMapping')
+    mapping.name = effect.uid + '.mapping'
+    build.links.new(source, mapping.inputs['Vector'])
+    mapping.inputs['Location'].default_value = (effect.offset_u, effect.offset_v, 0.0)
+    mapping.inputs['Rotation'].default_value = (0.0, 0.0, math.radians(effect.angle))
+    mapping.inputs['Scale'].default_value = (effect.tiling,) * 3
+    return mapping.outputs['Vector']
 
 
 def anchor_value(build, effect):

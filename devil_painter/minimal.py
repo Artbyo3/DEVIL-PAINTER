@@ -11,7 +11,7 @@ from .blending import BLEND_MODES, CHANNEL, CHANNELS, FOLDER_BLENDS, linear_to_s
 from .canvas import Layout, Rect
 from .document import (BAKE_ID_LABELS, DYNAMICS, NORMAL_FORMATS, PROJECTORS, STROKE_METHODS, TRANSPARENCY, NORMAL_SPACES, PROJECTIONS, RESOLUTIONS, SHADERS, active_effect, active_layer, children, editing_mask, find_layer,
                        linked_layer, set_channels, slot_value, uses_coordinates)
-from .effects import EFFECT_ICONS, EFFECT_KINDS, MASK_BLENDS, effect_label
+from .effects import EFFECT_ICONS, EFFECT_KINDS, FILL_PROJECTIONS, MASK_BLENDS, effect_label
 from .filters import FILTER, FILTERS
 from .library import capture, libraries as library_folders, texture_folder
 from .exporting import FORMAT_LABELS, SOURCES, TOKENS, find_template, is_custom
@@ -551,15 +551,19 @@ EFFECT_SLIDERS = {'LEVELS': (('in_low', 'In low', 1.0), ('in_high', 'In high', 1
                              ('out_high', 'Out high', 1.0)),
                   'FILL': (('scale', 'Scale', 50.0), ('detail', 'Detail', 1.0), ('contrast', 'Contrast', .98)),
                   'ID_COLOR': (('amount', 'Tolerance', 1.0),)}
-FX_RANGES = {field: (top, floor) for group in (*EFFECT_SLIDERS.values(), *(item.sliders for item in FILTERS), (('opacity', 'Opacity', 1.0), ('value', 'Value', 1.0)))
-             for field, _, top in group for floor in ({'gamma': .05, 'radius': 1.0, 'scale': .1}.get(field, 0.0),)}
+FILL_TRANSFORM = (('tiling', 'Tiling', 8.0), ('angle', 'Rotation', 360.0), ('offset_u', 'Offset U', 1.0), ('offset_v', 'Offset V', 1.0))
+FX_RANGES = {field: (top, floor) for group in (*EFFECT_SLIDERS.values(), *(item.sliders for item in FILTERS), FILL_TRANSFORM,
+                                                (('opacity', 'Opacity', 1.0), ('value', 'Value', 1.0)))
+             for field, _, top in group for floor in ({'gamma': .05, 'radius': 1.0, 'scale': .1, 'tiling': .1}.get(field, 0.0),)}
 
 
 def effect_sliders(effect):
     if effect.kind == 'FILTER':
         return FILTER[effect.filter].sliders
     if effect.kind == 'FILL' and effect.source == 'PATTERN':
-        return EFFECT_SLIDERS['FILL']
+        return EFFECT_SLIDERS['FILL'] + FILL_TRANSFORM
+    if effect.kind == 'FILL' and effect.source == 'IMAGE':
+        return FILL_TRANSFORM
     if effect.kind == 'FILL' and effect.source == 'VALUE':
         return (('value', 'Value', 1.0),)
     return EFFECT_SLIDERS.get(effect.kind, ())
@@ -603,6 +607,10 @@ def effect_section(flow, data, layer, w):
         flow.add('FX_SOURCE_NAME', Rect(x + h + 6 * s, y, w - h - 6 * s, h), 'NOTE',
                  label=sources[effect.source] + (' · ' + effect.pattern.title() if effect.source == 'PATTERN' else
                                                   ' · ' + effect.texture.name if effect.source == 'IMAGE' and effect.texture is not None else ''))
+        if effect.source != 'VALUE':
+            x, y, h = flow.field()
+            flow.add('FX_PROJECTION', Rect(x, y, w, h), 'DROPDOWN', label='Projection', text=dict(FILL_PROJECTIONS)[effect.projection],
+                     tip='Map the fill by UV or from three sides without seams; Automatic uses UV for textures and object space for patterns')
     if effect.kind == 'FILTER':
         x, y, h = flow.field()
         flow.add('FX_FILTER', Rect(x, y, w, h), 'DROPDOWN', label='Filter', text=FILTER[effect.filter].label, tip='Pick the filter')
@@ -635,7 +643,7 @@ def effect_section(flow, data, layer, w):
 
 def effect_lines(data):
     effect = active_effect(data)
-    lines = 2 + (effect.kind in {'PAINT', 'FILL', 'FILTER', 'COMPARE', 'ANCHOR'})
+    lines = 2 + (effect.kind in {'PAINT', 'FILL', 'FILTER', 'COMPARE', 'ANCHOR'}) + (effect.kind == 'FILL' and effect.source != 'VALUE')
     lines += (len(effect_sliders(effect)) + 1) // 2
     if effect.kind == 'ID_COLOR':
         lines += 1 + int('id' not in data.maps or data.maps['id'].image is None)

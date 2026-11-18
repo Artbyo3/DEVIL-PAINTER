@@ -20,6 +20,7 @@ from tools.workspace import prepare_scratch
 from tests.gui_harness import settle, until
 
 TIMEOUT = 600
+RAMP_SIZE = 64
 STARTED = time.time()
 
 
@@ -126,6 +127,36 @@ def write_png(path, color):
     image.file_format = 'PNG'
     image.save()
     bpy.data.images.remove(image)
+
+
+def write_ramp(path):
+    image = bpy.data.images.new(path.stem, RAMP_SIZE, RAMP_SIZE, alpha=False)
+    ramp = (numpy.arange(RAMP_SIZE, dtype=numpy.float32) + .5) / RAMP_SIZE
+    values = numpy.ones((RAMP_SIZE, RAMP_SIZE, 4), dtype=numpy.float32)
+    values[..., :3] = ramp[None, :, None]
+    image.pixels.foreach_set(values.ravel())
+    image.filepath_raw = str(path)
+    image.file_format = 'PNG'
+    image.save()
+    bpy.data.images.remove(image)
+
+
+def uv_interior(mesh, slot, width, margin):
+    uv = mesh.uv_layers.active.data
+    centers = (numpy.arange(width) + .5) / width
+    x, y = numpy.meshgrid(centers, centers)
+    inside = numpy.zeros((width, width), dtype=bool)
+    edge = margin / width
+    for triangle in (item for item in mesh.loop_triangles if item.material_index == slot):
+        corners = numpy.array([tuple(uv[loop].uv) for loop in triangle.loops])
+        signs = []
+        for index in range(3):
+            a, b = corners[index], corners[(index + 1) % 3]
+            length = max(numpy.hypot(*(b - a)), 1e-9)
+            signs.append(((b[0] - a[0]) * (y - a[1]) - (b[1] - a[1]) * (x - a[0])) / length)
+        signs = numpy.array(signs)
+        inside |= numpy.all(signs > edge, axis=0) | numpy.all(signs < -edge, axis=0)
+    return inside.ravel()
 
 
 def nodes(data):
@@ -330,6 +361,7 @@ def journey():
     textures = scratch / 'textures'
     textures.mkdir(exist_ok=True)
     write_png(textures / 'lone.png', (.3, .3, .3, 1.0))
+    write_ramp(textures / 'ramp.png')
     click(window, region, 'SHELF_TAB.TEXTURES')
     yield from settle()
     click(window, region, 'TEXTURE_DIR')
@@ -597,6 +629,43 @@ def journey():
     yield from context_menu(window, region, paint_uid, 'FLATTEN')
     check(find_layer(body, paint_uid) is None and find_layer(body, compare_uid) is None and active_layer(body).kind == 'PAINT',
           'Flatten merges a multi-selection into one paint layer')
+
+    click(window, region, 'ADD_FILL')
+    yield from settle()
+    ramp_uid = body.active_uid
+    yield from add_effect(window, region, 'MASK', 'FILL')
+    yield from reveal(window, region, 'FX_SOURCE')
+    yield from menu(window, region, 'FX_SOURCE', 'FX_PICK_TEXTURE')
+    ramp_item = next(key for key in keys('ITEM.') if control(key).label.startswith('ramp'))
+    click(window, region, ramp_item)
+    yield from settle()
+    ramp = find_layer(body, ramp_uid).effects[-1]
+    check(ramp.source == 'IMAGE' and ramp.texture.name.startswith('ramp') and has('FX_PROJECTION') and control('FX_PROJECTION').text == 'Automatic',
+          'a texture fill effect shows its projection, starting on Automatic')
+    yield from slide(window, region, 'FX_tiling', .25)
+    yield from slide(window, region, 'FX_offset_u', .25)
+    mapping = nodes(body)[ramp.uid + '.mapping']
+    check(abs(ramp.tiling - 2.0) < .15 and abs(ramp.offset_u - .25) < .05 and tuple(mapping.inputs['Scale'].default_value)[0] == ramp.tiling
+          and abs(mapping.inputs['Location'].default_value[0] - ramp.offset_u) < 1e-6,
+          f'the tiling and offset sliders drive the fill effect mapping (tiling {ramp.tiling:.2f}, offset {ramp.offset_u:.2f})')
+    yield from context_menu(window, region, ramp_uid, 'EXPORT_MASK')
+    tiled = png(export_dir / f'{bpy.path.clean_name(find_layer(body, ramp_uid).name)}_Mask.png')
+    width = int(round(len(tiled) ** .5))
+    u = (numpy.arange(width) + .5) / width
+    expected = numpy.broadcast_to(numpy.mod(u * ramp.tiling + ramp.offset_u, 1.0)[None, :], (width, width)).ravel()
+    away = (expected > .05) & (expected < .95) & uv_interior(cube.data, body.slot, width, 2.0)
+    error = numpy.abs(tiled[away, 0] - expected[away])
+    check(away.mean() > .15 and numpy.percentile(error, 99) < .03,
+          f'the exported mask is the ramp texture at frac({ramp.tiling:.2f} u + {ramp.offset_u:.2f}) '
+          f'(99th percentile error {numpy.percentile(error, 99):.4f} over {int(away.sum())} pixels)')
+    (textures / 'ramp.png').unlink()
+    yield from reveal(window, region, f'FX_{ramp_uid}.{ramp.uid}', 'LAYERS')
+    click(window, region, f'FX_{ramp_uid}.{ramp.uid}')
+    yield from settle()
+    yield from reveal(window, region, 'FX_PROJECTION')
+    yield from menu(window, region, 'FX_PROJECTION', 'SET_FXPROJECTION.TRIPLANAR')
+    check(ramp.projection == 'TRIPLANAR' and any(node.bl_idname == 'ShaderNodeTexImage' and node.image == ramp.texture and node.projection == 'BOX'
+                                                 for node in nodes(body)), 'Tri-planar projects the fill texture from three sides')
 
     click(window, region, 'CLOSE')
     yield from settle()

@@ -7,9 +7,10 @@ EFFECT_LABEL = {key: label for key, label, _ in EFFECT_KINDS}
 EFFECT_ICONS = {'PAINT': 'PAINT', 'FILL': 'FILL', 'LEVELS': 'SETTINGS', 'FILTER': 'BLUR', 'COMPARE': 'SHAPE', 'ANCHOR': 'PIN', 'ID_COLOR': 'EYEDROPPER'}
 MASK_BLENDS = (('MULTIPLY', 'Multiply'), ('ADD', 'Add'), ('SUBTRACT', 'Subtract'), ('MIX', 'Replace'), ('MINIMUM', 'Darken'),
                ('MAXIMUM', 'Lighten'), ('DIFFERENCE', 'Difference'))
+FILL_PROJECTIONS = (('AUTO', 'Automatic'), ('UV', 'UV'), ('TRIPLANAR', 'Tri-planar'))
 EFFECT_FIELDS = ('kind', 'target', 'enabled', 'blend', 'opacity', 'source', 'value', 'pattern', 'scale', 'detail', 'contrast', 'texture',
                  'in_low', 'in_high', 'gamma', 'out_low', 'out_high', 'filter', 'amount', 'radius', 'angle', 'hue', 'saturation', 'brightness',
-                 'color', 'color_b', 'other', 'channel')
+                 'color', 'color_b', 'other', 'channel', 'projection', 'tiling', 'offset_u', 'offset_v')
 
 
 def allowed(kind, target):

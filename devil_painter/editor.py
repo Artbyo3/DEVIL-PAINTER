@@ -13,7 +13,7 @@ from .ui_system import ACCENT
 from .canvas import Rect
 from .document import (BAKE_ID_LABELS, DYNAMICS, PROJECTIONS, PROJECTORS, RESOLUTIONS, STROKE_METHODS, active_effect, active_layer, active_tile, find_layer,
                        editing_mask, paint_target, set_channels, slot_value, texture_set, uses_coordinates)
-from .effects import MASK_BLENDS
+from .effects import FILL_PROJECTIONS, MASK_BLENDS
 from .filters import FILTER, FILTERS, GROUPS
 from .post import POST_SLIDERS
 from .compositing import PIN_CORNERS
@@ -1103,6 +1103,8 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             items = (('SET_FXSOURCE.VALUE', 'Plain value', effect.source == 'VALUE'),
                      ('FX_PICK_TEXTURE', 'Texture from the shelf', effect.source == 'IMAGE')) + tuple(
                 (f'SET_FXPATTERN.{item.key}', 'Pattern · ' + item.label, effect.source == 'PATTERN' and effect.pattern == item.key) for item in PATTERNS)
+        elif key == 'FX_PROJECTION':
+            items = tuple((f'SET_FXPROJECTION.{mode}', label, mode == effect.projection) for mode, label in FILL_PROJECTIONS)
         elif key == 'FX_OTHER':
             items = tuple((f'SET_FXOTHER.{layer.uid}', layer.name, layer.uid == effect.other) for layer in data.layers
                           if layer.uid != data.active_uid and layer.kind != 'INSTANCE') or (('NO_LAYER', 'No other layer', False),)
@@ -1130,7 +1132,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.message = actions.move_effect(context, obj, data, layer.uid, effect.uid, index + (1 if key == 'FX_UP' else -1))
         elif key == 'FX_DELETE':
             self.message = actions.delete_effect(context, obj, data)
-        elif key in {'FX_BLEND', 'FX_FILTER', 'FX_SOURCE', 'FX_OTHER', 'FX_CHANNEL'}:
+        elif key in {'FX_BLEND', 'FX_FILTER', 'FX_SOURCE', 'FX_OTHER', 'FX_CHANNEL', 'FX_PROJECTION'}:
             self.open_effect_menu(key, control, data)
         elif key.startswith('SET_FXPATTERN.'):
             actions.edit_effect(context, obj, data, 'source', 'PATTERN', False)
@@ -1144,9 +1146,10 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.message = 'Click the model to pick an ID color.'
         elif key.startswith('FXCOLOR.'):
             self.open_color(control, 'fx:' + key.removeprefix('FXCOLOR.'))
-        elif key.startswith(('SET_FXBLEND.', 'SET_FXFILTER.', 'SET_FXSOURCE.', 'SET_FXOTHER.', 'SET_FXCHANNEL.')):
+        elif key.startswith(('SET_FXBLEND.', 'SET_FXFILTER.', 'SET_FXSOURCE.', 'SET_FXOTHER.', 'SET_FXCHANNEL.', 'SET_FXPROJECTION.')):
             prefix, value = key.split('.', 1)
-            field = {'SET_FXBLEND': 'blend', 'SET_FXFILTER': 'filter', 'SET_FXSOURCE': 'source', 'SET_FXOTHER': 'other', 'SET_FXCHANNEL': 'channel'}[prefix]
+            field = {'SET_FXBLEND': 'blend', 'SET_FXFILTER': 'filter', 'SET_FXSOURCE': 'source', 'SET_FXOTHER': 'other', 'SET_FXCHANNEL': 'channel',
+                     'SET_FXPROJECTION': 'projection'}[prefix]
             self.message = actions.edit_effect(context, obj, data, field, value, True)
         elif control.kind == 'ROW' and key.startswith('FX_'):
             uid, effect_uid = key.removeprefix('FX_').split('.')
