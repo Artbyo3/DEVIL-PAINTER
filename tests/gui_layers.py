@@ -374,6 +374,7 @@ def journey():
     fill_effect = layer.effects[-1].uid
     check(layer.effects[-1].kind == 'FILL' and body.target == 'EFFECT' and has(f'FX_{fill_uid}.{fill_effect}'),
           'a fill effect lands in the mask stack and shows as a row under the layer')
+    yield from until(lambda: control(f'FX_{fill_uid}.{fill_effect}').preview is not None, 'the fill effect pattern thumbnail')
     check(control(f'FX_{fill_uid}.{fill_effect}').preview is not None, 'the fill effect row shows a pattern thumbnail')
     check(f'{fill_effect}.texture' in nodes(body), 'the fill effect drives a procedural pattern node in the mask')
     yield from reveal(window, region, 'FX_SOURCE')

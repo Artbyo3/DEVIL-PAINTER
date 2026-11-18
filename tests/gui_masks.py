@@ -16,7 +16,7 @@ import devil_painter
 from devil_painter import editor, library
 from devil_painter.document import active_effect, active_layer, find_layer
 from tools.workspace import prepare_scratch
-from tests.gui_harness import settle
+from tests.gui_harness import settle, until
 
 TIMEOUT = 600
 STARTED = time.time()
@@ -412,6 +412,7 @@ def journey():
     yield from settle()
     labels = {control(key).label: key for key in keys('ITEM.')}
     item_key = labels.get(saved[0]['name'])
+    yield from until(lambda: item_key is not None and control(item_key).preview is not None, 'the saved smart mask preview on the Masks shelf')
     check(item_key is not None and control(item_key).preview is not None, 'the Masks shelf shows the saved smart mask with its preview')
     click(window, region, 'ADD_FILL')
     yield from settle()
