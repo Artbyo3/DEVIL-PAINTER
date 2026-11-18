@@ -1,5 +1,5 @@
 import bpy
-from .blending import BLEND_MODES, CHANNEL, CHANNELS, FOLDER_BLENDS
+from .blending import BLEND_MODES, CHANNEL, CHANNELS, FOLDER_BLENDS, STORED_BLENDS
 from .effects import EFFECT_KINDS, MASK_BLENDS
 from .filters import FILTERS
 from .masks import GENERATORS
@@ -25,7 +25,7 @@ class DEVIL_PAINTER_PG_slot(bpy.types.PropertyGroup):
     enabled: bpy.props.BoolProperty(default=False)
     color: bpy.props.FloatVectorProperty(size=3, default=(0.8, 0.8, 0.8), min=0.0, max=1.0)
     value: bpy.props.FloatProperty(default=0.5, min=0.0, max=1.0)
-    blend: bpy.props.EnumProperty(items=[(key, label, '') for key, label in BLEND_MODES])
+    blend: bpy.props.EnumProperty(items=[(key, label, '', STORED_BLENDS.index(key)) for key, label in BLEND_MODES], default='MIX')
     opacity: bpy.props.FloatProperty(default=1.0, min=0.0, max=1.0)
     source: bpy.props.EnumProperty(items=SOURCES)
     image: bpy.props.PointerProperty(type=bpy.types.Image)

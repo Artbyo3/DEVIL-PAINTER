@@ -1,5 +1,5 @@
 import math
-from .blending import NORMAL_DETAIL
+from .blending import MIX_NODE_BLENDS
 from .document import PROJECTORS, active_tile, children, geometry_attribute, linked_layer, set_channels, shown_layers, slot_value, uses_coordinates
 from .effects import EFFECT_FIELDS
 from .filters import FILTER, content_warp, filter_color, filter_value, warp_vector, wrap_sampling
@@ -541,6 +541,62 @@ def channel_mix(nodes, links, name, below, factor, mode, x, y):
     return node
 
 
+def blended(slot):
+    return slot.enabled and slot.blend != 'DISABLE'
+
+
+def per_component(build, below, above, formula):
+    nodes, links = build.nodes, build.links
+    parts = []
+    for color in (below, above):
+        split = nodes.new('ShaderNodeSeparateColor')
+        links.new(color, split.inputs['Color'])
+        parts.append(split.outputs)
+
+    def op(operation, first, second):
+        return math_node(nodes, links, operation, first, second)
+    join = nodes.new('ShaderNodeCombineColor')
+    for index in range(3):
+        links.new(formula(op, parts[0][index], parts[1][index]), join.inputs[index])
+    return join.outputs['Color']
+
+
+def chosen(op, low, high, above):
+    return op('ADD', low, op('MULTIPLY', op('GREATER_THAN', above, .5), op('SUBTRACT', high, low)))
+
+
+BLEND_FORMULAS = {
+    'INVERSE_DIVIDE': lambda op, a, b: op('DIVIDE', b, op('MAXIMUM', a, 1e-4)),
+    'INVERSE_SUBTRACT': lambda op, a, b: op('SUBTRACT', b, a),
+    'SIGNED_ADD': lambda op, a, b: op('ADD', a, op('SUBTRACT', op('MULTIPLY', b, 2.0), 1.0)),
+    'LINEAR_BURN': lambda op, a, b: op('SUBTRACT', op('ADD', a, b), 1.0),
+    'HARD_LIGHT': lambda op, a, b: chosen(op, op('MULTIPLY', op('MULTIPLY', a, b), 2.0),
+                                          op('SUBTRACT', 1.0, op('MULTIPLY', op('MULTIPLY', op('SUBTRACT', 1.0, a), op('SUBTRACT', 1.0, b)), 2.0)), b),
+    'VIVID_LIGHT': lambda op, a, b: chosen(op, op('SUBTRACT', 1.0, op('DIVIDE', op('SUBTRACT', 1.0, a), op('MAXIMUM', op('MULTIPLY', b, 2.0), 1e-4))),
+                                           op('DIVIDE', a, op('MAXIMUM', op('SUBTRACT', 2.0, op('MULTIPLY', b, 2.0)), 1e-4)), b),
+    'PIN_LIGHT': lambda op, a, b: chosen(op, op('MINIMUM', a, op('MULTIPLY', b, 2.0)), op('MAXIMUM', a, op('SUBTRACT', op('MULTIPLY', b, 2.0), 1.0)), b),
+}
+
+
+def combine_normals(nodes, links, base, detail):
+    unpacked = [vector_math(nodes, links, 'MULTIPLY_ADD', color, (2.0, 2.0, 2.0), (-1.0, -1.0, -1.0)) for color in (base, detail)]
+    summed = vector_math(nodes, links, 'ADD', unpacked[0], vector_math(nodes, links, 'MULTIPLY', unpacked[1], (1.0, 1.0, 0.0)))
+    normalized = vector_math(nodes, links, 'NORMALIZE', summed)
+    return vector_math(nodes, links, 'MULTIPLY_ADD', normalized, (.5, .5, .5), (.5, .5, .5))
+
+
+def custom_blend(build, mode, below, above):
+    if mode == 'REPLACE':
+        return above
+    if mode == 'NORMAL_DETAIL':
+        return blend_normals(build.nodes, build.links, below, above)
+    if mode == 'NORMAL_INVERSE_DETAIL':
+        return blend_normals(build.nodes, build.links, above, below)
+    if mode == 'NORMAL_COMBINE':
+        return combine_normals(build.nodes, build.links, below, above)
+    return per_component(build, below, above, BLEND_FORMULAS[mode])
+
+
 def compose_layer(build, channels, layer, results, x):
     nodes, links, stroke = build.nodes, build.links, build.stroke
     owner = stroke is not None and stroke[0] == layer.uid
@@ -548,16 +604,16 @@ def compose_layer(build, channels, layer, results, x):
     vector = layer_coordinates(nodes, links, layer, x) if uses_coordinates(layer) else None
     for row, channel in enumerate(channels):
         slot = layer.slots[channel.key]
-        if not slot.enabled:
+        if not blended(slot):
             continue
         name = f'{layer.uid}.{channel.key}'
         y = 300 - 250 * row
-        reach = coverage
+        reach = 1.0 if slot.blend == 'REPLACE' else coverage
         if layer.kind == 'PAINT' and channel.key != 'base_color' and slot.source == 'IMAGE' and slot.image is not None:
             reach = math_node(nodes, links, 'MULTIPLY', coverage, sampling(build, layer, 'CONTENT')(slot.image)[1], x - 150, y - 60)
         factor = math_node(nodes, links, 'MULTIPLY', reach, 1.0, x - 100, y - 60, name + '.opacity')
-        detail = slot.blend == NORMAL_DETAIL
-        node = channel_mix(nodes, links, name, results[channel.key], factor, 'MIX' if detail else slot.blend, x, y)
+        native = slot.blend in MIX_NODE_BLENDS
+        node = channel_mix(nodes, links, name, results[channel.key], factor, slot.blend if native else 'MIX', x, y)
         content = painted if channel.key == 'base_color' and painted is not None else slot_content(build, layer, slot, vector, name, x, y)
         if owner and channel.key != 'base_color' and channel.key in stroke[2]:
             brushed = nodes.new('ShaderNodeMix')
@@ -569,14 +625,14 @@ def compose_layer(build, channels, layer, results, x):
                 links.new(content, socket(brushed.inputs, 'A', 'RGBA'))
             content = socket(brushed.outputs, 'Result', 'RGBA')
         effects = content_effects_for(layer, channel.key)
-        if content is None and (effects or detail):
+        if content is None and (effects or not native):
             constant = nodes.new('ShaderNodeRGB')
             constant.name = name + '.const'
             content = constant.outputs[0]
         for effect in effects:
             content = levels_color(build, content, effect) if effect.kind == 'LEVELS' else filter_color(build, content, effect)
-        if detail:
-            content = blend_normals(nodes, links, results[channel.key], content)
+        if not native:
+            content = custom_blend(build, slot.blend, results[channel.key], content)
         if content is not None:
             links.new(content, socket(node.inputs, 'B', 'RGBA'))
         results[channel.key] = socket(node.outputs, 'Result', 'RGBA')
@@ -740,10 +796,12 @@ def write_values(nodes, channels, layers, brush=None):
                 projector.inputs['Scale'].default_value = (layer.proj_size,) * 3
         for channel in channels:
             slot = layer.slots[channel.key]
-            if not slot.enabled:
+            if not blended(slot):
                 continue
             name = f'{layer.uid}.{channel.key}'
             nodes[name + '.opacity'].inputs[1].default_value = slot.opacity
+            if slot.blend == 'REPLACE':
+                nodes[name + '.opacity'].inputs[0].default_value = layer.opacity
             if brush is not None and name + '.stroke' in nodes:
                 brushed = nodes[name + '.stroke']
                 socket(brushed.inputs, 'B', 'RGBA').default_value = rgba(brush[1][channel.key])
