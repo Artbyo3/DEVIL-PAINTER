@@ -155,14 +155,17 @@ def needed_channels(template):
     return {SOURCES[key][1] for item in template['outputs'] for key in item['sources'] if SOURCES[key][1]}
 
 
-def ao_pixels(data, number, size):
+def ao_image(data, number, size):
     item = data.maps.get('ao')
     if item is None or item.image is None:
         return None
-    pixels = baking.read_pixels(tiles.variant(data, item.image, number))
-    if pixels.shape[0] != size:
-        return None
-    return pixels[..., 0]
+    image = tiles.variant(data, item.image, number)
+    return image if image.size[1] == size else None
+
+
+def ao_pixels(data, number, size):
+    image = ao_image(data, number, size)
+    return None if image is None else baking.read_pixels(image)[..., 0]
 
 
 def plane(key, baked, ao, size, srgb, linear_file, present, normal_format):
@@ -216,7 +219,39 @@ def write(path, planes, file_format, depth, target):
         bpy.data.scenes.remove(scene)
 
 
+def planned_files(obj, project, template, wanted, folder, pattern, size):
+    planned = []
+    for index in wanted:
+        data = project.sets[index]
+        set_tiles = tiles.numbers(data)
+        for number in set_tiles:
+            ao = ao_image(data, number, data.resolution)
+            for item in template['outputs']:
+                varying = [key for key in item['sources'] if key not in {'white', 'black'}]
+                if varying and not any(source_available(data, key, ao) for key in varying):
+                    continue
+                tokens = dict(mesh=bpy.path.clean_name(obj.name), set=bpy.path.clean_name(data.name), output=item['name'], udim=number,
+                              material=bpy.path.clean_name(data.material.name), resolution=size or data.resolution)
+                path = folder / (file_name(pattern, tokens, len(set_tiles) > 1) + '.' + FORMATS[item['format']][0])
+                planned.append((path, index, number, item))
+    return planned
+
+
+def refuse_collisions(planned, project):
+    owners = {}
+    for path, index, _, _ in planned:
+        key = str(path).casefold()
+        if key not in owners:
+            owners[key] = index
+        elif owners[key] != index:
+            raise ValueError(f'{project.sets[owners[key]].name} and {project.sets[index].name} would both export {path.name}. Add {{set}} to the file name pattern.')
+        else:
+            raise ValueError(f'Two outputs would both export {path.name}. Give every output its own name, or add {{output}} to the file name pattern.')
+
+
 def export(context, obj, project, template, wanted, directory, pattern, override, size=0, padding=baking.BAKE_MARGIN):
+    planned = planned_files(obj, project, template, wanted, Path(directory), pattern, size)
+    refuse_collisions(planned, project)
     present_anywhere = {item.key for index in wanted for item in set_channels(project.sets[index])}
     channels = needed_channels(template) & present_anywhere
     baked = {}
@@ -224,27 +259,14 @@ def export(context, obj, project, template, wanted, directory, pattern, override
         margin = max(project.sets[index].resolution for index in wanted) if padding == INFINITE_PADDING else padding
         for (index, number), values in baking.bake_channel(context, obj, project, wanted, CHANNEL[key], margin).items():
             baked.setdefault((index, number), {})[key] = values
-    written = []
-    folder = Path(directory)
-    for index in wanted:
+    ao = {}
+    for path, index, number, item in planned:
         data = project.sets[index]
-        set_tiles = tiles.numbers(data)
-        present = {item.key for item in set_channels(data)}
-        for number in set_tiles:
-            resolution = data.resolution
-            ao = ao_pixels(data, number, resolution)
-            for item in template['outputs']:
-                varying = [key for key in item['sources'] if key not in {'white', 'black'}]
-                if varying and not any(source_available(data, key, ao) for key in varying):
-                    continue
-                file_format = item['format']
-                depth = effective_depth(file_format, item['depth'], override)
-                linear_file = file_format == 'OPEN_EXR'
-                planes = [plane(key, baked.get((index, number), {}), ao, resolution, item['srgb'], linear_file, present, project.normal_format)
-                          for key in item['sources']]
-                tokens = dict(mesh=bpy.path.clean_name(obj.name), set=bpy.path.clean_name(data.name), output=item['name'], udim=number,
-                              material=bpy.path.clean_name(data.material.name), resolution=size or resolution)
-                path = folder / (file_name(pattern, tokens, len(set_tiles) > 1) + '.' + FORMATS[file_format][0])
-                write(path, planes, file_format, depth, size)
-                written.append(path)
-    return written
+        if (index, number) not in ao:
+            ao = {(index, number): ao_pixels(data, number, data.resolution)}
+        file_format = item['format']
+        present = {channel.key for channel in set_channels(data)}
+        planes = [plane(key, baked.get((index, number), {}), ao[(index, number)], data.resolution, item['srgb'], file_format == 'OPEN_EXR', present, project.normal_format)
+                  for key in item['sources']]
+        write(path, planes, file_format, effective_depth(file_format, item['depth'], override), size)
+    return [path for path, *_ in planned]
