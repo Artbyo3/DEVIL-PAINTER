@@ -104,9 +104,7 @@ def uids(data):
 
 
 def healthy(data):
-    message = editor._active.message
-    return (editor._active is not None and not message.startswith(('Render error', 'Editor error'))
-            and all(has('ROW_' + uid) for uid in uids(data)) and has('ADD_PAINT'))
+    return editor._active is not None and all(has('ROW_' + uid) for uid in uids(data)) and has('ADD_PAINT')
 
 
 def layer_menu(window, region, uid, item):
