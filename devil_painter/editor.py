@@ -148,6 +148,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         self.toast_revealed = False
         self.state = WorkspaceState()
         self.load_column()
+        self.message = library.settings_notice()
         self.last_click = ('', 0.0)
         self.modifiers = (False, False)
         self._closed = False
@@ -450,9 +451,10 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.finish_stroke(context)
         if event.type == 'TIMER':
             self.auto_bake(context)
-            for note in packs.poll():
-                self.message = note
-                self._area.tag_redraw()
+            for note in packs.poll() + [autosave.failure_notice()]:
+                if note:
+                    self.message = note
+                    self._area.tag_redraw()
             if packs.active():
                 self._area.tag_redraw()
             if thumbnails.waiting():

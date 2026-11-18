@@ -1,6 +1,8 @@
 import json
+import os
 import re
 import shutil
+import tempfile
 from pathlib import Path
 import bpy
 from .blending import CHANNEL
@@ -15,6 +17,7 @@ CHANNEL_WORDS = {'base_color': {'basecolor', 'albedo', 'diffuse', 'diff', 'color
                  'height': {'height', 'displacement', 'disp', 'bump'}, 'emission': {'emission', 'emissive'}, 'opacity': {'opacity', 'alpha'}}
 DIRECTX_WORDS = {'dx', 'normaldx'}
 SETTINGS_FILE = 'library.json'
+DAMAGED_SUFFIX = '.damaged'
 PACK_MARKER = '.installed'
 PACK_KINDS = ('Textures', 'Alphas', 'Materials', 'Brushes', 'Generators')
 BLEND_SUFFIX = '.blend'
@@ -80,16 +83,39 @@ def library_folder(name):
     return _cache[key]
 
 
+def read_settings(path):
+    if not path.is_file():
+        return {}
+    try:
+        values = json.loads(path.read_text(encoding='utf-8'))
+    except ValueError:
+        values = None
+    if isinstance(values, dict):
+        return values
+    damaged = path.with_name(path.name + DAMAGED_SUFFIX)
+    os.replace(path, damaged)
+    _cache['notice'] = f'Settings were damaged and reset. Old file kept as {damaged.name}.'
+    return {}
+
+
 def settings():
     if 'settings' not in _cache:
-        path = library_root() / SETTINGS_FILE
-        values = json.loads(path.read_text(encoding='utf-8')) if path.is_file() else {}
+        values = read_settings(library_root() / SETTINGS_FILE)
         _cache['settings'] = dict(values, texture_folder=values.get('texture_folder', ''), materials=values.get('materials', []))
     return _cache['settings']
 
 
+def settings_notice():
+    return _cache.pop('notice', '')
+
+
 def save_settings():
-    (library_root() / SETTINGS_FILE).write_text(json.dumps(settings(), indent=1), encoding='utf-8')
+    path = library_root() / SETTINGS_FILE
+    with tempfile.NamedTemporaryFile('w', encoding='utf-8', dir=path.parent, prefix=path.name + '.', suffix='.tmp', delete=False) as handle:
+        json.dump(settings(), handle, indent=1)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(handle.name, path)
 
 
 def user_materials():

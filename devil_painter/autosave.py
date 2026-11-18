@@ -7,7 +7,7 @@ from .library import save_settings, settings
 CHECK_SECONDS = 5.0
 SUFFIX = '_autosave.blend'
 MINUTE_RANGE = (1, 30)
-_state = dict(last=time.monotonic(), path='', saved=0.0)
+_state = dict(last=time.monotonic(), path='', saved=0.0, failed=0.0, reason='', unreported=False)
 
 
 def minutes():
@@ -40,8 +40,15 @@ def save_now():
     path = target()
     with bpy.context.temp_override(window=manager.windows[0]):
         bpy.ops.wm.save_as_mainfile(filepath=str(path), copy=True, check_existing=False)
-    _state.update(last=time.monotonic(), path=str(path), saved=time.time())
+    _state.update(last=time.monotonic(), path=str(path), saved=time.time(), failed=0.0, reason='')
     return path
+
+
+def save_or_report():
+    try:
+        save_now()
+    except RuntimeError as failure:
+        _state.update(last=time.monotonic(), failed=time.time(), reason=' '.join(str(failure).split()).removeprefix('Error: '), unreported=True)
 
 
 def tick():
@@ -49,16 +56,25 @@ def tick():
     due = minutes() and time.monotonic() - _state['last'] >= minutes() * 60
     if due and manager is not None and manager.windows and not busy(manager) and changed() \
             and any(project_of(obj) is not None for obj in bpy.data.objects):
-        save_now()
+        save_or_report()
     return CHECK_SECONDS
 
 
 def status():
     if not minutes():
         return 'Autosave is off'
+    if _state['failed']:
+        return f'Autosave failed at {time.strftime("%H:%M", time.localtime(_state["failed"]))}, retrying every {minutes()} min'
     if not _state['saved']:
         return f'Next autosave within {minutes()} min'
     return f'Saved {time.strftime("%H:%M", time.localtime(_state["saved"]))} to {Path(_state["path"]).name}'
+
+
+def failure_notice():
+    if not _state['unreported']:
+        return ''
+    _state['unreported'] = False
+    return f'Autosave failed: {_state["reason"]}. It will try again in {minutes()} min.'
 
 
 def register():
