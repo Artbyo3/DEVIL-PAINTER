@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import time
@@ -10,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(ROOT))
 import devil_painter
-from devil_painter import editor
+from devil_painter import editor, library
 from devil_painter.editor import HIDDEN_REGIONS
 from tools.workspace import prepare_scratch
 from tests.gui_harness import settle, until
@@ -85,6 +86,33 @@ def opens(window, where):
           f'Ctrl+Alt+P opens Devil Painter {where} and hides the Blender regions')
 
 
+def damaged_settings(window):
+    path = library.library_root() / library.SETTINGS_FILE
+    damaged = path.with_name(path.name + '.damaged')
+    damaged.unlink(missing_ok=True)
+    truncated = '{"texture_folder": "", "materials": [{"name": "Half'
+    path.write_text(truncated, encoding='utf-8')
+    library._cache.pop('settings', None)
+    yield from opens(window, 'with a truncated settings file')
+    message = editor._active.message
+    check('settings' in message.lower() and damaged.name in message, f'Devil Painter says the settings were damaged and where the old file went: {message!r}')
+    check(damaged.read_text(encoding='utf-8') == truncated, 'the damaged settings file is set aside untouched')
+    press(window, 'P', ctrl=True, alt=True)
+    yield from settle()
+    check(closed_now(window), 'Ctrl+Alt+P closes it')
+    check(not path.exists(), 'the damaged file no longer sits where the settings are read')
+    library.save_settings()
+    saved = json.loads(path.read_text(encoding='utf-8'))
+    check(isinstance(saved, dict) and saved['materials'] == [], 'the next save writes a complete settings file with defaults')
+    check(not list(path.parent.glob(path.name + '.*.tmp')), 'no temporary settings file is left behind')
+    library._cache.pop('settings', None)
+    yield from opens(window, 'after the settings were repaired')
+    check(editor._active.message == '', 'the damaged-settings notice is shown only once')
+    press(window, 'P', ctrl=True, alt=True)
+    yield from settle()
+    check(closed_now(window), 'Ctrl+Alt+P closes it again')
+
+
 def journey():
     prepare_scratch()
     devil_painter.register()
@@ -155,6 +183,7 @@ def journey():
         yield from given_back(window)
         check(closed_now(window) and regions_shown(window), 'the close button still closes it cleanly')
 
+    yield from damaged_settings(window)
     devil_painter.unregister()
     check(not hasattr(bpy.types.Object, 'devil_painter'), 'Devil Painter unregisters cleanly')
     print('ALL GUI REOPEN CHECKS PASSED', bpy.app.version_string)
