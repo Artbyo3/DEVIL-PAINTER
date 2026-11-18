@@ -15,7 +15,7 @@ sys.path.insert(0, str(ROOT))
 import devil_painter
 from devil_painter import editor
 from devil_painter.actions import LAST_LAYER
-from devil_painter.document import active_layer
+from devil_painter.document import active_layer, find_layer
 from tools.workspace import prepare_scratch
 from tests.gui_harness import settle
 
@@ -127,6 +127,45 @@ def stays_responsive(window, region, data):
     check(healthy(data) and elapsed < 5.0, f'the workspace keeps drawing and answering input ({elapsed:.2f}s for 20 moves)')
 
 
+def current_set():
+    return bpy.data.objects['Cube'].devil_painter.sets[0]
+
+
+def undo_restores_pixels(window, region, point):
+    click(window, region, 'ADD_PAINT')
+    yield from settle()
+    painted = active_layer(current_set()).uid
+    stroke(window, *point)
+    yield from settle()
+    yield from layer_menu(window, region, painted, 'ADD_MASK_BLACK')
+    stroke(window, *point)
+    yield from settle()
+    layer = find_layer(current_set(), painted)
+    content, mask = alpha(layer.image).max(), alpha(layer.mask).max()
+    check(content > .5 and mask > .5, f'the new layer holds a stroke and a painted mask ({content:.2f}, {mask:.2f})')
+    before = uids(current_set())
+    yield from layer_menu(window, region, painted, 'DELETE')
+    check(painted not in uids(current_set()), 'the painted layer is deleted')
+    click(window, region, 'UNDO')
+    yield from settle()
+    restored = find_layer(current_set(), painted)
+    check(uids(current_set()) == before and restored is not None, f'undo brings the deleted layer back: {uids(current_set())}')
+    check(restored.image is not None and abs(alpha(restored.image).max() - content) < 1e-3,
+          f'undo restores the deleted layer with its painting (alpha {alpha(restored.image).max():.2f})')
+    check(restored.mask is not None and abs(alpha(restored.mask).max() - mask) < 1e-3,
+          f'undo restores the deleted layer with its painted mask (mask {alpha(restored.mask).max():.2f})')
+    click(window, region, 'REDO')
+    yield from settle()
+    check(painted not in uids(current_set()), 'redo deletes the layer again')
+    click(window, region, 'UNDO')
+    yield from settle()
+    restored = find_layer(current_set(), painted)
+    check(restored is not None and alpha(restored.image).max() > .5 and alpha(restored.mask).max() > .5,
+          'a second undo restores the painting and the mask again')
+    yield from layer_menu(window, region, painted, 'DELETE')
+    check(uids(current_set()) == [uid for uid in before if uid != painted], 'deleting it again leaves the stack as it was')
+    yield from stays_responsive(window, region, current_set())
+
 def journey():
     prepare_scratch()
     devil_painter.register()
@@ -167,6 +206,10 @@ def journey():
     stroke(window, *front_point)
     yield from settle()
     check(alpha(active_layer(body).image).max() > .5, 'a brush stroke after deleting the first layer paints the remaining layer')
+    yield from undo_restores_pixels(window, region, front_point)
+    cube = bpy.data.objects['Cube']
+    project = cube.devil_painter
+    body = project.sets[0]
 
     click(window, region, 'ADD_PAINT')
     yield from settle()
@@ -194,9 +237,7 @@ def journey():
     check(len(body.layers) == 2 and editor._active.message == LAST_LAYER, 'deleting every selected layer at once is refused without removing any')
     yield from stays_responsive(window, region, body)
     other = next(uid for uid in uids(body) if uid != body.active_uid)
-    click(window, region, 'ROW_' + other, ctrl=True)
-    yield from settle()
-    check(len(editor._active.chosen(body)) == 2, 'both layers are selected again')
+    check(len(editor._active.chosen(body)) == 2, 'the refused delete keeps both layers selected')
     yield from layer_menu(window, region, other, 'MOVE_SELECTED.1')
     check(len(body.layers) == 1 and len(project.sets[1].layers) == 2 and editor._active.message == LAST_LAYER,
           'moving every selected layer to another set keeps one layer behind')
