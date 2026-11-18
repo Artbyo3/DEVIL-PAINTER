@@ -1191,6 +1191,9 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
                 project.active_set = project.sets.find(source.name)
             self.state.multi.clear()
             self.restore_mask_snapshot(obj)
+        elif key.startswith('SET_FOLDERCH.'):
+            _, channel, mode = key.split('.')
+            self.message = actions.set_channel_blend(context, obj, data, channel, mode)
         elif key.startswith('SET_FOLDERBLEND.'):
             self.message = actions.set_layer_field(context, obj, data, 'folder_blend', key.removeprefix('SET_FOLDERBLEND.'))
         elif key == 'GEO_MASK':
@@ -1528,6 +1531,11 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         if key == 'FOLDER_BLEND':
             current = active_layer(data).folder_blend
             self.state.popover = Popover('MENU', control.rect, items=tuple((f'SET_FOLDERBLEND.{mode}', label, mode == current) for mode, label in FOLDER_BLENDS))
+        elif key.startswith('FOLDER_CHBLEND.'):
+            channel = key.removeprefix('FOLDER_CHBLEND.')
+            item = active_layer(data).channel_blends.get(channel)
+            self.state.popover = Popover('MENU', control.rect, items=((f'SET_FOLDERCH.{channel}.{actions.SAME_AS_FOLDER}', 'Same as folder', item is None),) + tuple(
+                (f'SET_FOLDERCH.{channel}.{mode}', label, item is not None and item.blend == mode) for mode, label in FOLDER_BLENDS))
         elif key.startswith('RES.'):
             _, index, size = key.split('.')
             self.state.setup_resolutions[int(index)] = int(size)

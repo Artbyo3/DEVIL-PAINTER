@@ -303,6 +303,28 @@ def journey():
     yield from settle()
     check(find_layer(body, folder_uid).folder_blend == 'MULTIPLY' and nodes(body)[f'{folder_uid}.base_color'].blend_type == 'MULTIPLY',
           'an isolated folder merges its children first, then multiplies onto the stack')
+    check(control('FOLDER_CHBLEND.roughness').text == 'Same as folder', 'each folder channel starts on Same as folder')
+    yield from reveal(window, region, 'FOLDER_CHBLEND.roughness')
+    yield from menu(window, region, 'FOLDER_CHBLEND.roughness', 'SET_FOLDERCH.roughness.SCREEN')
+    check(nodes(body)[f'{folder_uid}.roughness'].blend_type == 'SCREEN' and nodes(body)[f'{folder_uid}.base_color'].blend_type == 'MULTIPLY'
+          and control('FOLDER_CHBLEND.roughness').text == 'Screen', 'a folder can screen its roughness while its base color still multiplies')
+    yield from context_menu(window, region, folder_uid, 'EXPORT_LAYER')
+    folder_stem = bpy.path.clean_name(find_layer(body, folder_uid).name)
+    rough = png(export_dir / f'{folder_stem}_{CHANNEL["roughness"].suffix}.png')
+    got = float(numpy.median(rough[rough[:, 3] > .5, 0]))
+    inner = find_layer(body, fill_uid).slots['roughness'].value
+    wanted = 1 - (1 - CHANNEL['roughness'].default[0]) * (1 - inner)
+    check(abs(got - wanted) < .01, f'the exported folder roughness is the Screen of its child {inner:.3f} over the default ({got:.3f}, expected {wanted:.3f})')
+    yield from select_row(window, region, folder_uid)
+    yield from reveal(window, region, 'FOLDER_CHBLEND.base_color')
+    yield from menu(window, region, 'FOLDER_CHBLEND.base_color', 'SET_FOLDERCH.base_color.PASSTHROUGH')
+    check(nodes(body)[f'{folder_uid}.base_color'].blend_type == 'MIX' and nodes(body)[f'{folder_uid}.roughness'].blend_type == 'SCREEN',
+          'one channel of a folder can pass through while another merges')
+    for key in ('roughness', 'base_color'):
+        yield from reveal(window, region, 'FOLDER_CHBLEND.' + key)
+        yield from menu(window, region, 'FOLDER_CHBLEND.' + key, f'SET_FOLDERCH.{key}.FOLDER')
+    check(len(find_layer(body, folder_uid).channel_blends) == 0 and nodes(body)[f'{folder_uid}.roughness'].blend_type == 'MULTIPLY',
+          'Same as folder drops the channel override')
     yield from drag_row(window, region, 'ROW_' + paint_uid, 'ROW_' + folder_uid, .9,
                         (('DROP_LINE', 'dragging a layer near the top edge of a row shows the insertion line'),))
     order = [layer.uid for layer in body.layers]
