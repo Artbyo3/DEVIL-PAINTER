@@ -4,7 +4,7 @@ import tempfile
 import unittest
 import zlib
 
-from tools.check_public import ALIAS, EMAIL, PUBLISHED_REFS, inspect_commit_metadata, inspect_payload, inspect_text
+from tools.check_public import ALIAS, EMAIL, OWNER_MERGE_IDENTITY, PUBLISHED_REFS, inspect_commit_metadata, inspect_payload, inspect_text
 
 
 def png_chunk(chunk_type, data):
@@ -21,6 +21,12 @@ class PublicationTests(unittest.TestCase):
     def test_public_author_and_github_merge_committer_are_permitted(self):
         errors = []
         record = '\0'.join(['a' * 40, ALIAS, EMAIL, 'GitHub', 'noreply' + '@' + 'github.com'])
+        inspect_commit_metadata(record, errors)
+        self.assertEqual(errors, [])
+
+    def test_owner_web_merge_author_is_permitted(self):
+        errors = []
+        record = '\0'.join(['c' * 40, *OWNER_MERGE_IDENTITY, 'GitHub', 'noreply' + '@' + 'github.com'])
         inspect_commit_metadata(record, errors)
         self.assertEqual(errors, [])
 
