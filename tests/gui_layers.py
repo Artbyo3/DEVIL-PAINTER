@@ -14,13 +14,18 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, str(ROOT))
 import devil_painter
 from devil_painter import editor, library
-from devil_painter.blending import BLEND_MODES, CHANNEL, FOLDER_BLENDS
+from devil_painter.blending import BLEND_MODES, CHANNEL, FOLDER_BLENDS, srgb_to_linear
 from devil_painter.effects import MASK_BLENDS
 from devil_painter.document import active_layer, find_layer, geometry_attribute
 from tools.workspace import prepare_scratch
 from tests.gui_harness import settle, until
 
 TIMEOUT = 600
+NEW_BLENDS = {'DISABLE': lambda a, b: a, 'REPLACE': lambda a, b: b, 'INVERSE_DIVIDE': lambda a, b: b / a, 'INVERSE_SUBTRACT': lambda a, b: b - a,
+              'SIGNED_ADD': lambda a, b: a + 2 * b - 1, 'LINEAR_BURN': lambda a, b: a + b - 1,
+              'HARD_LIGHT': lambda a, b: 2 * a * b if b < .5 else 1 - 2 * (1 - a) * (1 - b),
+              'VIVID_LIGHT': lambda a, b: 1 - (1 - a) / (2 * b) if b < .5 else a / (2 - 2 * b),
+              'PIN_LIGHT': lambda a, b: min(a, 2 * b) if b < .5 else max(a, 2 * b - 1)}
 RAMP_SIZE = 64
 STARTED = time.time()
 
@@ -358,7 +363,7 @@ def journey():
     yield from reveal(window, region, 'FX_BLEND')
     click(window, region, 'FX_BLEND')
     yield from settle()
-    check(len(keys('SET_FXBLEND.')) == len(MASK_BLENDS) == len(BLEND_MODES) - 1,
+    check(len(keys('SET_FXBLEND.')) == len(MASK_BLENDS) == 19,
           f'mask effects offer the full layer blend list ({len(keys("SET_FXBLEND."))} modes)')
     click(window, region, 'SET_FXBLEND.SUBTRACT')
     yield from settle()
@@ -685,6 +690,34 @@ def journey():
 
     click(window, region, 'ADD_FILL')
     yield from settle()
+    blend_layer = active_layer(body)
+    stem = bpy.path.clean_name(blend_layer.name)
+    below = CHANNEL['base_color'].default[0]
+    for color, modes in (('#959595', tuple(NEW_BLENDS)), ('#DADADA', ('HARD_LIGHT', 'VIVID_LIGHT', 'PIN_LIGHT'))):
+        yield from set_hex(window, region, 'SWATCH.base_color', color)
+        above = blend_layer.slots['base_color'].color[0]
+        for mode in modes:
+            formula = NEW_BLENDS[mode]
+            yield from reveal(window, region, 'BLEND.base_color')
+            yield from menu(window, region, 'BLEND.base_color', f'SET_BLEND.base_color.{mode}')
+            check(blend_layer.slots['base_color'].blend == mode and control('BLEND.base_color').text == dict(BLEND_MODES)[mode],
+                  f'the base color blend dropdown sets {dict(BLEND_MODES)[mode]}')
+            yield from context_menu(window, region, blend_layer.uid, 'EXPORT_LAYER')
+            exported = png(export_dir / f'{stem}_{CHANNEL["base_color"].suffix}.png')
+            got = float(srgb_to_linear(numpy.median(exported[exported[:, 3] > .5, 0])))
+            wanted = min(max(formula(below, above), 0.0), 1.0)
+            check(abs(got - wanted) < .012, f'{dict(BLEND_MODES)[mode]} of {above:.3f} over {below:.3f} exports {got:.3f} (expected {wanted:.3f})')
+    yield from reveal(window, region, 'USE.normal')
+    click(window, region, 'USE.normal')
+    yield from settle()
+    for mode in ('NORMAL_COMBINE', 'NORMAL_INVERSE_DETAIL'):
+        yield from reveal(window, region, 'BLEND.normal')
+        yield from menu(window, region, 'BLEND.normal', f'SET_BLEND.normal.{mode}')
+        yield from context_menu(window, region, blend_layer.uid, 'EXPORT_LAYER')
+        normal = png(export_dir / f'{stem}_{CHANNEL["normal"].suffix}.png')
+        flat = numpy.median(normal[normal[:, 3] > .5, :3], axis=0)
+        check(blend_layer.slots['normal'].blend == mode and numpy.abs(flat - (.5, .5, 1.0)).max() < .01,
+              f'{dict(BLEND_MODES)[mode]} of two flat normals exports a flat normal {tuple(round(float(value), 3) for value in flat)}')
     ramp_uid = body.active_uid
     yield from add_effect(window, region, 'MASK', 'FILL')
     yield from reveal(window, region, 'FX_SOURCE')
