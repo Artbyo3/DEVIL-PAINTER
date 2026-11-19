@@ -1,6 +1,6 @@
 import math
 from .blending import MIX_NODE_BLENDS
-from .document import PROJECTORS, active_tile, children, folder_mode, geometry_attribute, isolated_uids, linked_layer, set_channels, shown_layers, slot_value, uses_coordinates
+from .document import PROJECTORS, TRIPLANAR_BLEND, active_tile, children, folder_mode, geometry_attribute, isolated_uids, linked_layer, set_channels, shown_layers, slot_value, uses_coordinates
 from .effects import COMPONENT_FIELDS, CONTENT_KINDS, EFFECT_FIELDS
 from .caches import revision, tile, tile_variant
 from .filters import FILTER, HEIGHT_FILTERS, filter_color, filter_value, height_normal, slope_blur, slope_weight, wrap_sampling
@@ -16,7 +16,6 @@ PIN_CORNERS = ((0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0))
 PREVIEW_TOOLS = {'PAINT', 'FILL', ''}
 BUMP_DISTANCE = .05
 DISPLAY_GAMMA = 2.2
-TRIPLANAR_BLEND = .2
 MASK_MIXES = {'MINIMUM': 'DARKEN', 'MAXIMUM': 'LIGHTEN'}
 SHADER_INPUTS = {'base_color': 'Base Color', 'roughness': 'Roughness', 'metallic': 'Metallic', 'emission': 'Emission Color',
                  'opacity': 'Alpha'}
@@ -600,8 +599,9 @@ def slot_content(build, layer, slot, vector, name, x, y):
         texture = nodes.new('ShaderNodeTexImage')
         texture.image = slot.image
         texture.location = (x - 250, y - 120)
+        texture.name = name + '.box'
         texture.projection = 'BOX'
-        texture.projection_blend = TRIPLANAR_BLEND
+        texture.projection_blend = layer.triplanar_blend
         links.new(vector, texture.inputs['Vector'])
         return texture.outputs['Color']
     if slot.source == 'PATTERN':
@@ -1024,6 +1024,10 @@ def write_values(nodes, channels, layers, brush=None):
             if transform is not None:
                 transform.inputs['Location'].default_value = uv_location(layer)
                 transform.inputs['Rotation'].default_value = (0.0, 0.0, layer.uv_rotation)
+            for channel in channels:
+                box = nodes.get(f'{layer.uid}.{channel.key}.box')
+                if box is not None and box.projection_blend != layer.triplanar_blend:
+                    box.projection_blend = layer.triplanar_blend
         for channel in channels:
             slot = layer.slots[channel.key]
             if not blended(slot):

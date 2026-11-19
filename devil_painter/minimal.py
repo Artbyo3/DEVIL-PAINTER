@@ -821,6 +821,10 @@ def projection_section(flow, data, layer, w):
         x, y, h = flow.field()
         flow.add('PROJ_ALIGN', Rect(x, y, half, h), 'CHIP', label='Align to view', tip='Point the projector along the current view')
         flow.add('PROJ_RESET', Rect(x + half + 4 * s, y, half, h), 'CHIP', label='Reset', tip='Center the projector on the mesh again')
+    elif layer.projection == 'TRIPLANAR':
+        x, y, h = flow.field()
+        flow.add('TRIPLANAR_HARDNESS', Rect(x, y, w, h), 'SLIDER', label='Hardness', value=1.0 - layer.triplanar_blend, text=f'{1.0 - layer.triplanar_blend:.2f}',
+                 tip='Sharpen or soften where the three projections meet')
     elif layer.projection == 'UV':
         x, y, h = flow.field()
         flow.add('UV_OFFSET_X', Rect(x, y, half, h), 'SLIDER', label='Offset X', value=layer.uv_offset[0] % 1.0, text=f'{layer.uv_offset[0] % 1.0:.2f}',
@@ -936,7 +940,7 @@ def projection_lines(data):
     layer = active_layer(data)
     if not (layer.kind == 'FILL' and uses_coordinates(layer)):
         return 0
-    return 5 if layer.projection == 'PLANAR' else 3 if layer.projection in PROJECTORS else 4 if layer.projection == 'UV' else 1
+    return 5 if layer.projection == 'PLANAR' else 3 if layer.projection in PROJECTORS else 4 if layer.projection == 'UV' else 2
 
 
 def material_lines(data):

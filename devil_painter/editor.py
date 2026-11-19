@@ -1452,6 +1452,8 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             actions.set_projector(context, obj, data, dict(uv_offset=tuple(offset)), release)
         elif key == 'UV_SPIN' and data is not None:
             actions.set_projector(context, obj, data, dict(uv_rotation=math.radians(x * 360)), release)
+        elif key == 'TRIPLANAR_HARDNESS' and data is not None:
+            actions.set_projector(context, obj, data, dict(triplanar_blend=1.0 - x), release)
         elif key == 'RADIAL' and data is not None:
             data.brush_radial = 1 + round(x * 15)
         elif key in DRAG_FIELDS and data is not None:
