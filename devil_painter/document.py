@@ -9,6 +9,7 @@ RESOLUTIONS = (1024, 2048, 4096)
 SOURCES = (('VALUE', 'Value', ''), ('IMAGE', 'Texture', ''), ('PATTERN', 'Pattern', ''))
 PROJECTIONS = (('UV', 'UV', ''), ('TRIPLANAR', 'Tri-planar', ''), ('PLANAR', 'Planar', ''), ('SPHERICAL', 'Spherical', ''), ('CYLINDRICAL', 'Cylindrical', ''))
 PROJECTORS = {'PLANAR', 'SPHERICAL', 'CYLINDRICAL'}
+TRIPLANAR_BLEND = .2
 SLOT_FIELDS = ('enabled', 'source', 'color', 'value', 'color_b', 'value_b', 'blend', 'opacity', 'pattern', 'scale', 'detail', 'contrast')
 LAYER_KINDS = (('PAINT', 'Paint', ''), ('FILL', 'Fill', ''), ('FOLDER', 'Folder', ''), ('INSTANCE', 'Instance', ''))
 BAKE_IDS = (('ISLAND', 'UV islands', ''), ('MATERIAL', 'Materials', ''), ('OBJECT', 'Objects', ''), ('VERTEX', 'Vertex colors', ''))
@@ -157,6 +158,7 @@ class DEVIL_PAINTER_PG_layer(bpy.types.PropertyGroup):
     proj_bend: bpy.props.FloatProperty(default=0.0, min=0.0, max=1.0)
     uv_offset: bpy.props.FloatVectorProperty(size=2, default=(0.0, 0.0))
     uv_rotation: bpy.props.FloatProperty(default=0.0, subtype='ANGLE')
+    triplanar_blend: bpy.props.FloatProperty(default=TRIPLANAR_BLEND, min=0.0, max=1.0)
     slots: bpy.props.CollectionProperty(type=DEVIL_PAINTER_PG_slot)
     image: bpy.props.PointerProperty(type=bpy.types.Image)
     mask: bpy.props.PointerProperty(type=bpy.types.Image)

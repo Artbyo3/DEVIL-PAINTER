@@ -12,7 +12,7 @@ from .procedural import PATTERN
 from .document import PROJECTIONS, PROJECTORS, SLOT_FIELDS, geometry_attribute, active_effect, active_layer, adopt_generator_breakups, adopt_layer_generator, add_set_channels, add_slots, children, descendants, fill_slots, find_layer, layer_index, set_slot_value
 
 KIND_NAMES = {'PAINT': 'Paint', 'FILL': 'Fill', 'FOLDER': 'Folder'}
-LAYER_FIELDS = ('kind', 'visible', 'opacity', 'projection', 'tiling', 'proj_offset', 'proj_rotation', 'proj_size', 'uv_offset', 'uv_rotation', 'tile_match', 'material', 'folder_blend', 'geo_mask', 'link_set', 'link_uid')
+LAYER_FIELDS = ('kind', 'visible', 'opacity', 'projection', 'tiling', 'proj_offset', 'proj_rotation', 'proj_size', 'uv_offset', 'uv_rotation', 'triplanar_blend', 'tile_match', 'material', 'folder_blend', 'geo_mask', 'link_set', 'link_uid')
 ID_TOLERANCE = .15
 LAST_LAYER = 'A texture set keeps at least one layer. Add another layer before removing this one.'
 SAME_AS_FOLDER = 'FOLDER'
