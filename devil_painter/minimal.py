@@ -17,7 +17,7 @@ from .library import capture, libraries as library_folders, texture_folder
 from .exporting import FORMAT_LABELS, SOURCES, TOKENS, find_template, is_custom
 from .projects import UNWRAP_MODES
 from .shortcuts import ACTIONS, bindings, key_label
-from .masks import BUILDER_SLIDERS, GENERATOR
+from .masks import BREAKUP, GENERATOR
 from .sets import tile_label
 from .tiles import numbers
 from .meshmaps import MESH_MAP, MESH_MAPS
@@ -816,6 +816,7 @@ def layer_mask_section(flow, data, layer, w):
 
 GENERATOR_SLIDERS = (('GEN_LEVEL', 'Level', 'gen_level', 1.0), ('GEN_CONTRAST', 'Contrast', 'gen_contrast', 1.0),
                      ('GEN_NOISE', 'Noise', 'gen_noise', 1.0), ('GEN_SCALE', 'Scale', 'gen_scale', 200.0))
+BREAKUP_DETAIL = ('GEN_DETAIL', 'Detail', 'gen_detail', 15.0)
 
 
 def missing_maps(data, effect):
@@ -842,19 +843,29 @@ def generator_section(flow, data, effect, w):
             flow.add(key, Rect(x + column * (width + 4 * s), y, width, h), 'SLIDER', label=text, value=value / top,
                      text=f'{value:.0f}' if key == 'GEN_SCALE' else f'{value:.2f}')
     flow.add('GEN_INVERT', Rect(x + w - 80 * s, y, 80 * s, h), 'TOGGLE', label='Invert', active=effect.gen_invert, tip='Swap revealed and hidden areas')
-    if effect.generator == 'BUILDER':
+    terms = GENERATOR[effect.generator].terms
+    if terms:
         x, y, h = flow.field()
-        third = (w - 8 * s) / 3
-        for column, (key, text, field) in enumerate(BUILDER_SLIDERS):
-            value = getattr(effect, field)
-            flow.add(key, Rect(x + column * (third + 4 * s), y, third, h), 'SLIDER', label=text, value=value, text=f'{value:.2f}',
-                     tip=f'How much {text.lower()} feed the mask')
+        width = (w - 4 * s * (len(terms) - 1)) / len(terms)
+        for column, term in enumerate(terms):
+            value = getattr(effect, term.weight)
+            flow.add(term.slider, Rect(x + column * (width + 4 * s), y, width, h), 'SLIDER', label=term.label, value=value, text=f'{value:.2f}',
+                     tip=f'How much {term.label.lower()} feed the mask')
+    breakup = BREAKUP[effect.gen_breakup]
+    x, y, h = flow.field()
+    flow.add('GEN_BREAKUP', Rect(x, y, half if breakup.detail else w, h), 'DROPDOWN', label='Breakup', text=breakup.label,
+             tip='The texture that breaks up this generator: noise, scratches, streaks, cells, or a procedural pattern')
+    if breakup.detail:
+        key, text, field, top = BREAKUP_DETAIL
+        value = getattr(effect, field)
+        flow.add(key, Rect(x + half + 4 * s, y, half, h), 'SLIDER', label=text, value=value / top, text=f'{value:.1f}',
+                 tip='How much fine detail the breakup texture carries')
 
 
 def generator_lines(data, effect):
     if missing_maps(data, effect):
         return 2
-    return 4 if effect.generator == 'BUILDER' else 3
+    return 5 if GENERATOR[effect.generator].terms else 4
 
 
 def mask_section(flow, data, layer, w):

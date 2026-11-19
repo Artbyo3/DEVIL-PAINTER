@@ -9,7 +9,7 @@ from .masks import GENERATOR, GENERATOR_FIELDS
 from .meshmaps import MESH_MAP
 from .blending import BLEND_MODES, CHANNEL, FOLDER_BLENDS, NORMAL_DETAIL
 from .procedural import PATTERN
-from .document import PROJECTIONS, PROJECTORS, SLOT_FIELDS, geometry_attribute, active_effect, active_layer, adopt_layer_generator, add_set_channels, add_slots, children, descendants, fill_slots, find_layer, layer_index, set_slot_value
+from .document import PROJECTIONS, PROJECTORS, SLOT_FIELDS, geometry_attribute, active_effect, active_layer, adopt_generator_breakups, adopt_layer_generator, add_set_channels, add_slots, children, descendants, fill_slots, find_layer, layer_index, set_slot_value
 
 KIND_NAMES = {'PAINT': 'Paint', 'FILL': 'Fill', 'FOLDER': 'Folder'}
 LAYER_FIELDS = ('kind', 'visible', 'opacity', 'projection', 'tiling', 'proj_offset', 'proj_rotation', 'proj_size', 'tile_match', 'material', 'folder_blend', 'geo_mask', 'link_set', 'link_uid')
@@ -45,6 +45,7 @@ def prepare(obj, data):
         if layer.kind in {'PAINT', 'FILL'}:
             fill_slots(layer.slots)
         adopted = adopt_layer_generator(data, layer) or adopted
+        adopted = adopt_generator_breakups(layer) or adopted
     strokes.ensure_buffer(obj, data)
     if adopted:
         compositing.sync(data)

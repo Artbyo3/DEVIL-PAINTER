@@ -16,7 +16,8 @@ import devil_painter
 from devil_painter import editor, library
 from devil_painter.document import active_effect, active_layer, find_layer
 from devil_painter.effects import copy_effect
-from devil_painter.masks import GENERATOR_VALUES
+from devil_painter.procedural import PATTERN
+from devil_painter.masks import BREAKUPS, GENERATOR_VALUES, LAYER_GENERATOR_FIELDS
 from tools.workspace import prepare_scratch
 from tests.gui_harness import settle, until
 
@@ -632,15 +633,33 @@ def journey():
     source = find_layer(data, worn_uid)
     wear = next(effect for effect in source.effects if effect.uid == first_uid)
     flip = next(effect for effect in source.effects if effect.uid == filter_uid)
-    legacy.generator = wear.generator
-    for field in GENERATOR_VALUES:
+    for field in LAYER_GENERATOR_FIELDS:
         setattr(legacy, field, getattr(wear, field))
     data.serial += 1
     old_filter = legacy.effects.add()
     copy_effect(flip, old_filter)
     old_filter.uid = f'E{data.serial}'
     legacy_filter_uid = old_filter.uid
-    legacy_values = {field: getattr(wear, field) for field in GENERATOR_VALUES}
+    legacy_values = {field: getattr(wear, field) for field in LAYER_GENERATOR_FIELDS[1:]}
+
+    click(window, region, 'ADD_FILL')
+    yield from settle()
+    fresh_uid = active_layer(data).uid
+    yield from add_effect(window, region, 'MASK', 'GENERATOR')
+    yield from pick_menu(window, region, 'GENERATOR', 'SET_GENERATOR.METAL_EDGE_WEAR')
+    check(active_effect(data).gen_breakup == 'SCRATCH', 'picking Metal edge wear sets its scratch breakup as the explicit default')
+    yield from context_menu(window, region, fresh_uid, 'EXPORT_MASK')
+    reference = mask_png(export_dir, find_layer(data, fresh_uid))
+    click(window, region, 'ADD_FILL')
+    yield from settle()
+    stored_uid = active_layer(data).uid
+    data.serial += 1
+    old_generator = active_layer(data).effects.add()
+    copy_effect(find_layer(data, fresh_uid).effects[0], old_generator)
+    old_generator.uid = f'E{data.serial}'
+    old_generator.property_unset('gen_breakup')
+    check(not old_generator.is_property_set('gen_breakup') and old_generator.gen_breakup == 'NOISE',
+          'a Generator effect saved in the previous format carries no breakup choice')
     saved_file = scratch / 'legacy_generator.blend'
     with bpy.context.temp_override(window=window, area=area, region=region):
         bpy.ops.wm.save_as_mainfile(filepath=str(saved_file))
@@ -669,6 +688,105 @@ def journey():
     upgraded = mask_png(export_dir, find_layer(data, legacy_uid))
     difference = float(numpy.abs(upgraded - inverted)[island].mean())
     check(difference < .02, f'the migrated old document renders the same mask as the same generator and Invert built in the new stack ({difference:.4f})')
+    previous = find_layer(data, stored_uid).effects[0]
+    check(previous.is_property_set('gen_breakup') and previous.gen_breakup == 'SCRATCH' and previous.gen_weight == 1.0,
+          'opening Devil Painter gives a previous-format Metal edge wear its old scratch breakup and a full edges weight')
+    yield from context_menu(window, region, stored_uid, 'EXPORT_MASK')
+    migrated_mask = mask_png(export_dir, find_layer(data, stored_uid))
+    gap = float(numpy.abs(migrated_mask - reference).max())
+    check(gap == 0.0, f'the previous-format generator renders the same mask after migration as one built with the new settings ({gap:.4f})')
+
+    click(window, region, 'ADD_FILL')
+    yield from settle()
+    breakup_uid = active_layer(data).uid
+    yield from add_effect(window, region, 'MASK', 'GENERATOR')
+    first_breakup = active_effect(data).uid
+
+    def generator_effect(effect_uid):
+        return next(item for item in find_layer(data, breakup_uid).effects if item.uid == effect_uid)
+
+    def breakup_node(effect_uid, suffix='noise'):
+        return nodes(data)[f'{breakup_uid}.{effect_uid}.gen.{suffix}']
+
+    def breakup_export():
+        chosen = active_effect(data).uid
+        yield from context_menu(window, region, breakup_uid, 'EXPORT_MASK')
+        values = mask_png(export_dir, find_layer(data, breakup_uid))
+        yield from choose_effect(window, region, breakup_uid, chosen)
+        return values
+
+    def settings(effect_uid):
+        effect = generator_effect(effect_uid)
+        return {field: round(getattr(effect, field), 4) if isinstance(getattr(effect, field), float) else getattr(effect, field)
+                for field in ('generator', 'gen_breakup') + GENERATOR_VALUES}
+
+    yield from pick_menu(window, region, 'GENERATOR', 'SET_GENERATOR.EDGE_WEAR')
+    yield from slide(window, region, 'GEN_NOISE', .8)
+    check(control('GEN_WEIGHT').label == 'Edges' and control('GEN_BREAKUP').text == 'Noise' and has('GEN_DETAIL'),
+          'Edge wear shows its edges term weight, its Noise breakup texture, and the breakup detail')
+    yield from reveal(window, region, 'GEN_BREAKUP')
+    click(window, region, 'GEN_BREAKUP')
+    yield from settle()
+    offered_breakups = [key.removeprefix('SET_BREAKUP.') for key in keys('SET_BREAKUP.')]
+    check(offered_breakups == [item.key for item in BREAKUPS] and {'SCRATCH', 'CELLS', 'GRUNGE', 'CRACKS'} <= set(offered_breakups),
+          f'the breakup menu offers the {len(offered_breakups)} built-in breakup textures and procedural patterns')
+    press(window, 'ESC', *middle)
+    yield from settle()
+    for item in BREAKUPS:
+        yield from pick_menu(window, region, 'GEN_BREAKUP', 'SET_BREAKUP.' + item.key)
+        texture = breakup_node(first_breakup)
+        check(generator_effect(first_breakup).gen_breakup == item.key and texture.bl_idname == PATTERN[item.pattern].node
+              and has('GEN_DETAIL') == item.detail and abs(texture.inputs['Scale'].default_value - generator_effect(first_breakup).gen_scale) < 1e-4,
+              f'the {item.label} breakup drives the generator, with Detail {"shown" if item.detail else "hidden"}')
+    yield from pick_menu(window, region, 'GEN_BREAKUP', 'SET_BREAKUP.NOISE')
+    noise_mask = yield from breakup_export()
+    yield from pick_menu(window, region, 'GEN_BREAKUP', 'SET_BREAKUP.CELLS')
+    cells_mask = yield from breakup_export()
+    switched = float(numpy.abs(cells_mask - noise_mask)[island].mean())
+    check(switched > .02, f'switching the breakup texture from Noise to Cells changes the exported mask (mean difference {switched:.4f})')
+    yield from pick_menu(window, region, 'GEN_BREAKUP', 'SET_BREAKUP.GRUNGE')
+    grunge_mask = yield from breakup_export()
+    yield from slide(window, region, 'GEN_DETAIL', .2)
+    detail = generator_effect(first_breakup).gen_detail
+    check(abs(detail - 3.0) < .2 and abs(breakup_node(first_breakup).inputs['Detail'].default_value - detail) < 1e-4,
+          f'the Detail slider sets the grunge breakup detail ({detail:.2f})')
+    detailed_mask = yield from breakup_export()
+    detail_change = float(numpy.abs(detailed_mask - grunge_mask)[island].mean())
+    check(detail_change > .005, f'tuning the breakup detail changes the exported mask (mean difference {detail_change:.4f})')
+
+    yield from pick_menu(window, region, 'GENERATOR', 'SET_GENERATOR.BUILDER')
+    check(generator_effect(first_breakup).gen_breakup == 'NOISE' and [control(key).label for key in ('GEN_EDGES', 'GEN_DIRT', 'GEN_TOP')] == ['Edges', 'Dirt', 'Top']
+          and not has('GEN_WEIGHT'), 'picking the mask builder restores its own Noise breakup and shows one weight per term')
+    yield from slide(window, region, 'GEN_NOISE', .2)
+    untouched = settings(first_breakup)
+    builder_mask = yield from breakup_export()
+    yield from slide(window, region, 'GEN_TOP', .9)
+    tuned = settings(first_breakup)
+    changed = [field for field in untouched if untouched[field] != tuned[field]]
+    check(changed == ['gen_top'] and abs(breakup_node(first_breakup, 'gen_top').inputs[1].default_value - tuned['gen_top']) < 1e-4
+          and breakup_node(first_breakup, 'gen_edges').inputs[1].default_value == untouched['gen_edges']
+          and breakup_node(first_breakup, 'gen_dirt').inputs[1].default_value == untouched['gen_dirt'],
+          f'tuning the top term changes only the top weight; edges, dirt, and the breakup stay fixed (changed {changed})')
+    top_mask = yield from breakup_export()
+    term_change = float(numpy.abs(top_mask - builder_mask)[island].mean())
+    check(term_change > .02, f'tuning one term changes the exported mask (mean difference {term_change:.4f})')
+
+    yield from add_effect(window, region, 'MASK', 'GENERATOR')
+    second_breakup = active_effect(data).uid
+    yield from pick_menu(window, region, 'GENERATOR', 'SET_GENERATOR.DIRT')
+    yield from pick_menu(window, region, 'GEN_BREAKUP', 'SET_BREAKUP.STRIPES')
+    yield from slide(window, region, 'GEN_WEIGHT', .3)
+    second = settings(second_breakup)
+    check(settings(first_breakup) == tuned and second['gen_breakup'] == 'STRIPES' and abs(second['gen_weight'] - .3) < .05
+          and breakup_node(first_breakup).bl_idname == 'ShaderNodeTexNoise' and breakup_node(second_breakup).bl_idname == 'ShaderNodeTexWave'
+          and abs(breakup_node(second_breakup, 'gen_weight').inputs[1].default_value - second['gen_weight']) < 1e-4,
+          'a second Generator on the same layer keeps its own breakup and term weight while the first keeps its settings')
+    yield from choose_effect(window, region, breakup_uid, first_breakup)
+    yield from pick_menu(window, region, 'GEN_BREAKUP', 'SET_BREAKUP.BRICKS')
+    check(settings(second_breakup) == second and generator_effect(first_breakup).gen_breakup == 'BRICKS'
+          and breakup_node(first_breakup).bl_idname == 'ShaderNodeTexBrick' and breakup_node(second_breakup).bl_idname == 'ShaderNodeTexWave',
+          'changing the first Generator breakup leaves the second Generator untouched')
+    print('BREAKUP EVIDENCE', dict(texture_switch=round(switched, 4), detail=round(detail_change, 4), top_term=round(term_change, 4), migration=gap))
 
     click(window, region, 'CLOSE')
     yield from settle()

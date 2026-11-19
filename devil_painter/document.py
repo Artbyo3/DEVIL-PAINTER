@@ -2,7 +2,7 @@ import bpy
 from .blending import BLEND_MODES, CHANNEL, CHANNELS, FOLDER_BLENDS, STORED_BLENDS
 from .effects import EFFECT_KINDS, FILL_PROJECTIONS, LEVEL_COMPONENTS, MASK_BLENDS
 from .filters import FILTERS
-from .masks import GENERATOR_FIELDS, GENERATORS
+from .masks import BREAKUPS, GENERATOR, GENERATORS, LAYER_GENERATOR_FIELDS
 from .procedural import PATTERNS
 
 RESOLUTIONS = (1024, 2048, 4096)
@@ -67,6 +67,10 @@ def is_mesh(self, obj):
     return obj.type == 'MESH'
 
 
+def generator_breakup(effect, context):
+    effect.gen_breakup = GENERATOR[effect.generator].breakup
+
+
 class DEVIL_PAINTER_PG_effect(bpy.types.PropertyGroup):
     uid: bpy.props.StringProperty()
     kind: bpy.props.EnumProperty(items=[(key, label, '') for key, label, _ in EFFECT_KINDS])
@@ -110,7 +114,8 @@ class DEVIL_PAINTER_PG_effect(bpy.types.PropertyGroup):
     offset_u: bpy.props.FloatProperty(default=0.0, min=0.0, max=1.0)
     offset_v: bpy.props.FloatProperty(default=0.0, min=0.0, max=1.0)
     id_colors: bpy.props.CollectionProperty(type=DEVIL_PAINTER_PG_id_color)
-    generator: bpy.props.EnumProperty(items=[(item.key, item.label, '') for item in GENERATORS])
+    generator: bpy.props.EnumProperty(items=[(item.key, item.label, '') for item in GENERATORS], update=generator_breakup)
+    gen_breakup: bpy.props.EnumProperty(items=[(item.key, item.label, '') for item in BREAKUPS])
     gen_level: bpy.props.FloatProperty(default=.2, min=-1.0, max=1.0)
     gen_contrast: bpy.props.FloatProperty(default=.5, min=0.0, max=1.0)
     gen_noise: bpy.props.FloatProperty(default=.3, min=0.0, max=1.0)
@@ -119,6 +124,8 @@ class DEVIL_PAINTER_PG_effect(bpy.types.PropertyGroup):
     gen_edges: bpy.props.FloatProperty(default=.5, min=0.0, max=1.0)
     gen_dirt: bpy.props.FloatProperty(default=.5, min=0.0, max=1.0)
     gen_top: bpy.props.FloatProperty(default=0.0, min=0.0, max=1.0)
+    gen_weight: bpy.props.FloatProperty(default=1.0, min=0.0, max=1.0)
+    gen_detail: bpy.props.FloatProperty(default=8.0, min=0.0, max=15.0)
 
 
 class DEVIL_PAINTER_PG_layer(bpy.types.PropertyGroup):
@@ -401,11 +408,18 @@ def adopt_layer_generator(data, layer):
     data.serial += 1
     effect = layer.effects.add()
     effect.uid, effect.kind, effect.target, effect.blend, effect.opacity = f'E{data.serial}', 'GENERATOR', 'MASK', 'MULTIPLY', 1.0
-    for field in GENERATOR_FIELDS:
+    for field in LAYER_GENERATOR_FIELDS:
         setattr(effect, field, getattr(layer, field))
     layer.effects.move(len(layer.effects) - 1, 0)
     layer.generator = 'NONE'
     return True
+
+
+def adopt_generator_breakups(layer):
+    unset = [effect for effect in layer.effects if effect.kind == 'GENERATOR' and not effect.is_property_set('gen_breakup')]
+    for effect in unset:
+        effect.gen_breakup = GENERATOR[effect.generator].breakup
+    return bool(unset)
 
 
 def geometry_attribute(data, layer):
