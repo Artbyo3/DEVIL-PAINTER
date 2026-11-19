@@ -382,7 +382,7 @@ def definition_effects(definition):
 
 
 def generator_values(effect):
-    return dict(kind='GENERATOR', target='MASK', enabled=effect.enabled, blend=effect.blend, opacity=effect.opacity,
+    return dict(kind='GENERATOR', target=effect.target, enabled=effect.enabled, blend=effect.blend, opacity=effect.opacity,
                 **{field: getattr(effect, field) for field in GENERATOR_FIELDS})
 
 

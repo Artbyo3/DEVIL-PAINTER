@@ -131,6 +131,18 @@ Blender's native painting.
   mask effect, multiplied at full opacity, so the mask is unchanged. The
   Masks shelf tab holds smart mask presets whose thumbnails render the
   generator live on a beveled cube.
+- Content effects: a layer's content stack holds Levels, Filter, Fill, Paint,
+  and Generator effects, applied in stack order to every channel the layer
+  writes. Fill, Paint, and Generator content effects add content of their
+  own and combine with the content below them through their blend mode
+  (Replace by default) and opacity. A Fill puts its color in color channels
+  and its value in the others; a pattern Fill blends its two colors through
+  the pattern, and a texture Fill uses the texture. A Paint effect holds the
+  brush strokes painted while it is selected. A Generator is the same
+  generator as in the mask stack, with its breakup and term weights, and
+  writes its grayscale result into the channels. Content effects save with
+  the file and in smart materials; Save as material keeps content
+  Generators.
 - Smart materials: Save as smart material on any layer or folder stores the
   whole subtree (folders, fill sources, generators, opacity, painted masks,
   paint images, and channel canvases as PNG files) in the user library. The
