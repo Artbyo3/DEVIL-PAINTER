@@ -11,6 +11,9 @@ SWIRL_TURNS = 2.0
 SEPIA = (1.07, .74, .43, 1.0)
 WARM = (1.0, .78, .55, 1.0)
 COOL = (.6, .78, 1.0, 1.0)
+SLOPE_REFERENCE = 32.0
+NORMAL_DEPTH = .05
+HEIGHT_FILTERS = frozenset({'SLOPE_BLUR', 'HEIGHT_NORMAL'})
 RADIUS = ('radius', 'Radius', 32.0)
 AMOUNT = ('amount', 'Amount', 1.0)
 SCALE = ('scale', 'Scale', 50.0)
@@ -106,6 +109,8 @@ FILTERS = (
     Filter('CAVITY_SHADE', 'Cavity darken', 'Lighting', (AMOUNT,)),
     Filter('TOP_LIGHT', 'Top light', 'Lighting', (AMOUNT,)),
     Filter('HEIGHT_GRADIENT', 'Height gradient', 'Lighting', (AMOUNT,)),
+    blur_like('SLOPE_BLUR', 'Slope blur', 'Blur and sharpen', ('radius', 'Intensity', 32.0), ('in_low', 'Slope min', 1.0), ('in_high', 'Slope max', 1.0)),
+    blur_like('HEIGHT_NORMAL', 'Height to normal', 'Edges', ('amount', 'Strength', 1.0), color_only=True),
 )
 FILTER = {item.key: item for item in FILTERS}
 
@@ -285,6 +290,42 @@ def wrap_sampling(build, effect, inner):
             return mixed(center, (blurred[0], math_node(build.nodes, build.links, 'MULTIPLY', blurred[1], 2.0)))
         return mixed(center, blurred)
     return sample
+
+
+def height_slope(build, height, vector):
+    texel = 1.0 / max(build.resolution, 1)
+    nodes, links = build.nodes, build.links
+    across = math_node(nodes, links, 'SUBTRACT', height(offset(build, vector, texel, 0.0)), height(offset(build, vector, -texel, 0.0)))
+    up = math_node(nodes, links, 'SUBTRACT', height(offset(build, vector, 0.0, texel)), height(offset(build, vector, 0.0, -texel)))
+    return across, up
+
+
+def slope_weight(build, effect, height, vector):
+    nodes, links = build.nodes, build.links
+    across, up = height_slope(build, height, vector)
+    length = math_node(nodes, links, 'SQRT', math_node(nodes, links, 'ADD', math_node(nodes, links, 'MULTIPLY', across, across),
+                                                       math_node(nodes, links, 'MULTIPLY', up, up)), 0.0)
+    steepness = math_node(nodes, links, 'MULTIPLY', length, build.resolution / 2 / SLOPE_REFERENCE)
+    return band(build, steepness, effect.in_low, max(effect.in_high, effect.in_low + 1e-3))
+
+
+def slope_blur(build, effect, inner, image, weight, vector):
+    nodes, links = build.nodes, build.links
+    reach = math_node(nodes, links, 'MULTIPLY', weight, effect.radius / max(build.resolution, 1))
+    spread = join_xyz(build, reach, reach)
+    taps = [inner(image, vector)] + [inner(image, vector_math(nodes, links, 'MULTIPLY_ADD', spread, (dx, dy, 0.0), vector))
+                                     for dx, dy in ring_offsets(1.0)]
+    center, blurred = taps[0], averaged(build, taps)
+    return mix_color(build, center[0], blurred[0], effect.opacity), mix_value(build, center[1], blurred[1], effect.opacity)
+
+
+def height_normal(build, effect, height, vector):
+    nodes, links = build.nodes, build.links
+    across, up = height_slope(build, height, vector)
+    gain = -effect.amount * NORMAL_DEPTH * build.resolution / 2
+    tilt = join_xyz(build, math_node(nodes, links, 'MULTIPLY', across, gain), math_node(nodes, links, 'MULTIPLY', up, gain))
+    normal = vector_math(nodes, links, 'NORMALIZE', vector_math(nodes, links, 'ADD', tilt, (0.0, 0.0, 1.0)))
+    return vector_math(nodes, links, 'MULTIPLY_ADD', normal, (.5, .5, .5), (.5, .5, .5))
 
 
 def noise_factor(build, effect, scale=None, stretch=(1.0, 1.0, 1.0), detail=8.0):
