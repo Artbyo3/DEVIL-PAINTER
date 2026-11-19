@@ -157,6 +157,21 @@ Blender's native painting.
   layer's own transparency still passes through every blur-type filter set
   to All channels, as before. Pointwise filters (Levels, Invert, Contrast,
   color and lighting filters) are unchanged.
+- Slope blur and Height to normal: two positional filters that read the
+  height below them. Slope blur (Blur and sharpen) blurs the result below it
+  by how steep the height below it is: flat areas stay sharp and steep areas
+  blur up to Intensity pixels, with Slope min and Slope max setting which
+  slopes count as flat and which blur fully. In the content stack the slope
+  comes from the layer's own height channel at the filter's position (the
+  height content plus every content effect under the filter), or from the
+  channel being filtered when the layer has no height; in the mask stack it
+  comes from the mask below. Height to normal (Edges, content stack only)
+  turns the height below it into a tangent-space normal written into the
+  normal channel, in the project's normal format, with Strength setting how
+  far slopes tilt the normal; the other channels pass through. Neither filter
+  changes a paint layer's own transparency. Opacity and anchors set their
+  per-pixel strength like any other Filter, and both save and reopen with
+  the file.
 - Anchor inputs: a Generator or Filter effect, in the mask or content stack,
   can take another layer's result as an extra input through its Anchor
   dropdown, with a Channel dropdown and an Anchor strength slider. A

@@ -3,7 +3,7 @@ from .blending import MIX_NODE_BLENDS
 from .document import PROJECTORS, active_tile, children, folder_mode, geometry_attribute, isolated_uids, linked_layer, set_channels, shown_layers, slot_value, uses_coordinates
 from .effects import COMPONENT_FIELDS, CONTENT_KINDS, EFFECT_FIELDS
 from .caches import revision, tile, tile_variant
-from .filters import FILTER, filter_color, filter_value, wrap_sampling
+from .filters import FILTER, HEIGHT_FILTERS, filter_color, filter_value, height_normal, slope_blur, slope_weight, wrap_sampling
 from .masks import GENERATOR_VALUES, generator_mask, generator_name, id_selection, write_generators
 from .nodes import gray, link_or_set, math_node, mix_color, mix_value, socket, vector_math
 from .procedural import contrast_range, pattern_node, set_pattern_values
@@ -100,7 +100,7 @@ class Build:
         self.shading = shading or dict(shader='PRINCIPLED', normal_format='OPENGL', normal_space='TANGENT')
         self.shaded = None
         self.data, self.resolution = data, resolution
-        self.masks, self.anchors, self.layer_map, self.below = {}, {}, {}, {}
+        self.masks, self.anchors, self.layer_map, self.below, self.slopes = {}, {}, {}, {}, {}
 
 
 class Instance:
@@ -204,7 +204,7 @@ def positional(effect):
 def coverage_sampling(build, layer, key):
     chain = build.sampler.sample
     for effect in layer.effects:
-        if positional(effect) and effect.target == 'CONTENT' and effect.channel in {'ALL', key}:
+        if positional(effect) and effect.target == 'CONTENT' and effect.channel in {'ALL', key} and effect.filter not in HEIGHT_FILTERS:
             chain = anchored_sampling(build, effect, chain, wrap_sampling(build, effect, chain))
     return lambda image: chain(image, build.sampler.uv())[1]
 
@@ -217,7 +217,48 @@ def below_image(build, layer, effect, key, below):
     return tile(build.data, name, numbers(build.data)[0])
 
 
+def height_below(build, layer, effect, key, content):
+    if key == 'height':
+        return below_image(build, layer, effect, key, content)
+    if (build.data is None or effect.channel not in {'ALL', 'height'} or 'height' not in {channel.key for channel in set_channels(build.data)}
+            or not blended(layer.slots['height'])):
+        return None
+    return tile(build.data, f'{layer.uid}.{effect.uid}.height', numbers(build.data)[0])
+
+
+def shared_slope(build, effect, source, height):
+    name = (effect.uid, source.name)
+    if name not in build.slopes:
+        build.slopes[name] = slope_weight(build, effect, height, build.sampler.uv())
+    return build.slopes[name]
+
+
+def height_filtered(build, layer, effect, key, content):
+    if effect.filter == 'HEIGHT_NORMAL' and key not in {'height', 'normal'}:
+        return content
+    height = height_below(build, layer, effect, key, content)
+    if build.data is None:
+        return content
+    vector = build.sampler.uv()
+    if effect.filter == 'HEIGHT_NORMAL':
+        if key != 'normal' or height is None:
+            return content
+        result = height_normal(build, effect, lambda spot: gray(build, build.sampler.sample(height, spot)[0]), vector)
+        if build.shading['normal_format'] == 'DIRECTX':
+            result = flip_green(build.nodes, build.links, result)
+        result = mix_color(build, content, result, effect.opacity)
+    else:
+        image = height if key == 'height' else below_image(build, layer, effect, key, content)
+        source = image if height is None else height
+        weight = shared_slope(build, effect, source, lambda spot: gray(build, build.sampler.sample(source, spot)[0]))
+        result = slope_blur(build, effect, build.sampler.sample, image, weight, vector)[0]
+    strength = anchor_strength(build, effect)
+    return result if strength is None else mix_color(build, content, result, strength)
+
+
 def filtered_content(build, layer, effect, key, content):
+    if effect.filter in HEIGHT_FILTERS:
+        return height_filtered(build, layer, effect, key, content)
     image = below_image(build, layer, effect, key, content)
     if image is None:
         return content
@@ -227,6 +268,8 @@ def filtered_content(build, layer, effect, key, content):
 
 
 def filtered_mask(build, layer, effect, value):
+    if effect.filter == 'HEIGHT_NORMAL':
+        return value
     image = below_image(build, layer, effect, 'MASK', value)
     if image is None:
         return value
@@ -235,7 +278,11 @@ def filtered_mask(build, layer, effect, value):
         split = build.nodes.new('ShaderNodeSeparateColor')
         build.links.new(build.sampler.sample(image, vector)[0], split.inputs['Color'])
         return split.outputs['Red'], split.outputs['Red']
-    result = wrap_sampling(build, effect, taps)(image, build.sampler.uv())[1]
+    if effect.filter == 'SLOPE_BLUR':
+        weight = shared_slope(build, effect, image, lambda spot: taps(image, spot)[1])
+        result = slope_blur(build, effect, taps, image, weight, build.sampler.uv())[1]
+    else:
+        result = wrap_sampling(build, effect, taps)(image, build.sampler.uv())[1]
     strength = anchor_strength(build, effect)
     return result if strength is None else mix_value(build, value, result, strength)
 
