@@ -7,6 +7,7 @@ import bpy
 import numpy
 from mathutils import Vector
 from .baking import BAKE_SAMPLES, bake_pass, emission_tree, read_pixels
+from .caches import touch
 from .sets import uv_island_labels
 from .signals import map_signal
 from .tiles import create, variant
@@ -218,6 +219,7 @@ def store(data, key_image, number, pixels):
     image.pixels.foreach_set(pixels.ravel())
     image.update()
     image.pack()
+    touch()
 
 
 def height_pixels(high, low, normal, span, distance):

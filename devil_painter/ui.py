@@ -1,6 +1,6 @@
 import bpy
 from bpy.app.handlers import persistent
-from . import actions, autosave, document, operators, strokes, thumbnails, tiles
+from . import actions, autosave, caches, document, operators, strokes, thumbnails, tiles
 from .editor import DEVIL_PAINTER_OT_editor, close_active
 
 
@@ -30,6 +30,9 @@ def on_save(_):
             for image in images:
                 if image.is_dirty or image.packed_file is None:
                     image.pack()
+    for image in caches.cached_images():
+        if image.is_dirty or image.packed_file is None:
+            image.pack()
 
 
 classes = (DEVIL_PAINTER_OT_editor,) + operators.CLASSES

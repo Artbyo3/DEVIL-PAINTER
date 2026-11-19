@@ -1,11 +1,12 @@
 from contextlib import contextmanager
 import bpy
 import numpy
-from . import compositing, tiles
+from . import caches, compositing, tiles
 from .compositing import rgba
 from .document import set_channels
 
 BAKE_MARGIN = 16
+BELOW_MARGIN = 64
 BAKE_SAMPLES = 1
 DUMMY_SIZE = 8
 GPU_BACKENDS = ('OPTIX', 'CUDA', 'HIP', 'ONEAPI', 'METAL')
@@ -99,48 +100,87 @@ def uv_name(obj, project):
     return project.uv_map if project.uv_map in obj.data.uv_layers else obj.data.uv_layers.active.name
 
 
-def bake_pass(context, obj, project, wanted, prepare, bake_type='EMIT', samples=BAKE_SAMPLES, extra=(), margin=BAKE_MARGIN, **options):
+def bake_tiles(obj, project, wanted, prepare, bake_type, margin, **options):
     mesh = obj.data
     name = uv_name(obj, project)
     face_tiles = tiles.face_tiles(mesh, name)
     numbers = sorted({number for index in wanted for number in tiles.numbers(project.sets[index])})
     results = {}
+    for number in numbers:
+        created = []
+        targets = {}
+        try:
+            for index, data in enumerate(project.sets):
+                tree = data.material.node_tree
+                if index in wanted and number in tiles.numbers(data):
+                    prepare(data)
+                    image = target_image(f'DP Bake {data.name} {number}', data.resolution)
+                    targets[index] = image
+                else:
+                    emission_tree(tree, (0.0, 0.0, 0.0, 1.0))
+                    image = target_image('DP Bake unused', DUMMY_SIZE)
+                created.append(image)
+                node = tree.nodes.new('ShaderNodeTexImage')
+                node.image = image
+                node.select = True
+                tree.nodes.active = node
+            layer = tiles.shifted_uv(mesh, name, face_tiles == number, number)
+            try:
+                bpy.ops.object.bake(type=bake_type, margin=margin, use_clear=True, target='IMAGE_TEXTURES', uv_layer=layer, **options)
+            finally:
+                mesh.uv_layers.remove(mesh.uv_layers[layer])
+                mesh.uv_layers.active = mesh.uv_layers[name]
+            for index, image in targets.items():
+                results[(index, number)] = read_pixels(image)
+        finally:
+            for image in created:
+                bpy.data.images.remove(image)
+    return results
+
+
+def resync(project):
+    for data in project.sets:
+        data.material[compositing.SIGNATURE_KEY] = ''
+        compositing.sync(data)
+
+
+def bake_pass(context, obj, project, wanted, prepare, bake_type='EMIT', samples=BAKE_SAMPLES, extra=(), margin=BAKE_MARGIN, **options):
+    refresh_below(context, obj, project)
     with bake_scene(context, obj, samples, extra):
         try:
-            for number in numbers:
-                created = []
-                targets = {}
-                try:
-                    for index, data in enumerate(project.sets):
-                        tree = data.material.node_tree
-                        if index in wanted and number in tiles.numbers(data):
-                            prepare(data)
-                            image = target_image(f'DP Bake {data.name} {number}', data.resolution)
-                            targets[index] = image
-                        else:
-                            emission_tree(tree, (0.0, 0.0, 0.0, 1.0))
-                            image = target_image('DP Bake unused', DUMMY_SIZE)
-                        created.append(image)
-                        node = tree.nodes.new('ShaderNodeTexImage')
-                        node.image = image
-                        node.select = True
-                        tree.nodes.active = node
-                    layer = tiles.shifted_uv(mesh, name, face_tiles == number, number)
-                    try:
-                        bpy.ops.object.bake(type=bake_type, margin=margin, use_clear=True, target='IMAGE_TEXTURES', uv_layer=layer, **options)
-                    finally:
-                        mesh.uv_layers.remove(mesh.uv_layers[layer])
-                        mesh.uv_layers.active = mesh.uv_layers[name]
-                    for index, image in targets.items():
-                        results[(index, number)] = read_pixels(image)
-                finally:
-                    for image in created:
-                        bpy.data.images.remove(image)
+            return bake_tiles(obj, project, wanted, prepare, bake_type, margin, **options)
         finally:
-            for data in project.sets:
-                data.material[compositing.SIGNATURE_KEY] = ''
-                compositing.sync(data)
-    return results
+            resync(project)
+
+
+def stale_below(project):
+    stale = []
+    for index, data in enumerate(project.sets):
+        if compositing.has_positional(data):
+            stamp = compositing.below_stamp(data)
+            if not caches.fresh(data, stamp):
+                stale.append((index, stamp))
+    return stale
+
+
+def refresh_below(context, obj, project):
+    stale = stale_below(project)
+    if not stale:
+        return False
+    with bake_scene(context, obj):
+        try:
+            for index, stamp in stale:
+                data = project.sets[index]
+                build, emission = compositing.below_build(data)
+                for name in list(build.below):
+                    def prepare(item, name=name):
+                        compositing.emit_below(build, emission, name)
+                    for (_, number), pixels in bake_tiles(obj, project, [index], prepare, 'EMIT', BELOW_MARGIN).items():
+                        caches.write(caches.tile(data, name, number), pixels)
+                caches.mark(data, stamp)
+        finally:
+            resync(project)
+    return True
 
 
 def bake_channel(context, obj, project, wanted, channel, margin=BAKE_MARGIN):

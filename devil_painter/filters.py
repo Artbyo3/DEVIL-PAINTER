@@ -511,8 +511,3 @@ def filter_value(build, value, effect):
     else:
         result = gray(build, adjusted(build, as_color(build, value), effect))
     return result
-
-
-def content_warp(effects):
-    return next((effect for effect in effects if effect.enabled and effect.target == 'CONTENT' and effect.kind == 'FILTER'
-                 and effect.filter == 'WARP'), None)
