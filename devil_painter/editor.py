@@ -1245,9 +1245,9 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         if layer.kind == 'FOLDER':
             items.append(('FLATTEN', 'Flatten folder', False))
         items.append(('EXPORT_LAYER', 'Export flattened', False))
-        if layer.mask is not None or layer.generator != 'NONE' or layer.geo_mask or len(layer.effects):
+        if layer.mask is not None or layer.geo_mask or len(layer.effects):
             items.append(('EXPORT_MASK', 'Export mask', False))
-        if layer.mask is not None or layer.generator != 'NONE' or any(effect.target == 'MASK' for effect in layer.effects):
+        if layer.mask is not None or any(effect.target == 'MASK' for effect in layer.effects):
             items.append(('SAVE_SMART_MASK', 'Save mask as smart mask', False))
         if layer.kind != 'FOLDER':
             items += [(f'INSTANCE_INTO.{index}', 'Instance into ' + item.name, False) for index, item in enumerate(project.sets) if index != project.active_set]
@@ -1636,13 +1636,13 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.history_step(context, redo=True)
             bpy.ops.ed.redo()
         elif key == 'GENERATOR':
-            current = active_layer(data).generator
-            self.state.popover = Popover('MENU', control.rect, items=(('SET_GENERATOR.NONE', 'None', current == 'NONE'),) + tuple(
+            current = active_effect(data).generator
+            self.state.popover = Popover('MENU', control.rect, items=tuple(
                 (f'SET_GENERATOR.{item.key}', item.label, current == item.key) for item in GENERATORS))
         elif key.startswith('SET_GENERATOR.'):
-            self.message = actions.set_generator(context, obj, data, dict(generator=key.removeprefix('SET_GENERATOR.')))
+            self.message = actions.edit_effect(context, obj, data, 'generator', key.removeprefix('SET_GENERATOR.'), True)
         elif key == 'GEN_INVERT':
-            self.message = actions.set_generator(context, obj, data, dict(gen_invert=not active_layer(data).gen_invert))
+            self.message = actions.edit_effect(context, obj, data, 'gen_invert', not active_effect(data).gen_invert, True)
         elif key == 'VIEW2D':
             self.message = self.close_flat(context) if self.flat_space() is not None else self.open_flat(context)
         elif key in {'BAKE', 'OPEN_BAKE'}:
@@ -2002,7 +2002,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             items += [(f'SOLO.map:{item.key}', item.label + ' map', data.solo == 'map:' + item.key) for item in MESH_MAPS
                       if item.key in data.maps and data.maps[item.key].image is not None]
             layer = active_layer(data)
-            if layer is not None and (layer.mask is not None or layer.generator != 'NONE' or mask_effects(layer)):
+            if layer is not None and (layer.mask is not None or mask_effects(layer)):
                 items.append((f'SOLO.mask:{layer.uid}', 'Mask of ' + layer.name, data.solo == 'mask:' + layer.uid))
             self.state.popover = Popover('MENU', control.rect, items=tuple(items))
         elif key.startswith('SOLO.'):
@@ -2105,7 +2105,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         if item.kind == 'GENERATOR':
             if layer is None:
                 return 'Select a layer to mask.'
-            return actions.set_generator(context, obj, data, dict(generator=item.payload))
+            return actions.add_generator(context, obj, data, dict(generator=item.payload))
         if item.kind == 'FILTER':
             if layer is None or layer.kind == 'INSTANCE':
                 return 'Select a layer to filter.'
@@ -2138,7 +2138,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         if item.kind == 'MASK':
             if layer is None:
                 return 'Select a layer to mask.'
-            return actions.set_generator(context, obj, data, {key: value for key, value in item.payload.items() if key != 'name'})
+            return actions.add_generator(context, obj, data, {key: value for key, value in item.payload.items() if key != 'name'})
         if item.kind == 'BRUSH':
             brushes.apply_preset(context, data, item.payload)
             compositing.sync(data)

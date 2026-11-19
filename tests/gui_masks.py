@@ -15,6 +15,8 @@ sys.path.insert(0, str(ROOT))
 import devil_painter
 from devil_painter import editor, library
 from devil_painter.document import active_effect, active_layer, find_layer
+from devil_painter.effects import copy_effect
+from devil_painter.masks import GENERATOR_VALUES
 from tools.workspace import prepare_scratch
 from tests.gui_harness import settle, until
 
@@ -248,6 +250,15 @@ def fill_at(window, x, y):
     return editor._active.message
 
 
+def search(window, region, text):
+    click(window, region, 'SHELF_SEARCH')
+    yield from settle()
+    type_text(window, text, *spot(region, 'SHELF_SEARCH'))
+    yield from settle()
+    move(window, region.x + region.width / 2, region.y + region.height / 2)
+    yield from settle()
+
+
 def journey():
     scratch = prepare_scratch()
     check(library.library_root().resolve().is_relative_to(scratch.resolve()), 'the test library lives in scratch')
@@ -306,29 +317,86 @@ def journey():
     yield from settle()
     worn = active_layer(data)
     worn_uid = worn.uid
+    yield from add_effect(window, region, 'MASK', 'GENERATOR')
+    first_uid = active_effect(data).uid
+
+    def generator_node(effect_uid, suffix):
+        return nodes(data)[f'{worn_uid}.{effect_uid}.gen.{suffix}']
+
     yield from reveal(window, region, 'GENERATOR')
     click(window, region, 'GENERATOR')
     yield from settle()
-    offered = [key.removeprefix('SET_GENERATOR.') for key in keys('SET_GENERATOR.') if key != 'SET_GENERATOR.NONE']
+    offered = [key.removeprefix('SET_GENERATOR.') for key in keys('SET_GENERATOR.')]
     check(len(offered) >= 21 and {'METAL_EDGE_WEAR', 'FIBERGLASS_EDGE_WEAR', 'BUILDER', 'UV_BORDER', 'SPHERICAL', 'GRADIENT_X', 'SIDES', 'NOISE'} <= set(offered),
           f'the generator menu offers {len(offered)} generators')
     press(window, 'ESC', *middle)
     yield from settle()
     for key in offered:
         yield from pick_menu(window, region, 'GENERATOR', 'SET_GENERATOR.' + key)
-        layer = find_layer(data, worn_uid)
-        built = f'{worn_uid}.gen.range' in nodes(data)
-        check(layer.generator == key and (built or (key == 'HEIGHT' and has('GEN_MISSING'))), f'the {key} generator builds its mask')
+        built = f'{worn_uid}.{first_uid}.gen.range' in nodes(data)
+        check(active_effect(data).generator == key and (built or (key == 'HEIGHT' and has('GEN_MISSING'))), f'the {key} generator builds its mask')
     yield from pick_menu(window, region, 'GENERATOR', 'SET_GENERATOR.BUILDER')
     check(has('GEN_EDGES') and has('GEN_DIRT') and has('GEN_TOP'), 'the mask builder shows its edges, dirt, and top weights')
     yield from slide(window, region, 'GEN_TOP', .9)
-    check(abs(find_layer(data, worn_uid).gen_top - .9) < .05 and abs(nodes(data)[f'{worn_uid}.gen.gen_top'].inputs[1].default_value - .9) < .05,
+    check(abs(active_effect(data).gen_top - .9) < .05 and abs(generator_node(first_uid, 'gen_top').inputs[1].default_value - .9) < .05,
           'the top weight slider feeds the mask builder')
     yield from pick_menu(window, region, 'GENERATOR', 'SET_GENERATOR.TOP')
     yield from slide(window, region, 'GEN_NOISE', 0.0)
     yield from context_menu(window, region, worn_uid, 'EXPORT_MASK')
     mask = mask_png(export_dir, find_layer(data, worn_uid))
     check(mask[top_pixel] > .7 and mask[bottom_pixel] < .3, 'the top surfaces generator reveals the top and hides the bottom')
+
+    def exported():
+        chosen = active_effect(data).uid
+        yield from context_menu(window, region, worn_uid, 'EXPORT_MASK')
+        values = mask_png(export_dir, find_layer(data, worn_uid))
+        yield from choose_effect(window, region, worn_uid, chosen)
+        return values[top_pixel], values[bottom_pixel]
+
+    def stack():
+        return [(effect.uid, effect.generator) for effect in find_layer(data, worn_uid).effects if effect.kind == 'GENERATOR']
+
+    click(window, region, 'SHELF_TAB.GENERATORS')
+    yield from settle()
+    yield from search(window, region, 'Bottom')
+    labels = {control(key).label: key for key in keys('ITEM.')}
+    check('Bottom surfaces' in labels, 'the generators shelf finds Bottom surfaces')
+    click(window, region, labels['Bottom surfaces'])
+    yield from settle()
+    yield from search(window, region, '')
+    second_uid = active_effect(data).uid
+    check(stack() == [(first_uid, 'TOP'), (second_uid, 'BOTTOM')] and f'{worn_uid}.{first_uid}.gen.range' in nodes(data)
+          and f'{worn_uid}.{second_uid}.gen.range' in nodes(data),
+          'clicking a generator in the shelf adds a second Generator effect above the first instead of replacing it')
+    yield from slide(window, region, 'GEN_NOISE', 0.0)
+    multiplied = yield from exported()
+    check(multiplied[0] < .3 and multiplied[1] < .3, f'Bottom multiplied over Top hides both faces (top {multiplied[0]:.3f}, bottom {multiplied[1]:.3f})')
+    yield from pick_menu(window, region, 'FX_BLEND', 'SET_FXBLEND.MAXIMUM')
+    lightened = yield from exported()
+    check(active_effect(data).blend == 'MAXIMUM' and lightened[0] > .7 and lightened[1] > .7,
+          f'switching the second generator to Lighten reveals both faces (top {lightened[0]:.3f}, bottom {lightened[1]:.3f})')
+    yield from slide(window, region, 'FX_opacity', .5)
+    halved = yield from exported()
+    opacity = active_effect(data).opacity
+    check(abs(opacity - .5) < .05 and halved[0] > .7 and abs(halved[1] - opacity) < .1,
+          f'the second generator opacity scales its contribution (opacity {opacity:.2f}, bottom {halved[1]:.3f})')
+    yield from slide(window, region, 'FX_opacity', .995)
+    restored = yield from exported()
+    check(restored[1] > .9, f'full opacity brings the bottom back (bottom {restored[1]:.3f})')
+    yield from reveal(window, region, 'FX_DOWN')
+    click(window, region, 'FX_DOWN')
+    yield from settle()
+    reordered = yield from exported()
+    check(stack() == [(second_uid, 'BOTTOM'), (first_uid, 'TOP')] and reordered[0] > .7 and reordered[1] < .3,
+          f'moving the Lighten generator below the Top multiply changes the export (bottom {restored[1]:.3f} -> {reordered[1]:.3f})')
+    print('STACK ORDER EVIDENCE', dict(multiply=[round(float(value), 3) for value in multiplied], lighten=[round(float(value), 3) for value in lightened],
+                                       half=[round(float(value), 3) for value in halved], top_then_bottom=[round(float(value), 3) for value in restored],
+                                       bottom_then_top=[round(float(value), 3) for value in reordered]))
+    yield from reveal(window, region, 'FX_DELETE')
+    click(window, region, 'FX_DELETE')
+    yield from settle()
+    check(stack() == [(first_uid, 'TOP')] and f'{worn_uid}.{second_uid}.gen.range' not in nodes(data), 'deleting one generator leaves the other')
+    yield from choose_effect(window, region, worn_uid, first_uid)
     yield from pick_menu(window, region, 'GENERATOR', 'SET_GENERATOR.EDGE_WEAR')
     yield from context_menu(window, region, worn_uid, 'EXPORT_MASK')
     generated = mask_png(export_dir, find_layer(data, worn_uid))
@@ -402,7 +470,8 @@ def journey():
     yield from context_menu(window, region, worn_uid, 'SAVE_SMART_MASK')
     yield from settle()
     saved = library.settings().get('smart_masks', [])
-    check(len(saved) == 1 and len(saved[0]['effects']) == 2 and saved[0]['generator']['generator'] == 'EDGE_WEAR' and Path(saved[0]['preview']).is_file(),
+    check(len(saved) == 1 and [(entry['kind'], entry['generator']) for entry in saved[0]['effects']][0] == ('GENERATOR', 'EDGE_WEAR')
+          and len(saved[0]['effects']) == 3 and 'generator' not in saved[0] and Path(saved[0]['preview']).is_file(),
           'Save mask as smart mask stores the generator, the effect stack, and a preview')
     import json
     check('smart_masks' in json.loads((library.library_root() / library.SETTINGS_FILE).read_text(encoding='utf-8')), 'smart masks are written to the library')
@@ -420,7 +489,8 @@ def journey():
     click(window, region, item_key)
     yield from settle()
     reused = find_layer(data, reused_uid)
-    check(reused.generator == 'EDGE_WEAR' and [effect.kind for effect in reused.effects if effect.target == 'MASK'] == ['FILTER', 'PAINT'],
+    check([(effect.kind, effect.generator if effect.kind == 'GENERATOR' else '') for effect in reused.effects if effect.target == 'MASK']
+          == [('GENERATOR', 'EDGE_WEAR'), ('FILTER', ''), ('PAINT', '')],
           'clicking the smart mask gives another layer the same generator and effect stack')
     yield from context_menu(window, region, reused_uid, 'EXPORT_MASK')
     check(numpy.abs(mask_png(export_dir, reused) - refined)[island].mean() < .02, 'the reused smart mask matches the original mask')
@@ -554,6 +624,51 @@ def journey():
     click(window, region, 'POLYFILL')
     yield from settle()
     check(editor._active.state.poly_mode == '', 'the polygon fill tool turns off')
+
+    click(window, region, 'ADD_FILL')
+    yield from settle()
+    legacy = active_layer(data)
+    legacy_uid = legacy.uid
+    source = find_layer(data, worn_uid)
+    wear = next(effect for effect in source.effects if effect.uid == first_uid)
+    flip = next(effect for effect in source.effects if effect.uid == filter_uid)
+    legacy.generator = wear.generator
+    for field in GENERATOR_VALUES:
+        setattr(legacy, field, getattr(wear, field))
+    data.serial += 1
+    old_filter = legacy.effects.add()
+    copy_effect(flip, old_filter)
+    old_filter.uid = f'E{data.serial}'
+    legacy_filter_uid = old_filter.uid
+    legacy_values = {field: getattr(wear, field) for field in GENERATOR_VALUES}
+    saved_file = scratch / 'legacy_generator.blend'
+    with bpy.context.temp_override(window=window, area=area, region=region):
+        bpy.ops.wm.save_as_mainfile(filepath=str(saved_file))
+    bpy.ops.wm.open_mainfile(filepath=str(saved_file))
+    yield from settle()
+    window, area, region = viewport()
+    middle = (area.x + area.width / 2, area.y + area.height / 2)
+    cube = bpy.data.objects['Cube']
+    project = cube.devil_painter
+    data = project.sets[0]
+    stored = find_layer(data, legacy_uid)
+    check(editor._active is None and stored.generator == 'EDGE_WEAR' and [effect.kind for effect in stored.effects] == ['FILTER'],
+          'the reopened file holds a layer in the old format: its generator in layer fields and an Invert filter in the mask stack')
+    press(window, 'P', *middle, ctrl=True, alt=True)
+    yield from settle()
+    migrated = find_layer(data, legacy_uid)
+    effects = [(effect.kind, effect.target, effect.blend, round(effect.opacity, 3), effect.generator if effect.kind == 'GENERATOR' else effect.filter)
+               for effect in migrated.effects]
+    moved = migrated.effects[0]
+    check(editor._active is not None and migrated.generator == 'NONE'
+          and effects == [('GENERATOR', 'MASK', 'MULTIPLY', 1.0, 'EDGE_WEAR'), ('FILTER', 'MASK', 'MIX', 1.0, 'INVERT')]
+          and migrated.effects[1].uid == legacy_filter_uid and all(getattr(moved, field) == value for field, value in legacy_values.items())
+          and f'{legacy_uid}.{moved.uid}.gen.range' in nodes(data),
+          f'opening Devil Painter moves the old generator into the mask stack first, multiplied at full opacity, with its settings {effects}')
+    yield from context_menu(window, region, legacy_uid, 'EXPORT_MASK')
+    upgraded = mask_png(export_dir, find_layer(data, legacy_uid))
+    difference = float(numpy.abs(upgraded - inverted)[island].mean())
+    check(difference < .02, f'the migrated old document renders the same mask as the same generator and Invert built in the new stack ({difference:.4f})')
 
     click(window, region, 'CLOSE')
     yield from settle()

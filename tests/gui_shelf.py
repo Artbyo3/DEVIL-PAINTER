@@ -137,6 +137,10 @@ def select_row(window, region, uid, **modifiers):
     yield from settle()
 
 
+def generators(layer):
+    return [effect.generator for effect in layer.effects if effect.kind == 'GENERATOR']
+
+
 def labels():
     return {control(key).label: key for key in keys('ITEM.')}
 
@@ -339,7 +343,7 @@ def journey():
     yield from drag_to(window, spot(region, labels()['Dirt']), row_point(region, paint_uid, .5))
     check(has('DROP_INTO'), 'dragging a mask over a layer marks that layer')
     yield from release(window, row_point(region, paint_uid, .5))
-    check(find_layer(data, paint_uid).generator == 'DIRT' and len(order(data)) == len(after), 'dropping a smart mask onto a layer masks that layer')
+    check(generators(find_layer(data, paint_uid)) == ['DIRT'] and len(order(data)) == len(after), 'dropping a smart mask onto a layer adds its generator to the mask stack')
     yield from open_tab(window, region, 'FILTERS')
     yield from search(window, region, 'pixel')
     yield from drag_to(window, spot(region, labels()['Pixelate']), row_point(region, steel_uid, .5))
@@ -350,7 +354,7 @@ def journey():
     yield from select_row(window, region, steel_uid)
     click(window, region, labels()['Metal edge wear'])
     yield from settle()
-    check(find_layer(data, steel_uid).generator == 'METAL_EDGE_WEAR', 'clicking a generator masks the selected layer')
+    check(generators(find_layer(data, steel_uid)) == ['METAL_EDGE_WEAR'], 'clicking a generator adds it to the mask stack of the selected layer')
     yield from open_tab(window, region, 'ENVIRONMENTS')
     click(window, region, labels()['forest'])
     yield from settle()
@@ -376,7 +380,7 @@ def journey():
     children = [layer for layer in data.layers if layer.parent == folder.uid]
     check(folder.kind == 'FOLDER' and folder.name == 'Rusty Iron' and len(order(data)) > count and order(data).index(folder.uid) > order(data).index(top) and not folder.parent,
           'dropping a smart material on top of the stack adds its folder there')
-    grime = next(layer for layer in children if layer.generator == 'DIRT')
+    grime = next(layer for layer in children if generators(layer) == ['DIRT'])
     check(any(node.type == 'TEX_IMAGE' and node.image == data.maps['ao'].image for node in nodes(data)),
           'the smart material masks read the baked mesh maps')
     yield from context_menu(window, region, grime.uid, 'EXPORT_MASK')

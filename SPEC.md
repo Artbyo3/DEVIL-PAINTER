@@ -112,13 +112,19 @@ Blender's native painting.
   from a chosen high-poly source. Samples are adjustable. Baked maps appear as
   thumbnails in the Mesh maps panel, and clicking one, or picking it in the
   View menu, shows it on the model.
-- Mask generators: any layer or folder can be masked by a generator driven
-  by the baked maps: Edge wear (convex curvature), Cavity (concave
-  curvature), Dirt (ambient occlusion), Ground gradient (height from the
-  position map), and Thickness. Each has level, contrast, noise breakup,
-  noise scale, and invert, and multiplies with the painted mask so painting
-  refines it. The Masks shelf tab holds smart mask presets whose thumbnails
-  render the generator live on a beveled cube.
+- Mask generators: a Generator is a mask effect, so any layer or folder can
+  stack any number of them anywhere in its mask stack, driven by the baked
+  maps: Edge wear (convex curvature), Cavity (concave curvature), Dirt
+  (ambient occlusion), Ground gradient (height from the position map),
+  Thickness, and more. Each has its own blend mode and opacity like every
+  mask effect, plus level, contrast, noise breakup, noise scale, and invert,
+  and applies in stack order. Clicking a generator or smart mask preset in
+  the shelf adds a new Generator effect to the selected layer's mask stack
+  instead of replacing one. Documents saved before generators became effects
+  keep their generator: opening them moves it into the stack as the first
+  mask effect, multiplied at full opacity, so the mask is unchanged. The
+  Masks shelf tab holds smart mask presets whose thumbnails render the
+  generator live on a beveled cube.
 - Smart materials: Save as smart material on any layer or folder stores the
   whole subtree (folders, fill sources, generators, opacity, painted masks,
   paint images, and channel canvases as PNG files) in the user library. The

@@ -1,10 +1,11 @@
 from .filters import FILTER
+from .masks import GENERATOR, GENERATOR_FIELDS
 
 EFFECT_KINDS = (('PAINT', 'Paint', ('MASK',)), ('FILL', 'Fill', ('MASK',)), ('LEVELS', 'Levels', ('MASK', 'CONTENT')),
                 ('FILTER', 'Filter', ('MASK', 'CONTENT')), ('COMPARE', 'Compare mask', ('MASK',)), ('ANCHOR', 'Anchor', ('MASK',)),
-                ('ID_COLOR', 'ID color', ('MASK',)))
+                ('ID_COLOR', 'ID color', ('MASK',)), ('GENERATOR', 'Generator', ('MASK',)))
 EFFECT_LABEL = {key: label for key, label, _ in EFFECT_KINDS}
-EFFECT_ICONS = {'PAINT': 'PAINT', 'FILL': 'FILL', 'LEVELS': 'SETTINGS', 'FILTER': 'BLUR', 'COMPARE': 'SHAPE', 'ANCHOR': 'PIN', 'ID_COLOR': 'EYEDROPPER'}
+EFFECT_ICONS = {'PAINT': 'PAINT', 'FILL': 'FILL', 'LEVELS': 'SETTINGS', 'FILTER': 'BLUR', 'COMPARE': 'SHAPE', 'ANCHOR': 'PIN', 'ID_COLOR': 'EYEDROPPER', 'GENERATOR': 'GRID'}
 MASK_BLENDS = (('MIX', 'Replace', 3), ('MINIMUM', 'Darken', 4), ('MULTIPLY', 'Multiply', 0), ('BURN', 'Color burn', 7), ('MAXIMUM', 'Lighten', 5),
                ('SCREEN', 'Screen', 8), ('DODGE', 'Color dodge', 9), ('ADD', 'Linear dodge (Add)', 1), ('OVERLAY', 'Overlay', 10),
                ('SOFT_LIGHT', 'Soft light', 11), ('LINEAR_LIGHT', 'Linear light', 12), ('DIFFERENCE', 'Difference', 6), ('EXCLUSION', 'Exclusion', 13),
@@ -17,7 +18,7 @@ LEVEL_FIELDS = ('in_low', 'in_high', 'gamma', 'out_low', 'out_high')
 COMPONENT_FIELDS = tuple('comp_' + field for field in LEVEL_FIELDS)
 EFFECT_FIELDS = ('kind', 'target', 'enabled', 'blend', 'opacity', 'source', 'value', 'pattern', 'scale', 'detail', 'contrast', 'texture',
                  'in_low', 'in_high', 'gamma', 'out_low', 'out_high', 'filter', 'amount', 'radius', 'angle', 'hue', 'saturation', 'brightness',
-                 'color', 'color_b', 'other', 'channel', 'clamp', 'levels_component', 'projection', 'tiling', 'offset_u', 'offset_v') + COMPONENT_FIELDS
+                 'color', 'color_b', 'other', 'channel', 'clamp', 'levels_component', 'projection', 'tiling', 'offset_u', 'offset_v') + COMPONENT_FIELDS + GENERATOR_FIELDS
 
 
 def allowed(kind, target):
@@ -39,6 +40,8 @@ def find_effect(layer, uid):
 def effect_label(effect):
     if effect.kind == 'FILTER':
         return FILTER[effect.filter].label
+    if effect.kind == 'GENERATOR':
+        return GENERATOR[effect.generator].label
     return EFFECT_LABEL[effect.kind]
 
 

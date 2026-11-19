@@ -40,7 +40,7 @@ GIZMO_HANDLE = 9
 SAMPLE_TOP = 1024
 EXPOSURE_RANGE = (-5.0, 5.0)
 GAMMA_RANGE = (.2, 3.0)
-SHELF_TIPS = {'GENERATOR': 'Click to mask the selected layer with this generator', 'FILTER': 'Click to add this filter to the selected layer',
+SHELF_TIPS = {'GENERATOR': 'Click to add this generator to the mask of the selected layer', 'FILTER': 'Click to add this filter to the selected layer',
               'ENVIRONMENT': 'Click to light the viewport with this environment'}
 THUMBNAIL = 32
 RECENT_COLORS = 8
@@ -431,6 +431,8 @@ def effect_preview(effect):
         return effect.texture
     if effect.kind == 'FILL' and effect.source == 'PATTERN':
         return shelf.thumbnail(shelf.Item(effect.pattern, 'PATTERN', effect.pattern))
+    if effect.kind == 'GENERATOR':
+        return shelf.thumbnail(shelf.Item(GENERATOR[effect.generator].label, 'GENERATOR', effect.generator))
     return None
 
 
@@ -515,7 +517,7 @@ def effects_add_section(flow, data, layer, w):
     s = flow.layout.scale
     x, y, h = flow.field()
     half = (w - 4 * s) / 2
-    flow.add('ADD_FX_MASK', Rect(x, y, half, h), 'DROPDOWN', text='+ Mask effect', tip='Add paint, fill, levels, filter, compare, or anchor to the mask')
+    flow.add('ADD_FX_MASK', Rect(x, y, half, h), 'DROPDOWN', text='+ Mask effect', tip='Add paint, fill, levels, filter, compare, anchor, ID color, or a generator to the mask')
     flow.add('ADD_FX_CONTENT', Rect(x + half + 4 * s, y, half, h), 'DROPDOWN', text='+ Content effect', tip='Add levels or a filter to the layer content')
 
 
@@ -669,6 +671,8 @@ def effect_section(flow, data, layer, w):
             x, y, h = flow.field()
             flow.add('FX_ID_MISSING', Rect(x, y, w - 106 * s, h), 'NOTE', label='Needs the ID map')
             flow.add('OPEN_BAKE', Rect(x + w - 100 * s, y, 100 * s, h), 'CHIP', label='Bake maps', tip='Open the bake card')
+    if effect.kind == 'GENERATOR':
+        generator_section(flow, data, effect, w)
     slider_rows(flow, 'FX_', LevelsView(effect) if effect.kind == 'LEVELS' else effect, effect_sliders(effect), w)
     colors = FILTER[effect.filter].colors if effect.kind == 'FILTER' else ()
     if colors:
@@ -682,6 +686,8 @@ def effect_lines(data):
     effect = active_effect(data)
     lines = 2 + (effect.kind in {'PAINT', 'FILL', 'FILTER', 'COMPARE', 'ANCHOR', 'LEVELS'}) + (effect.kind == 'FILL' and effect.source != 'VALUE')
     lines += (len(effect_sliders(effect)) + 1) // 2
+    if effect.kind == 'GENERATOR':
+        lines += generator_lines(data, effect)
     if effect.kind == 'ID_COLOR':
         lines += 2 + len(effect.id_colors) + int('id' not in data.maps or data.maps['id'].image is None)
     return lines + int(effect.kind == 'FILTER' and bool(FILTER[effect.filter].colors))
@@ -812,19 +818,16 @@ GENERATOR_SLIDERS = (('GEN_LEVEL', 'Level', 'gen_level', 1.0), ('GEN_CONTRAST', 
                      ('GEN_NOISE', 'Noise', 'gen_noise', 1.0), ('GEN_SCALE', 'Scale', 'gen_scale', 200.0))
 
 
-def missing_maps(data, layer):
-    return [key for key in GENERATOR[layer.generator].maps if key not in data.maps or data.maps[key].image is None]
+def missing_maps(data, effect):
+    return [key for key in GENERATOR[effect.generator].maps if key not in data.maps or data.maps[key].image is None]
 
 
-def generator_section(flow, data, layer, w):
+def generator_section(flow, data, effect, w):
     s = flow.layout.scale
     x, y, h = flow.field()
-    label = GENERATOR[layer.generator].label if layer.generator != 'NONE' else 'None'
-    flow.add('GENERATOR', Rect(x, y, w, h), 'DROPDOWN', label='Generator', text=label,
-             tip='Mask this layer from the baked mesh maps or a procedural pattern: wear, dirt, gradients, surfaces, UV borders, and more')
-    if layer.generator == 'NONE':
-        return
-    missing = missing_maps(data, layer)
+    flow.add('GENERATOR', Rect(x, y, w, h), 'DROPDOWN', label='Generator', text=GENERATOR[effect.generator].label,
+             tip='Drive this mask effect from the baked mesh maps or a procedural pattern: wear, dirt, gradients, surfaces, UV borders, and more')
+    missing = missing_maps(data, effect)
     if missing:
         x, y, h = flow.field()
         flow.add('GEN_MISSING', Rect(x, y, w - 106 * s, h), 'NOTE', label=f'Needs the {MESH_MAP[missing[0]].label.lower()} map')
@@ -835,26 +838,23 @@ def generator_section(flow, data, layer, w):
         x, y, h = flow.field()
         for column, (key, text, field, top) in enumerate(GENERATOR_SLIDERS[row * 2:row * 2 + 2]):
             width = half if row == 0 else (w - 8 * s - 80 * s) / 2
-            value = getattr(layer, field)
+            value = getattr(effect, field)
             flow.add(key, Rect(x + column * (width + 4 * s), y, width, h), 'SLIDER', label=text, value=value / top,
                      text=f'{value:.0f}' if key == 'GEN_SCALE' else f'{value:.2f}')
-    flow.add('GEN_INVERT', Rect(x + w - 80 * s, y, 80 * s, h), 'TOGGLE', label='Invert', active=layer.gen_invert, tip='Swap revealed and hidden areas')
-    if layer.generator == 'BUILDER':
+    flow.add('GEN_INVERT', Rect(x + w - 80 * s, y, 80 * s, h), 'TOGGLE', label='Invert', active=effect.gen_invert, tip='Swap revealed and hidden areas')
+    if effect.generator == 'BUILDER':
         x, y, h = flow.field()
         third = (w - 8 * s) / 3
         for column, (key, text, field) in enumerate(BUILDER_SLIDERS):
-            value = getattr(layer, field)
+            value = getattr(effect, field)
             flow.add(key, Rect(x + column * (third + 4 * s), y, third, h), 'SLIDER', label=text, value=value, text=f'{value:.2f}',
                      tip=f'How much {text.lower()} feed the mask')
 
 
-def generator_lines(data):
-    layer = active_layer(data)
-    if layer.generator == 'NONE':
-        return 1
-    if missing_maps(data, layer):
+def generator_lines(data, effect):
+    if missing_maps(data, effect):
         return 2
-    return 4 if layer.generator == 'BUILDER' else 3
+    return 4 if effect.generator == 'BUILDER' else 3
 
 
 def mask_section(flow, data, layer, w):
@@ -893,13 +893,13 @@ def material_lines(data):
 
 PROPERTY_SECTIONS = {'LAYER': (Section(one_line, opacity_section), Section(material_lines, material_section), Section(projection_lines, projection_section),
                                Section(channel_lines, channels_section), Section(one_line, layer_mask_section),
-                               Section(generator_lines, generator_section), Section(geometry_lines, geometry_section),
+                               Section(geometry_lines, geometry_section),
                                Section(one_line, effects_add_section)),
                      'FOLDER': (Section(one_line, opacity_section), Section(one_line, folder_blend_section),
                                 Section(folder_channel_lines, folder_channels_section), Section(one_line, layer_mask_section),
-                                Section(generator_lines, generator_section), Section(geometry_lines, geometry_section),
+                                Section(geometry_lines, geometry_section),
                                 Section(one_line, effects_add_section)),
-                     'MASK': (Section(two_lines, mask_section), Section(generator_lines, generator_section)),
+                     'MASK': (Section(two_lines, mask_section), Section(one_line, effects_add_section)),
                      'EFFECT': (Section(effect_lines, effect_section), Section(one_line, effects_add_section)),
                      'INSTANCE': (Section(one_line, opacity_section), Section(one_line, instance_section))}
 

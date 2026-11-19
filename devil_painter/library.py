@@ -371,16 +371,24 @@ def load_image(path, channel):
     return image
 
 
-def apply_generator(layer, values):
-    for field in GENERATOR_FIELDS:
-        if field in values:
-            setattr(layer, field, values[field])
+def generator_entry(values):
+    return dict(kind='GENERATOR', target='MASK', blend='MULTIPLY', opacity=1.0, **{field: values[field] for field in GENERATOR_FIELDS if field in values})
+
+
+def definition_effects(definition):
+    values = definition.get('generator', {})
+    legacy = [generator_entry(values)] if values.get('generator', 'NONE') != 'NONE' else []
+    return legacy + list(definition.get('effects', ()))
+
+
+def generator_values(effect):
+    return dict(kind='GENERATOR', target='MASK', enabled=effect.enabled, blend=effect.blend, opacity=effect.opacity,
+                **{field: getattr(effect, field) for field in GENERATOR_FIELDS})
 
 
 def apply_definition(layer, definition):
     layer.projection = definition.get('projection', 'UV')
     layer.tiling = definition.get('tiling', 1.0)
-    apply_generator(layer, definition.get('generator', dict(generator='NONE')))
     for slot in layer.slots:
         values = definition['slots'].get(slot.name)
         slot.enabled = values is not None
@@ -424,6 +432,7 @@ def capture(layer):
                 values['source'] = 'VALUE'
         slots[slot.name] = values
     result = material(layer.name, layer.projection, layer.tiling, **slots)
-    if layer.generator != 'NONE':
-        result['generator'] = {field: getattr(layer, field) for field in GENERATOR_FIELDS}
+    generators = [generator_values(effect) for effect in layer.effects if effect.kind == 'GENERATOR']
+    if generators:
+        result['effects'] = generators
     return result
