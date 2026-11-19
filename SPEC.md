@@ -143,6 +143,17 @@ Blender's native painting.
   writes its grayscale result into the channels. Content effects save with
   the file and in smart materials; Save as material keeps content
   Generators.
+- Anchor inputs: a Generator or Filter effect, in the mask or content stack,
+  can take another layer's result as an extra input through its Anchor
+  dropdown, with a Channel dropdown and an Anchor strength slider. A
+  Generator adds the anchored channel to its signal as micro-detail around
+  mid-gray, so painting the anchor lighter or darker pushes the generator up
+  or down where it was painted. A Filter applies with the anchored value as
+  its per-pixel strength: full where the anchor is white, none where it is
+  black. At zero strength or with no anchor the effect renders exactly as
+  before. Anchor routings save with the file; a smart material keeps an
+  anchor that points inside the saved subtree and relinks it to the copied
+  layer, and drops one that points outside it.
 - Smart materials: Save as smart material on any layer or folder stores the
   whole subtree (folders, fill sources, generators, opacity, painted masks,
   paint images, and channel canvases as PNG files) in the user library. The

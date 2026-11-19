@@ -1112,6 +1112,12 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         elif key == 'FX_OTHER':
             items = tuple((f'SET_FXOTHER.{layer.uid}', layer.name, layer.uid == effect.other) for layer in data.layers
                           if layer.uid != data.active_uid and layer.kind != 'INSTANCE') or (('NO_LAYER', 'No other layer', False),)
+        elif key == 'FX_ANCHOR':
+            items = (('SET_FXANCHOR.', 'None', not effect.anchor),) + tuple(
+                (f'SET_FXANCHOR.{layer.uid}', layer.name, layer.uid == effect.anchor) for layer in data.layers
+                if layer.uid != data.active_uid and layer.kind != 'INSTANCE')
+        elif key == 'FX_ANCHOR_CHANNEL':
+            items = tuple((f'SET_FXANCHORCHANNEL.{channel.key}', channel.label, channel.key == effect.anchor_channel) for channel in set_channels(data))
         else:
             items = tuple((f'SET_FXCHANNEL.{channel.key}', channel.label, channel.key == effect.channel) for channel in set_channels(data))
         self.state.popover = Popover('MENU', control.rect, items=items)
@@ -1138,7 +1144,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.message = actions.move_effect(context, obj, data, layer.uid, effect.uid, index + (1 if key == 'FX_UP' else -1))
         elif key == 'FX_DELETE':
             self.message = actions.delete_effect(context, obj, data)
-        elif key in {'FX_BLEND', 'FX_FILTER', 'FX_SOURCE', 'FX_OTHER', 'FX_CHANNEL', 'FX_COMPONENT', 'FX_PROJECTION'}:
+        elif key in {'FX_BLEND', 'FX_FILTER', 'FX_SOURCE', 'FX_OTHER', 'FX_CHANNEL', 'FX_COMPONENT', 'FX_PROJECTION', 'FX_ANCHOR', 'FX_ANCHOR_CHANNEL'}:
             self.open_effect_menu(key, control, data)
         elif key.startswith('SET_FXPATTERN.'):
             actions.edit_effect(context, obj, data, 'source', 'PATTERN', False)
@@ -1157,10 +1163,12 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.message = actions.remove_id_color(context, obj, data, int(key.removeprefix('FX_REMOVE_ID.')))
         elif key.startswith('FXCOLOR.'):
             self.open_color(control, 'fx:' + key.removeprefix('FXCOLOR.'))
-        elif key.startswith(('SET_FXBLEND.', 'SET_FXFILTER.', 'SET_FXSOURCE.', 'SET_FXOTHER.', 'SET_FXCHANNEL.', 'SET_FXCOMPONENT.', 'SET_FXPROJECTION.')):
+        elif key.startswith(('SET_FXBLEND.', 'SET_FXFILTER.', 'SET_FXSOURCE.', 'SET_FXOTHER.', 'SET_FXCHANNEL.', 'SET_FXCOMPONENT.', 'SET_FXPROJECTION.',
+                             'SET_FXANCHOR.', 'SET_FXANCHORCHANNEL.')):
             prefix, value = key.split('.', 1)
             field = {'SET_FXBLEND': 'blend', 'SET_FXFILTER': 'filter', 'SET_FXSOURCE': 'source', 'SET_FXOTHER': 'other', 'SET_FXCHANNEL': 'channel',
-                     'SET_FXCOMPONENT': 'levels_component', 'SET_FXPROJECTION': 'projection'}[prefix]
+                     'SET_FXCOMPONENT': 'levels_component', 'SET_FXPROJECTION': 'projection', 'SET_FXANCHOR': 'anchor',
+                     'SET_FXANCHORCHANNEL': 'anchor_channel'}[prefix]
             self.message = actions.edit_effect(context, obj, data, field, value, True)
         elif control.kind == 'ROW' and key.startswith('FX_'):
             uid, effect_uid = key.removeprefix('FX_').split('.')

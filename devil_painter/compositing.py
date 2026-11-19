@@ -4,7 +4,7 @@ from .document import PROJECTORS, active_tile, children, folder_mode, geometry_a
 from .effects import COMPONENT_FIELDS, CONTENT_KINDS, EFFECT_FIELDS
 from .filters import FILTER, content_warp, filter_color, filter_value, warp_vector, wrap_sampling
 from .masks import GENERATOR_VALUES, generator_mask, generator_name, id_selection, write_generators
-from .nodes import gray, link_or_set, math_node, mix_color, socket, vector_math
+from .nodes import gray, link_or_set, math_node, mix_color, mix_value, socket, vector_math
 from .procedural import contrast_range, pattern_node, set_pattern_values
 from .tiles import numbers, variant
 
@@ -200,7 +200,7 @@ def sampling(build, layer, target):
     chain = build.sampler.sample
     for effect in layer.effects:
         if effect.enabled and effect.target == target and effect.kind == 'FILTER' and FILTER[effect.filter].sampling:
-            chain = wrap_sampling(build, effect, chain)
+            chain = anchored_sampling(build, effect, chain, wrap_sampling(build, effect, chain))
     return lambda image, vector=None: chain(image, vector if vector is not None else build.sampler.uv())
 
 
@@ -327,12 +327,39 @@ def fill_vector(build, effect):
     return mapping.outputs['Vector']
 
 
-def anchor_value(build, effect):
-    results = build.anchors.get(effect.other)
+def anchor_input(build, uid, channel):
+    results = build.anchors.get(uid)
     if results is None:
         return None
-    key = effect.channel if effect.channel in results else next(iter(results), None)
+    key = channel if channel in results else next(iter(results), None)
     return gray(build, results[key]) if key is not None else None
+
+
+def anchor_value(build, effect):
+    return anchor_input(build, effect.other, effect.channel)
+
+
+def anchor_strength(build, effect):
+    value = anchor_input(build, effect.anchor, effect.anchor_channel) if effect.anchor else None
+    return None if value is None else mix_value(build, 1.0, value, effect.anchor_weight)
+
+
+def anchor_detail(build, effect):
+    value = anchor_input(build, effect.anchor, effect.anchor_channel) if effect.anchor else None
+    if value is None:
+        return None
+    return math_node(build.nodes, build.links, 'MULTIPLY', math_node(build.nodes, build.links, 'SUBTRACT', value, .5), effect.anchor_weight * 2)
+
+
+def anchored_sampling(build, effect, inner, chain):
+    strength = anchor_strength(build, effect)
+    if strength is None:
+        return chain
+
+    def sample(image, vector):
+        base, result = inner(image, vector), chain(image, vector)
+        return mix_color(build, base[0], result[0], strength), mix_value(build, base[1], result[1], strength)
+    return sample
 
 
 def mask_value(build, layer):
@@ -360,12 +387,15 @@ def mask_value(build, layer):
                 other = levels_value(build, value, effect)
             elif effect.kind == 'FILTER':
                 other = filter_value(build, value, effect)
+                strength = anchor_strength(build, effect) if other is not None else None
+                if strength is not None:
+                    other = mix_value(build, value, other, strength)
             elif effect.kind == 'FILL':
                 other = fill_effect_value(build, effect)
             elif effect.kind == 'ID_COLOR':
                 other = id_selection(build, effect, sample)
             elif effect.kind == 'GENERATOR':
-                other = generator_mask(nodes, links, effect, generator_name(layer, effect), build, sample)
+                other = generator_mask(nodes, links, effect, generator_name(layer, effect), build, sample, anchor_detail(build, effect))
             elif effect.kind == 'COMPARE':
                 target = build.layer_map.get(effect.other)
                 other = mask_value(build, target) if target is not None and target.uid != layer.uid else None
@@ -505,7 +535,7 @@ def content_source(build, layer, effect, colored, generated):
     if effect.kind == 'FILL':
         return fill_content(build, effect, colored), effect.opacity
     if effect.uid not in generated:
-        generated[effect.uid] = generator_mask(build.nodes, build.links, effect, generator_name(layer, effect), build, sample)
+        generated[effect.uid] = generator_mask(build.nodes, build.links, effect, generator_name(layer, effect), build, sample, anchor_detail(build, effect))
     return generated[effect.uid], effect.opacity
 
 
@@ -513,7 +543,9 @@ def content_effect(build, layer, content, effect, colored, generated):
     if effect.kind == 'LEVELS':
         return levels_color(build, content, effect)
     if effect.kind == 'FILTER':
-        return filter_color(build, content, effect)
+        result = filter_color(build, content, effect)
+        strength = anchor_strength(build, effect)
+        return result if strength is None else mix_color(build, content, result, strength)
     other, factor = content_source(build, layer, effect, colored, generated)
     if other is None:
         return content

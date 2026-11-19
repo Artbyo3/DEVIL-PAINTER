@@ -11,7 +11,7 @@ from .blending import BLEND_MODES, CHANNEL, CHANNELS, FOLDER_BLENDS, linear_to_s
 from .canvas import Layout, Rect
 from .document import (BAKE_ID_LABELS, DYNAMICS, NORMAL_FORMATS, PROJECTORS, STROKE_METHODS, TRANSPARENCY, NORMAL_SPACES, PROJECTIONS, RESOLUTIONS, SHADERS, active_effect, active_layer, children, editing_mask, find_layer, isolated_uids,
                        linked_layer, set_channels, slot_value, uses_coordinates)
-from .effects import CONTENT_SOURCES, EFFECT_ICONS, EFFECT_KINDS, FILL_PROJECTIONS, LEVEL_COMPONENTS, MASK_BLEND_LABEL, LevelsView, effect_label
+from .effects import ANCHORED_KINDS, CONTENT_SOURCES, EFFECT_ICONS, EFFECT_KINDS, FILL_PROJECTIONS, LEVEL_COMPONENTS, MASK_BLEND_LABEL, LevelsView, effect_label
 from .filters import FILTER, FILTERS
 from .library import capture, libraries as library_folders, texture_folder
 from .exporting import FORMAT_LABELS, SOURCES, TOKENS, find_template, is_custom
@@ -578,7 +578,8 @@ EFFECT_SLIDERS = {'LEVELS': (('in_low', 'In low', 1.0), ('in_high', 'In high', 1
 FILL_COLORS = {'VALUE': (('color', 'The color this fill puts in color channels'),),
                'PATTERN': (('color', 'The color of the bright parts of the pattern'), ('color_b', 'The color of the dark parts of the pattern'))}
 FILL_TRANSFORM = (('tiling', 'Tiling', 8.0), ('angle', 'Rotation', 360.0), ('offset_u', 'Offset U', 1.0), ('offset_v', 'Offset V', 1.0))
-FX_RANGES = {field: (top, floor) for group in (*EFFECT_SLIDERS.values(), *(item.sliders for item in FILTERS), FILL_TRANSFORM,
+ANCHOR_SLIDERS = (('anchor_weight', 'Anchor strength', 1.0),)
+FX_RANGES = {field: (top, floor) for group in (*EFFECT_SLIDERS.values(), *(item.sliders for item in FILTERS), FILL_TRANSFORM, ANCHOR_SLIDERS,
                                                 (('opacity', 'Opacity', 1.0), ('value', 'Value', 1.0)))
              for field, _, top in group for floor in ({'gamma': .05, 'radius': 1.0, 'scale': .1, 'tiling': .1}.get(field, 0.0),)}
 
@@ -659,6 +660,7 @@ def effect_section(flow, data, layer, w):
     if effect.kind == 'FILTER':
         x, y, h = flow.field()
         flow.add('FX_FILTER', Rect(x, y, w, h), 'DROPDOWN', label='Filter', text=FILTER[effect.filter].label, tip='Pick the filter')
+        anchor_inputs(flow, data, effect, w)
     if effect.kind in {'COMPARE', 'ANCHOR'}:
         x, y, h = flow.field()
         other = find_layer(data, effect.other)
@@ -686,6 +688,7 @@ def effect_section(flow, data, layer, w):
             flow.add('OPEN_BAKE', Rect(x + w - 100 * s, y, 100 * s, h), 'CHIP', label='Bake maps', tip='Open the bake card')
     if effect.kind == 'GENERATOR':
         generator_section(flow, data, effect, w)
+        anchor_inputs(flow, data, effect, w)
     slider_rows(flow, 'FX_', LevelsView(effect) if effect.kind == 'LEVELS' else effect, effect_sliders(effect), w)
     colors = effect_colors(effect)
     if colors:
@@ -695,9 +698,27 @@ def effect_section(flow, data, layer, w):
                      tip=label)
 
 
+def anchor_inputs(flow, data, effect, w):
+    s = flow.layout.scale
+    half = (w - 4 * s) / 2
+    x, y, h = flow.field()
+    anchor = find_layer(data, effect.anchor) if effect.anchor else None
+    flow.add('FX_ANCHOR', Rect(x, y, half, h), 'DROPDOWN', label='Anchor', text=anchor.name if anchor is not None else 'None',
+             tip=f'A layer whose result feeds this {effect_label(effect).lower()} as an extra input')
+    flow.add('FX_ANCHOR_CHANNEL', Rect(x + half + 4 * s, y, half, h), 'DROPDOWN', label='Channel', text=CHANNEL[effect.anchor_channel].label,
+             tip='Which channel of the anchored result to use')
+    if anchor is not None:
+        slider_rows(flow, 'FX_', effect, ANCHOR_SLIDERS, w)
+
+
+def anchor_lines(data, effect):
+    return 1 + bool(effect.anchor and find_layer(data, effect.anchor) is not None) if effect.kind in ANCHORED_KINDS else 0
+
+
 def effect_lines(data):
     effect = active_effect(data)
     lines = 2 + (effect.kind in {'PAINT', 'FILL', 'FILTER', 'COMPARE', 'ANCHOR', 'LEVELS'}) + (effect.kind == 'FILL' and effect.source != 'VALUE')
+    lines += anchor_lines(data, effect)
     lines += (len(effect_sliders(effect)) + 1) // 2
     if effect.kind == 'GENERATOR':
         lines += generator_lines(data, effect)
