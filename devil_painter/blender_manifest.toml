@@ -14,6 +14,7 @@ blender_version_min = "5.2.0"
 [permissions]
 files = "Save and load texture layers, presets, and library assets"
 network = "Download optional free asset packs when you click Download"
+clipboard = "Paste text into text fields with Ctrl+V"
 
 [build]
 paths_exclude_pattern = [
