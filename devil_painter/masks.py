@@ -153,7 +153,7 @@ def generator_name(layer, effect):
     return f'{layer.uid}.{effect.uid}'
 
 
-def generator_mask(nodes, links, effect, name, build, sample):
+def generator_mask(nodes, links, effect, name, build, sample, detail=None):
     generator = GENERATOR[effect.generator]
     if not build.live and any(key not in build.maps for key in generator.maps):
         return None
@@ -168,6 +168,8 @@ def generator_mask(nodes, links, effect, name, build, sample):
         signal = texture
     if generator.flip:
         signal = operate(nodes, links, 'SUBTRACT', 1.0, signal)
+    if detail is not None:
+        signal = operate(nodes, links, 'ADD', signal, detail)
     breakup = operate(nodes, links, 'MULTIPLY', operate(nodes, links, 'SUBTRACT', texture, .5), 1.0, name + '.gen.amount')
     ranged = nodes.new('ShaderNodeMapRange')
     ranged.name = name + '.gen.range'

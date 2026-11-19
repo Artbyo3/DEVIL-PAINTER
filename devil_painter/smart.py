@@ -11,6 +11,7 @@ from .library import (BUILTIN_MATERIALS, apply_definition, capture, definition_e
 from .masks import LAYER_GENERATOR_FIELDS, SMART_MASKS
 
 PRESET = {item['name']: item for item in SMART_MASKS}
+ANCHOR_REF = '#'
 BASE = {item['name']: item for item in BUILTIN_MATERIALS}
 
 
@@ -71,8 +72,9 @@ def plain_value(value):
     return value if isinstance(value, (str, int, float, bool)) else list(value)
 
 
-def effect_entry(effect, folder):
+def effect_entry(effect, folder, places):
     values = {field: plain_value(getattr(effect, field)) for field in EFFECT_FIELDS if field != 'texture'}
+    values['anchor'] = f'{ANCHOR_REF}{places[effect.anchor]}' if effect.anchor in places else ''
     values['image'] = write_png(effect.image, folder / f'{effect.uid}.png', False) if effect.image is not None else ''
     values['texture'] = bpy.path.abspath(effect.texture.filepath) if effect.texture is not None and effect.texture.filepath else ''
     values['id_colors'] = [list(item.color) for item in effect.id_colors]
@@ -114,7 +116,7 @@ def save_mask(layer, preview):
     folder.mkdir(parents=True)
     definition = dict(name=unique_name(smart_masks(), layer.name + ' mask'),
                       mask=write_png(layer.mask, folder / 'mask.png', False) if layer.mask is not None else '',
-                      effects=[effect_entry(effect, folder) for effect in layer.effects if effect.target == 'MASK' and portable(effect)],
+                      effects=[effect_entry(effect, folder, {}) for effect in layer.effects if effect.target == 'MASK' and portable(effect)],
                       preview=write_pixels(preview.ravel(), preview.shape[1], preview.shape[0], folder / 'preview.png', True))
     smart_masks().append(definition)
     save_settings()
@@ -146,7 +148,7 @@ def subtree(layers, root):
     return found
 
 
-def layer_entry(layer, folder, parent):
+def layer_entry(layer, folder, parent, places):
     if layer.kind == 'FILL':
         result = capture(layer)
     else:
@@ -162,7 +164,7 @@ def layer_entry(layer, folder, parent):
                 result['slots'][slot.name] = values
     if layer.mask is not None:
         result['mask'] = write_png(layer.mask, folder / f'{layer.uid}_mask.png', False)
-    result['effects'] = [effect_entry(effect, folder) for effect in layer.effects if portable(effect)]
+    result['effects'] = [effect_entry(effect, folder, places) for effect in layer.effects if portable(effect)]
     return result
 
 
@@ -171,15 +173,12 @@ def save_smart(layer):
     folder = library_root() / 'smart' / f'{slug}_{int(time.time() * 1000)}'
     folder.mkdir(parents=True)
     layers = [layer] if layer.kind != 'FOLDER' else subtree(texture_set(layer.id_data).layers, layer)
-    entries, index = [], {}
-    for item in layers:
-        parent = index.get(item.parent, -1)
-        index[item.uid] = len(entries)
-        entries.append(layer_entry(item, folder, parent))
+    places = {item.uid: position for position, item in enumerate(layers)}
+    entries = [layer_entry(item, folder, places.get(item.parent, -1), places) for item in layers]
     definition = dict(name=layer.name, layers=entries)
     if layer.kind == 'FOLDER':
         definition['root'] = dict(opacity=layer.opacity, mask=write_png(layer.mask, folder / 'root_mask.png', False) if layer.mask else '',
-                                  effects=[effect_entry(effect, folder) for effect in layer.effects if effect.kind == 'GENERATOR'])
+                                  effects=[effect_entry(effect, folder, places) for effect in layer.effects if effect.kind == 'GENERATOR'])
     definition['name'] = unique_name(smart_materials(), definition['name'])
     smart_materials().append(definition)
     save_settings()
@@ -231,3 +230,13 @@ def build(obj, data, definition, root, blank):
         add_effects(obj, data, root, definition_effects(settings_root))
         if settings_root['mask']:
             root.mask = owned_image(data, settings_root['mask'], f'DP {obj.name} {root.uid} mask', False, (1.0, 1.0, 1.0, 1.0))
+    relink_anchors(data, [root.uid, *uids], uids)
+
+
+def relink_anchors(data, owners, uids):
+    for layer in data.layers:
+        if layer.uid not in owners:
+            continue
+        for effect in layer.effects:
+            if effect.anchor.startswith(ANCHOR_REF):
+                effect.anchor = uids[int(effect.anchor.removeprefix(ANCHOR_REF))]
