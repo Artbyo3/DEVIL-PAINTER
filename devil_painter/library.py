@@ -397,7 +397,7 @@ def apply_definition(layer, definition):
         channel = CHANNEL[slot.name]
         slot.source = values.get('source', 'VALUE')
         slot.blend = values.get('blend', 'MIX')
-        for field in ('pattern', 'scale', 'detail', 'contrast', 'opacity'):
+        for field in ('pattern', 'scale', 'detail', 'contrast', 'opacity', 'wrap', 'filtering'):
             if field in values:
                 setattr(slot, field, values[field])
         for field, target in (('value', ''), ('second', '_b')):

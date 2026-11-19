@@ -60,21 +60,22 @@ class Sampler:
             self.cache[key] = node.outputs[0]
         return self.cache[key]
 
-    def texture(self, image, vector, location):
+    def texture(self, image, vector, location, wrap='REPEAT', filtering='Linear'):
         node = self.nodes.new('ShaderNodeTexImage')
         node.image = image
         node.location = location
+        node.extension, node.interpolation = wrap, filtering
         self.links.new(vector if vector is not None else self.uv(), node.inputs['Vector'])
         return node
 
-    def sample(self, image, vector=None, location=(0, 0)):
+    def sample(self, image, vector=None, location=(0, 0), wrap='REPEAT', filtering='Linear'):
         tiles = [(number, self.lookup(image, number)) for number in self.tile_numbers]
         if len({tile.name for _, tile in tiles}) == 1:
-            node = self.texture(image, vector, location)
+            node = self.texture(image, vector, location, wrap, filtering)
             return node.outputs['Color'], node.outputs['Alpha']
         color = alpha = None
         for index, (number, tile) in enumerate(tiles):
-            node = self.texture(tile, vector, (location[0], location[1] - 120 * index))
+            node = self.texture(tile, vector, (location[0], location[1] - 120 * index), wrap, filtering)
             if color is None:
                 color, alpha = node.outputs['Color'], node.outputs['Alpha']
                 continue
@@ -149,7 +150,7 @@ def resolved(layers):
 def slot_signature(slot):
     source = slot.source
     if source == 'IMAGE':
-        source += slot.image.name if slot.image else ''
+        source += slot.image.name + slot.wrap + slot.filtering if slot.image else ''
     elif source == 'PATTERN':
         source += slot.pattern
     return slot.name + slot.blend + source
@@ -594,14 +595,17 @@ def layer_coordinates(nodes, links, layer, x):
 def slot_content(build, layer, slot, vector, name, x, y):
     nodes, links = build.nodes, build.links
     if slot.source == 'IMAGE' and slot.image:
-        if layer.kind == 'PAINT' or layer.projection != 'TRIPLANAR':
-            return build.sampler.sample(slot.image, None if layer.kind == 'PAINT' else vector)[0]
+        if layer.kind == 'PAINT':
+            return build.sampler.sample(slot.image)[0]
+        if layer.projection != 'TRIPLANAR':
+            return build.sampler.sample(slot.image, vector, wrap=slot.wrap, filtering=slot.filtering)[0]
         texture = nodes.new('ShaderNodeTexImage')
         texture.image = slot.image
         texture.location = (x - 250, y - 120)
         texture.name = name + '.box'
         texture.projection = 'BOX'
         texture.projection_blend = layer.triplanar_blend
+        texture.extension, texture.interpolation = slot.wrap, slot.filtering
         links.new(vector, texture.inputs['Vector'])
         return texture.outputs['Color']
     if slot.source == 'PATTERN':

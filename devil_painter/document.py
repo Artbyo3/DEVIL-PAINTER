@@ -10,7 +10,10 @@ SOURCES = (('VALUE', 'Value', ''), ('IMAGE', 'Texture', ''), ('PATTERN', 'Patter
 PROJECTIONS = (('UV', 'UV', ''), ('TRIPLANAR', 'Tri-planar', ''), ('PLANAR', 'Planar', ''), ('SPHERICAL', 'Spherical', ''), ('CYLINDRICAL', 'Cylindrical', ''))
 PROJECTORS = {'PLANAR', 'SPHERICAL', 'CYLINDRICAL'}
 TRIPLANAR_BLEND = .2
-SLOT_FIELDS = ('enabled', 'source', 'color', 'value', 'color_b', 'value_b', 'blend', 'opacity', 'pattern', 'scale', 'detail', 'contrast')
+TEXTURE_WRAPS = (('REPEAT', 'Repeat', ''), ('EXTEND', 'Clamp', ''), ('MIRROR', 'Mirror', ''))
+TEXTURE_FILTERS = (('Linear', 'Linear', ''), ('Closest', 'Closest', ''), ('Cubic', 'Cubic', ''))
+TEXTURE_SAMPLING = {'wrap': TEXTURE_WRAPS, 'filtering': TEXTURE_FILTERS}
+SLOT_FIELDS = ('enabled', 'source', 'color', 'value', 'color_b', 'value_b', 'blend', 'opacity', 'pattern', 'scale', 'detail', 'contrast', 'wrap', 'filtering')
 LAYER_KINDS = (('PAINT', 'Paint', ''), ('FILL', 'Fill', ''), ('FOLDER', 'Folder', ''), ('INSTANCE', 'Instance', ''))
 BAKE_IDS = (('ISLAND', 'UV islands', ''), ('MATERIAL', 'Materials', ''), ('OBJECT', 'Objects', ''), ('VERTEX', 'Vertex colors', ''))
 BAKE_ID_LABELS = {key: label for key, label, _ in BAKE_IDS}
@@ -36,6 +39,8 @@ class DEVIL_PAINTER_PG_slot(bpy.types.PropertyGroup):
     scale: bpy.props.FloatProperty(default=8.0, min=0.1, max=1024.0)
     detail: bpy.props.FloatProperty(default=0.5, min=0.0, max=1.0)
     contrast: bpy.props.FloatProperty(default=0.3, min=0.0, max=0.98)
+    wrap: bpy.props.EnumProperty(items=TEXTURE_WRAPS)
+    filtering: bpy.props.EnumProperty(items=TEXTURE_FILTERS)
 
 
 class DEVIL_PAINTER_PG_channel(bpy.types.PropertyGroup):

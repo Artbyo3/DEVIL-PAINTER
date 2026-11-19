@@ -11,7 +11,7 @@ from . import actions, autosave, baking, bridge, brushes, caches, compositing, d
 from .blending import BLEND_MODES, CHANNEL, FOLDER_BLENDS, linear_to_srgb, srgb_to_linear
 from .ui_system import ACCENT
 from .canvas import Rect
-from .document import (BAKE_ID_LABELS, DYNAMICS, PROJECTIONS, PROJECTORS, RESOLUTIONS, STROKE_METHODS, active_effect, active_layer, active_tile, find_layer,
+from .document import (BAKE_ID_LABELS, DYNAMICS, PROJECTIONS, PROJECTORS, RESOLUTIONS, STROKE_METHODS, TEXTURE_SAMPLING, active_effect, active_layer, active_tile, find_layer,
                        editing_mask, paint_target, set_channels, slot_value, texture_set, uses_coordinates)
 from .effects import FILL_PROJECTIONS, LEVEL_COMPONENTS, MASK_BLENDS, mask_effects
 from .filters import FILTER, FILTERS, GROUPS
@@ -1959,6 +1959,14 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         elif key.startswith('SET_BLEND.'):
             _, channel, mode = key.split('.')
             self.message = actions.set_blend(context, obj, data, channel, mode)
+        elif key.startswith(('WRAP.', 'FILTERING.')):
+            field, channel = key.lower().split('.')
+            current = getattr(active_layer(data).slots[channel], field)
+            self.state.popover = Popover('MENU', control.rect, items=tuple((f'SET_SAMPLING.{field}.{channel}.{mode}', label, mode == current)
+                                                                          for mode, label, _ in TEXTURE_SAMPLING[field]))
+        elif key.startswith('SET_SAMPLING.'):
+            _, field, channel, mode = key.split('.')
+            self.message = actions.set_sampling(context, obj, data, channel, field, mode)
         elif key in {'CHANNELS', 'PROJECT', 'VIEWPORT', 'OPEN_SHORTCUTS'}:
             kind = 'SHORTCUTS' if key == 'OPEN_SHORTCUTS' else key
             same = self.state.popover is not None and self.state.popover.kind == kind
