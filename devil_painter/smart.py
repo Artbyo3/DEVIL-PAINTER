@@ -8,7 +8,7 @@ from .effects import EFFECT_FIELDS
 from .tiles import adopt
 from .library import (BUILTIN_MATERIALS, apply_definition, capture, definition_effects, library_root, load_image, material, pattern, plain,
                       save_settings, settings)
-from .masks import GENERATOR_FIELDS, SMART_MASKS
+from .masks import LAYER_GENERATOR_FIELDS, SMART_MASKS
 
 PRESET = {item['name']: item for item in SMART_MASKS}
 BASE = {item['name']: item for item in BUILTIN_MATERIALS}
@@ -16,7 +16,7 @@ BASE = {item['name']: item for item in BUILTIN_MATERIALS}
 
 def masked(definition, mask_name, **changes):
     preset = dict(PRESET[mask_name], **changes)
-    return dict(definition, generator={key: preset[key] for key in GENERATOR_FIELDS})
+    return dict(definition, generator={key: preset[key] for key in LAYER_GENERATOR_FIELDS})
 
 
 def entry(definition, parent=-1):

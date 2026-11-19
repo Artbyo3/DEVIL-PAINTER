@@ -23,10 +23,10 @@ from bpy_extras import view3d_utils
 from mathutils import Euler, Matrix, Vector
 from .draw import TOAST_SECONDS, Renderer
 from .privacy import masked
-from .masks import BUILDER_SLIDERS, GENERATORS
+from .masks import BREAKUPS, GENERATORS
 from .polyfill import POLY_NOUN
 from .meshmaps import MESH_MAPS
-from .minimal import MENU_HEADING, SAMPLE_TOP, EXPOSURE_RANGE, GAMMA_RANGE, PROJECTOR_RANGE, NORMAL_SLIDERS, STENCIL_SLIDERS, FX_RANGES, effect_menu, layer_rows, FOV_RANGE, RECENT_COLORS, SHADER_SLIDERS, BRUSH_SLIDERS, BRUSH_TOGGLES, GENERATOR_SLIDERS, MAX_BRUSH_SIZE, REPLACE_TARGET, EFFECT_TARGET, SCALE_RANGE, TILING_RANGE, from_slider, painter_layout
+from .minimal import MENU_HEADING, SAMPLE_TOP, EXPOSURE_RANGE, GAMMA_RANGE, PROJECTOR_RANGE, NORMAL_SLIDERS, STENCIL_SLIDERS, FX_RANGES, effect_menu, layer_rows, FOV_RANGE, RECENT_COLORS, SHADER_SLIDERS, BRUSH_SLIDERS, BRUSH_TOGGLES, BREAKUP_DETAIL, GENERATOR_SLIDERS, MAX_BRUSH_SIZE, REPLACE_TARGET, EFFECT_TARGET, SCALE_RANGE, TILING_RANGE, from_slider, painter_layout
 from .shell import COLUMNS, HEADER, HEIGHTS, PANELS, ROWS_ONLY, SECTIONS, SIDES, WIDTHS, clamp_length, clamp_strip, default_strips, flexible, place, resize_run
 from .state import Popover, TextEdit, WorkspaceState
 
@@ -64,7 +64,8 @@ PROJECTION_LABELS = {key: label for key, label, _ in PROJECTIONS}
 CIRCLE_STEPS = 32
 BRUSH_RANGES = {key: (field, top, .01 if key == 'BRUSH_FLOW' else 1.0 if key == 'BRUSH_SPACING' else 0.0) for key, _, field, top, _ in BRUSH_SLIDERS}
 BRUSH_FLAGS = {key: field for key, _, field in BRUSH_TOGGLES}
-GENERATOR_RANGES = {**{key: (field, top) for key, _, field, top in GENERATOR_SLIDERS}, **{key: (field, 1.0) for key, _, field in BUILDER_SLIDERS}}
+GENERATOR_RANGES = {**{key: (field, top) for key, _, field, top in GENERATOR_SLIDERS + (BREAKUP_DETAIL,)},
+                    **{term.slider: (term.weight, 1.0) for generator in GENERATORS for term in generator.terms}}
 BAKE_OBJECTS = {'BAKE_SOURCE': ('bake_source', 'SET_SOURCE.'), 'BAKE_CAGE': ('bake_cage', 'SET_CAGE.')}
 AUTO_BAKE_DELAY = 1.0
 LAYER_KEYS = ('ROW_', 'FX_', 'EYE_', 'FXEYE_', 'MASKTHUMB_')
@@ -1641,6 +1642,12 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
                 (f'SET_GENERATOR.{item.key}', item.label, current == item.key) for item in GENERATORS))
         elif key.startswith('SET_GENERATOR.'):
             self.message = actions.edit_effect(context, obj, data, 'generator', key.removeprefix('SET_GENERATOR.'), True)
+        elif key == 'GEN_BREAKUP':
+            current = active_effect(data).gen_breakup
+            self.state.popover = Popover('MENU', control.rect, items=tuple(
+                (f'SET_BREAKUP.{item.key}', item.label, current == item.key) for item in BREAKUPS))
+        elif key.startswith('SET_BREAKUP.'):
+            self.message = actions.edit_effect(context, obj, data, 'gen_breakup', key.removeprefix('SET_BREAKUP.'), True)
         elif key == 'GEN_INVERT':
             self.message = actions.edit_effect(context, obj, data, 'gen_invert', not active_effect(data).gen_invert, True)
         elif key == 'VIEW2D':

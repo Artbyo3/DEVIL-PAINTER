@@ -118,7 +118,13 @@ Blender's native painting.
   (ambient occlusion), Ground gradient (height from the position map),
   Thickness, and more. Each has its own blend mode and opacity like every
   mask effect, plus level, contrast, noise breakup, noise scale, and invert,
-  and applies in stack order. Clicking a generator or smart mask preset in
+  and applies in stack order. Each Generator picks its own breakup texture
+  (noise, scratches, streaks, cells, or the grunge, cracks, wood, stripes,
+  bricks, and checker patterns), with a Detail slider for the noise-based
+  ones, and gives every mesh term its own weight (Edges, Dirt, Top,
+  Gradient, and so on). Documents saved before the breakup became a choice
+  get their generator's former breakup and full term weights on open, so
+  the mask is unchanged. Clicking a generator or smart mask preset in
   the shelf adds a new Generator effect to the selected layer's mask stack
   instead of replacing one. Documents saved before generators became effects
   keep their generator: opening them moves it into the stack as the first
