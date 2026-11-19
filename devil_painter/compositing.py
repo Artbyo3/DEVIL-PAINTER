@@ -2,11 +2,12 @@ import math
 from .blending import MIX_NODE_BLENDS
 from .document import PROJECTORS, active_tile, children, folder_mode, geometry_attribute, isolated_uids, linked_layer, set_channels, shown_layers, slot_value, uses_coordinates
 from .effects import COMPONENT_FIELDS, CONTENT_KINDS, EFFECT_FIELDS
-from .filters import FILTER, content_warp, filter_color, filter_value, warp_vector, wrap_sampling
+from .caches import revision, tile, tile_variant
+from .filters import FILTER, filter_color, filter_value, wrap_sampling
 from .masks import GENERATOR_VALUES, generator_mask, generator_name, id_selection, write_generators
 from .nodes import gray, link_or_set, math_node, mix_color, mix_value, socket, vector_math
 from .procedural import contrast_range, pattern_node, set_pattern_values
-from .tiles import numbers, variant
+from .tiles import numbers
 
 SIGNATURE_KEY = 'devil_painter_signature'
 QUICK_TINT = (1.0, .08, .15, 1.0)
@@ -99,7 +100,7 @@ class Build:
         self.shading = shading or dict(shader='PRINCIPLED', normal_format='OPENGL', normal_space='TANGENT')
         self.shaded = None
         self.data, self.resolution = data, resolution
-        self.masks, self.anchors, self.layer_map = {}, {}, {}
+        self.masks, self.anchors, self.layer_map, self.below = {}, {}, {}, {}
 
 
 class Instance:
@@ -196,12 +197,47 @@ def stroke_over(build, image, alpha, color, x):
     return total, mix_color(build, color, texture.outputs['Color'], weight), weight
 
 
-def sampling(build, layer, target):
+def positional(effect):
+    return effect.enabled and effect.kind == 'FILTER' and FILTER[effect.filter].sampling
+
+
+def coverage_sampling(build, layer, key):
     chain = build.sampler.sample
     for effect in layer.effects:
-        if effect.enabled and effect.target == target and effect.kind == 'FILTER' and FILTER[effect.filter].sampling:
+        if positional(effect) and effect.target == 'CONTENT' and effect.channel in {'ALL', key}:
             chain = anchored_sampling(build, effect, chain, wrap_sampling(build, effect, chain))
-    return lambda image, vector=None: chain(image, vector if vector is not None else build.sampler.uv())
+    return lambda image: chain(image, build.sampler.uv())[1]
+
+
+def below_image(build, layer, effect, key, below):
+    if build.data is None:
+        return None
+    name = f'{layer.uid}.{effect.uid}.{key}'
+    build.below[name] = below
+    return tile(build.data, name, numbers(build.data)[0])
+
+
+def filtered_content(build, layer, effect, key, content):
+    image = below_image(build, layer, effect, key, content)
+    if image is None:
+        return content
+    result = wrap_sampling(build, effect, build.sampler.sample)(image, build.sampler.uv())[0]
+    strength = anchor_strength(build, effect)
+    return result if strength is None else mix_color(build, content, result, strength)
+
+
+def filtered_mask(build, layer, effect, value):
+    image = below_image(build, layer, effect, 'MASK', value)
+    if image is None:
+        return value
+
+    def taps(image, vector):
+        split = build.nodes.new('ShaderNodeSeparateColor')
+        build.links.new(build.sampler.sample(image, vector)[0], split.inputs['Color'])
+        return split.outputs['Red'], split.outputs['Red']
+    result = wrap_sampling(build, effect, taps)(image, build.sampler.uv())[1]
+    strength = anchor_strength(build, effect)
+    return result if strength is None else mix_value(build, value, result, strength)
 
 
 def levels_value(build, value, effect):
@@ -367,7 +403,7 @@ def mask_value(build, layer):
         return build.masks[layer.uid]
     build.masks[layer.uid] = 1.0
     nodes, links = build.nodes, build.links
-    sample = sampling(build, layer, 'MASK')
+    sample = build.sampler.sample
     value = 1.0
     if layer.mask:
         value = sample(layer.mask)[1]
@@ -385,6 +421,9 @@ def mask_value(build, layer):
         else:
             if effect.kind == 'LEVELS':
                 other = levels_value(build, value, effect)
+            elif positional(effect):
+                value = filtered_mask(build, layer, effect, value)
+                continue
             elif effect.kind == 'FILTER':
                 other = filter_value(build, value, effect)
                 strength = anchor_strength(build, effect) if other is not None else None
@@ -416,7 +455,7 @@ def layer_coverage(build, layer, x, stroke=None):
     factor.inputs[0].default_value = 1.0
     coverage, source, weight = factor.outputs[0], None, None
     if layer.kind == 'PAINT' and layer.image:
-        source, alpha = sampling(build, layer, 'CONTENT')(layer.image)
+        source, alpha = build.sampler.sample(layer.image)[0], coverage_sampling(build, layer, 'ALL')(layer.image)
         if stroke is not None:
             alpha, source, weight = stroke_over(build, stroke, alpha, source, x)
         links.new(alpha, factor.inputs[0])
@@ -496,7 +535,7 @@ def slot_content(build, layer, slot, vector, name, x, y):
     nodes, links = build.nodes, build.links
     if slot.source == 'IMAGE' and slot.image:
         if layer.kind == 'PAINT' or layer.projection != 'TRIPLANAR':
-            return sampling(build, layer, 'CONTENT')(slot.image, None if layer.kind == 'PAINT' else vector)[0]
+            return build.sampler.sample(slot.image, None if layer.kind == 'PAINT' else vector)[0]
         texture = nodes.new('ShaderNodeTexImage')
         texture.image = slot.image
         texture.location = (x - 250, y - 120)
@@ -506,8 +545,7 @@ def slot_content(build, layer, slot, vector, name, x, y):
         return texture.outputs['Color']
     if slot.source == 'PATTERN':
         texture, factor = pattern_node(nodes, slot.pattern, name + '.texture', (x - 450, y - 120))
-        warp = content_warp(layer.effects)
-        links.new(warp_vector(build, warp, vector) if warp else vector, texture.inputs['Vector'])
+        links.new(vector, texture.inputs['Vector'])
         contrast = nodes.new('ShaderNodeMapRange')
         contrast.name = name + '.contrast'
         contrast.location = (x - 300, y - 120)
@@ -523,12 +561,11 @@ def slot_content(build, layer, slot, vector, name, x, y):
 
 def content_effects_for(layer, key):
     return [effect for effect in layer.effects if effect.enabled and effect.target == 'CONTENT' and effect.kind in CONTENT_KINDS
-            and effect.channel in {'ALL', key} and not (effect.kind == 'FILTER' and FILTER[effect.filter].sampling)
-            and not (effect.kind == 'PAINT' and effect.image is None)]
+            and effect.channel in {'ALL', key} and not (effect.kind == 'PAINT' and effect.image is None)]
 
 
 def content_source(build, layer, effect, colored, generated):
-    sample = sampling(build, layer, 'CONTENT')
+    sample = build.sampler.sample
     if effect.kind == 'PAINT':
         color, alpha = sample(effect.image)
         return color if colored else gray(build, color), math_node(build.nodes, build.links, 'MULTIPLY', alpha, effect.opacity)
@@ -539,7 +576,9 @@ def content_source(build, layer, effect, colored, generated):
     return generated[effect.uid], effect.opacity
 
 
-def content_effect(build, layer, content, effect, colored, generated):
+def content_effect(build, layer, content, effect, key, colored, generated):
+    if positional(effect):
+        return filtered_content(build, layer, effect, key, content)
     if effect.kind == 'LEVELS':
         return levels_color(build, content, effect)
     if effect.kind == 'FILTER':
@@ -728,7 +767,7 @@ def compose_layer(build, channels, layer, results, x):
         y = 300 - 250 * row
         reach = coverage
         if layer.kind == 'PAINT' and channel.key != 'base_color' and slot.source == 'IMAGE' and slot.image is not None:
-            reach = math_node(nodes, links, 'MULTIPLY', coverage, sampling(build, layer, 'CONTENT')(slot.image)[1], x - 150, y - 60)
+            reach = math_node(nodes, links, 'MULTIPLY', coverage, coverage_sampling(build, layer, channel.key)(slot.image), x - 150, y - 60)
         factor = math_node(nodes, links, 'MULTIPLY', reach, 1.0, x - 100, y - 60, name + '.opacity')
         native = slot.blend in MIX_NODE_BLENDS
         node = channel_mix(nodes, links, name, results[channel.key], factor, slot.blend if native else 'MIX', x, y)
@@ -748,7 +787,7 @@ def compose_layer(build, channels, layer, results, x):
             constant.name = name + '.const'
             content = constant.outputs[0]
         for effect in effects:
-            content = content_effect(build, layer, content, effect, channel.width == 3, generated)
+            content = content_effect(build, layer, content, effect, channel.key, channel.width == 3, generated)
         if not native:
             content = custom_blend(build, slot.blend, results[channel.key], content)
         if content is not None:
@@ -947,6 +986,52 @@ def write_values(nodes, channels, layers, brush=None):
                 nodes[name + '.const'].outputs[0].default_value = rgba(slot_value(slot))
 
 
+def rna_values(item):
+    parts = []
+    for prop in item.bl_rna.properties:
+        if prop.identifier == 'rna_type':
+            continue
+        value = getattr(item, prop.identifier)
+        if prop.type == 'COLLECTION':
+            parts.extend(rna_values(entry) for entry in value)
+        elif prop.type == 'POINTER':
+            parts.append('' if value is None else value.name_full if hasattr(value, 'name_full') else rna_values(value))
+        elif getattr(prop, 'is_array', False):
+            parts.append(','.join(str(entry) for entry in value))
+        else:
+            parts.append(str(value))
+    return '/'.join(parts)
+
+
+def has_positional(data):
+    return any(positional(effect) for layer in resolved(data.layers) for effect in layer.effects)
+
+
+def below_stamp(data):
+    project = data.id_data.devil_painter
+    layers = '|'.join(rna_values(layer) for item in project.sets for layer in item.layers)
+    channels = ','.join(channel.key for channel in set_channels(data))
+    maps = ','.join(item.image.name_full for item in data.maps if item.image is not None)
+    tiles = ','.join(str(number) for number in numbers(data))
+    return f'{revision()};{data.visible};{data.resolution};{project.uv_map};{channels};{maps};{tiles};{layers}'
+
+
+def below_build(data):
+    tree = data.material.node_tree
+    build = set_build(data, tree, raw=True)
+    output = build_tree(build, set_channels(data), stack_layers(data, True), None, True)
+    emission = tree.nodes.new('ShaderNodeEmission')
+    tree.links.new(emission.outputs[0], output.inputs['Surface'])
+    return build, emission
+
+
+def emit_below(build, emission, name):
+    target = emission.inputs['Color']
+    for link in list(target.links):
+        build.links.remove(link)
+    link_or_set(build, target, build.below[name])
+
+
 def stroke_link(data):
     if not data.stroke_owner or data.stroke is None:
         return None
@@ -993,7 +1078,7 @@ def viewed_map(data):
 
 def set_build(data, tree, raw=False):
     project = data.id_data.devil_painter
-    sampler = Sampler(tree.nodes, tree.links, numbers(data), lambda image, number: variant(data, image, number), project.uv_map)
+    sampler = Sampler(tree.nodes, tree.links, numbers(data), lambda image, number: tile_variant(data, image, number), project.uv_map)
     maps = {item.name: item.image for item in data.maps if item.image is not None}
     shading = dict(shader=data.shader, normal_format=project.normal_format, normal_space=project.normal_space)
     return Build(tree.nodes, tree.links, sampler, None if raw else stroke_link(data), maps, False, 1.0, active_tile(data), shading, data, data.resolution)

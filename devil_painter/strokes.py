@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 import bpy
 import numpy
-from . import compositing
+from . import caches, compositing
 from .document import active_tile, find_layer, set_channels, slot_value
 from .tiles import blank, create, variant
 
@@ -36,6 +36,7 @@ def read(image):
 def write(image, pixels):
     image.pixels.foreach_set(pixels.ravel())
     image.update()
+    caches.touch()
 
 
 def rgb(value):

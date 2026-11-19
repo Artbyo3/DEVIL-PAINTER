@@ -143,6 +143,20 @@ Blender's native painting.
   writes its grayscale result into the channels. Content effects save with
   the file and in smart materials; Save as material keeps content
   Generators.
+- Positional sampling filters: a blur-type Filter (every Filter that reads
+  neighbouring pixels: the blurs, sharpen, glow, the distorts, color fringe,
+  and the edge filters) processes only what is below it in its stack. In the
+  mask stack that is the painted mask, the geometry mask, and every mask
+  effect under the filter; in the content stack it is the layer's own content
+  for that channel plus every content effect under the filter, including
+  Fills and Generators. Effects above the filter composite after it and stay
+  untouched, so a sharp Paint effect above a Blur stays sharp. The result
+  below each such filter is baked to a cached texture at the texture set
+  resolution, refreshed after strokes, edits, undo, and before every export,
+  bake, flatten, and layer export; the cache is packed on save. A paint
+  layer's own transparency still passes through every blur-type filter set
+  to All channels, as before. Pointwise filters (Levels, Invert, Contrast,
+  color and lighting filters) are unchanged.
 - Anchor inputs: a Generator or Filter effect, in the mask or content stack,
   can take another layer's result as an extra input through its Anchor
   dropdown, with a Channel dropdown and an Anchor strength slider. A

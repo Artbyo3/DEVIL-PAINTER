@@ -7,7 +7,7 @@ import numpy
 import math
 import gpu
 from gpu_extras.batch import batch_for_shader
-from . import actions, autosave, bridge, brushes, compositing, dynamics, packs, tiles, exporting, library, meshmaps, painting, polyfill, post, projection, vectors, projects, sets, shelf, shortcuts, smart, strokes, thumbnails
+from . import actions, autosave, baking, bridge, brushes, caches, compositing, dynamics, packs, tiles, exporting, library, meshmaps, painting, polyfill, post, projection, vectors, projects, sets, shelf, shortcuts, smart, strokes, thumbnails
 from .blending import BLEND_MODES, CHANNEL, FOLDER_BLENDS, linear_to_srgb, srgb_to_linear
 from .ui_system import ACCENT
 from .canvas import Rect
@@ -159,6 +159,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         obj = context.view_layer.objects.active
         data = texture_set(obj)
         self.stroke_pending = False
+        self.below_pending, self.below_since = (), 0.0
         self.drag_origin = (0.0, 0.0)
         self.engine_before = ''
         self.fonts = []
@@ -254,6 +255,24 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             if message:
                 self.message = message
                 self._area.tag_redraw()
+
+    def refresh_below(self, context):
+        obj, data = self.painted()
+        if (data is None or obj.mode != 'TEXTURE_PAINT' or self.stroke_pending or self.state.drag is not None
+                or any(operator.bl_idname.startswith('PAINT_OT') for operator in self._window.modal_operators)):
+            return
+        stale = tuple(stamp for _, stamp in baking.stale_below(obj.devil_painter))
+        if stale != self.below_pending:
+            self.below_pending, self.below_since = stale, time.monotonic()
+            return
+        if not stale or time.monotonic() - self.below_since < AUTO_BAKE_DELAY:
+            return
+        self.below_pending = ()
+        if baking.refresh_below(context, obj, obj.devil_painter):
+            painting.enter_paint_mode(context, obj)
+            sets.mask_faces(obj, obj.devil_painter)
+            painting.update_canvas(context, data)
+            self._area.tag_redraw()
 
     def setup(self, obj, data):
         if data is not None or obj is None or obj.type != 'MESH':
@@ -453,6 +472,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.finish_stroke(context)
         if event.type == 'TIMER':
             self.auto_bake(context)
+            self.refresh_below(context)
             for note in packs.poll() + [autosave.failure_notice()]:
                 if note:
                     self.message = note
@@ -894,6 +914,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         return strokes.merge(obj, data, strokes.Gesture(path, radius, source)), ''
 
     def begin_stroke(self, context):
+        caches.touch()
         obj, data = self.painted()
         if data is None or obj.mode != 'TEXTURE_PAINT':
             return
@@ -921,6 +942,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self._area.tag_redraw()
 
     def history_step(self, context, redo):
+        caches.touch()
         self.state.popover = None
         if redo:
             strokes.redo()
