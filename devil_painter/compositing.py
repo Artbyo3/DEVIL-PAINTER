@@ -1067,6 +1067,7 @@ def below_build(data):
     tree = data.material.node_tree
     build = set_build(data, tree, raw=True)
     output = build_tree(build, set_channels(data), stack_layers(data, True), None, True)
+    update_values(data, raw=True)
     emission = tree.nodes.new('ShaderNodeEmission')
     tree.links.new(emission.outputs[0], output.inputs['Surface'])
     return build, emission
