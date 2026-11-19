@@ -19,7 +19,7 @@ Devil Painter creates one texture set per material slot with an initial Paint la
 
 1. Choose **Paint** (<kbd>B</kbd>), **Fill** (<kbd>G</kbd>), **Erase** (<kbd>E</kbd>), **Blur**, **Smear**, **Clone**, **Polygon fill**, or **Path** from the left tool dock.
 2. Pick a brush color in the tool strip, adjust **Size** (<kbd>F</kbd> or <kbd>[</kbd> / <kbd>]</kbd>) and **Opacity** (<kbd>Shift</kbd> + <kbd>F</kbd>), and paint directly onto the mesh in the 3D Viewport.
-3. Open **Brush** in the tool strip to configure flow, spacing, hardness, **Lazy mouse**, jitter, angle, stroke method, dynamics, pen pressure, and which channels each stroke paints and erases simultaneously. Use **Symmetry** for mirror or radial strokes, **Stencil** to paint through or project images/text/SVGs, and **Quick mask** for temporary masks.
+3. Open **Brush** in the tool strip to configure flow, spacing, hardness, **Lazy mouse**, jitter, angle, stroke method, dynamics, pen pressure (size, opacity, flow, hardness, and angle each have their own toggle), and which channels each stroke paints and erases simultaneously. Use **Symmetry** for mirror or radial strokes, **Stencil** to paint through or project images/text/SVGs, and **Quick mask** for temporary masks.
 
 ## Step 4: Add Fill Layers, Materials, and Masks
 

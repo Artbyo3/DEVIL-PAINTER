@@ -23,8 +23,9 @@ PRESETS = (
     dict(name='Square', hardness=.8, flow=1.0, spacing=25.0, smoothing=.3, jitter=0.0, alpha='Square', random_angle=False),
     dict(name='Scratches', hardness=.7, flow=.8, spacing=40.0, smoothing=0.0, jitter=.5, alpha='Scratches', random_angle=True),
 )
-PRESET_FIELDS = ('hardness', 'flow', 'spacing', 'smoothing', 'jitter', 'random_angle', 'stroke', 'angle')
-PRESET_DEFAULTS = dict(stroke='SPACE', angle=0.0)
+PRESSURE_FIELDS = ('pressure_flow', 'pressure_hardness', 'pressure_angle')
+PRESET_FIELDS = ('hardness', 'flow', 'spacing', 'smoothing', 'jitter', 'random_angle', 'stroke', 'angle', *PRESSURE_FIELDS)
+PRESET_DEFAULTS = dict(stroke='SPACE', angle=0.0, **{field: False for field in PRESSURE_FIELDS})
 STENCIL_TEXTURE = 'DP Stencil'
 
 
@@ -136,19 +137,33 @@ def set_hardness(brush, hardness):
     brush.curve_distance_falloff.update()
 
 
+def pressure_mapped(data):
+    return any(getattr(data, 'brush_' + field) for field in PRESSURE_FIELDS)
+
+
+def pressure_response(curve, pressure, mapped):
+    return curve.evaluate(curve.curves[0], pressure) if mapped else 1.0
+
+
+def sync_pressure(context, data, pressure):
+    brush = context.tool_settings.image_paint.brush
+    flow = data.brush_flow * pressure_response(brush.curve_strength, pressure, data.brush_pressure_flow)
+    setattr(brush_source(context, 'strength'), 'strength', flow if active_tool(context) in STROKE_TOOLS else data.brush_opacity)
+    hardness = data.brush_hardness * pressure_response(brush.curve_hardness, pressure, data.brush_pressure_hardness)
+    if abs(brush.get('dp_hardness', -1.0) - hardness) > 1e-4:
+        set_hardness(brush, hardness)
+        brush['dp_hardness'] = hardness
+    if brush.mask_texture is not None:
+        brush.mask_texture_slot.angle = math.radians(data.brush_angle * pressure_response(brush.curve_strength, pressure, data.brush_pressure_angle))
+
+
 def sync(context, data):
     paint = context.tool_settings.image_paint
     brush = paint.brush
     if brush is None or brush.library is not None:
         return
-    stroke = active_tool(context) in STROKE_TOOLS
-    flow = data.brush_flow
-    setattr(brush_source(context, 'strength'), 'strength', flow if stroke else data.brush_opacity)
-    brush.use_accumulate = stroke and flow < 1
+    brush.use_accumulate = active_tool(context) in STROKE_TOOLS and data.brush_flow < 1
     brush.spacing = max(1, round(data.brush_spacing))
-    if abs(brush.get('dp_hardness', -1.0) - data.brush_hardness) > 1e-4:
-        set_hardness(brush, data.brush_hardness)
-        brush['dp_hardness'] = data.brush_hardness
     brush.use_smooth_stroke = data.brush_smoothing > 0
     brush.smooth_stroke_radius = round(10 + 90 * data.brush_smoothing)
     brush.smooth_stroke_factor = .5 + .49 * data.brush_smoothing
@@ -164,7 +179,7 @@ def sync(context, data):
         slot.mask_map_mode = 'VIEW_PLANE'
         slot.use_random = data.brush_random_angle
         slot.random_angle = math.tau
-        slot.angle = math.radians(data.brush_angle)
+    sync_pressure(context, data, 1.0)
     sync_stencil(context, brush, data)
     sync_symmetry(context, data)
 

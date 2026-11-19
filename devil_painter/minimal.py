@@ -256,8 +256,9 @@ BRUSH_SLIDERS = (('BRUSH_FLOW', 'Flow', 'brush_flow', 1.0, 'How much paint each 
 NORMAL_SLIDERS = (('BRUSH_NORMAL_TILT', 'Normal tilt', 'brush_normal_tilt', 89.0), ('BRUSH_NORMAL_ANGLE', 'Normal direction', 'brush_normal_angle', 360.0))
 STENCIL_SLIDERS = (('STENCIL_SCALE', 'Scale', 'stencil_scale', 4.0), ('STENCIL_ANGLE', 'Rotation', 'stencil_angle', 360.0),
                    ('STENCIL_X', 'Left to right', 'stencil_x', 1.0), ('STENCIL_Y', 'Bottom to top', 'stencil_y', 1.0))
-BRUSH_TOGGLES = (('BRUSH_PRESSURE_SIZE', 'Pressure size', 'brush_pressure_size'), ('BRUSH_PRESSURE_OPACITY', 'Pressure flow', 'brush_pressure_opacity'),
-                 ('BRUSH_RANDOM_ANGLE', 'Random angle', 'brush_random_angle'))
+BRUSH_TOGGLES = (('BRUSH_PRESSURE_SIZE', 'Pressure size', 'brush_pressure_size'), ('BRUSH_PRESSURE_OPACITY', 'Pressure opacity', 'brush_pressure_opacity'),
+                 ('BRUSH_PRESSURE_FLOW', 'Pressure flow', 'brush_pressure_flow'), ('BRUSH_PRESSURE_HARDNESS', 'Pressure hardness', 'brush_pressure_hardness'),
+                 ('BRUSH_PRESSURE_ANGLE', 'Pressure angle', 'brush_pressure_angle'), ('BRUSH_RANDOM_ANGLE', 'Random angle', 'brush_random_angle'))
 SHORT_NAMES = {'roughness': 'Rough', 'metallic': 'Metal', 'normal': 'Normal', 'height': 'Height', 'emission': 'Emit', 'opacity': 'Alpha'}
 
 
