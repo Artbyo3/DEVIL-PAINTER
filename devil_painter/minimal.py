@@ -11,7 +11,7 @@ from .blending import BLEND_MODES, CHANNEL, CHANNELS, FOLDER_BLENDS, linear_to_s
 from .canvas import Layout, Rect
 from .document import (BAKE_ID_LABELS, DYNAMICS, NORMAL_FORMATS, PROJECTORS, STROKE_METHODS, TRANSPARENCY, NORMAL_SPACES, PROJECTIONS, RESOLUTIONS, SHADERS, active_effect, active_layer, children, editing_mask, find_layer, isolated_uids,
                        linked_layer, set_channels, slot_value, uses_coordinates)
-from .effects import EFFECT_ICONS, EFFECT_KINDS, FILL_PROJECTIONS, LEVEL_COMPONENTS, MASK_BLEND_LABEL, LevelsView, effect_label
+from .effects import CONTENT_SOURCES, EFFECT_ICONS, EFFECT_KINDS, FILL_PROJECTIONS, LEVEL_COMPONENTS, MASK_BLEND_LABEL, LevelsView, effect_label
 from .filters import FILTER, FILTERS
 from .library import capture, libraries as library_folders, texture_folder
 from .exporting import FORMAT_LABELS, SOURCES, TOKENS, find_template, is_custom
@@ -518,7 +518,7 @@ def effects_add_section(flow, data, layer, w):
     x, y, h = flow.field()
     half = (w - 4 * s) / 2
     flow.add('ADD_FX_MASK', Rect(x, y, half, h), 'DROPDOWN', text='+ Mask effect', tip='Add paint, fill, levels, filter, compare, anchor, ID color, or a generator to the mask')
-    flow.add('ADD_FX_CONTENT', Rect(x + half + 4 * s, y, half, h), 'DROPDOWN', text='+ Content effect', tip='Add levels or a filter to the layer content')
+    flow.add('ADD_FX_CONTENT', Rect(x + half + 4 * s, y, half, h), 'DROPDOWN', text='+ Content effect', tip='Add paint, fill, levels, filter, or a generator to the layer content')
 
 
 def geometry_section(flow, data, layer, w):
@@ -575,6 +575,8 @@ EFFECT_SLIDERS = {'LEVELS': (('in_low', 'In low', 1.0), ('in_high', 'In high', 1
                              ('out_high', 'Out high', 1.0)),
                   'FILL': (('scale', 'Scale', 50.0), ('detail', 'Detail', 1.0), ('contrast', 'Contrast', .98)),
                   'ID_COLOR': (('amount', 'Tolerance', 1.0),)}
+FILL_COLORS = {'VALUE': (('color', 'The color this fill puts in color channels'),),
+               'PATTERN': (('color', 'The color of the bright parts of the pattern'), ('color_b', 'The color of the dark parts of the pattern'))}
 FILL_TRANSFORM = (('tiling', 'Tiling', 8.0), ('angle', 'Rotation', 360.0), ('offset_u', 'Offset U', 1.0), ('offset_v', 'Offset V', 1.0))
 FX_RANGES = {field: (top, floor) for group in (*EFFECT_SLIDERS.values(), *(item.sliders for item in FILTERS), FILL_TRANSFORM,
                                                 (('opacity', 'Opacity', 1.0), ('value', 'Value', 1.0)))
@@ -591,6 +593,14 @@ def effect_sliders(effect):
     if effect.kind == 'FILL' and effect.source == 'VALUE':
         return (('value', 'Value', 1.0),)
     return EFFECT_SLIDERS.get(effect.kind, ())
+
+
+def effect_colors(effect):
+    if effect.kind == 'FILTER':
+        return FILTER[effect.filter].colors
+    if effect.kind == 'FILL' and effect.target == 'CONTENT':
+        return FILL_COLORS.get(effect.source, ())
+    return ()
 
 
 def slider_rows(flow, prefix, holder, sliders, w):
@@ -618,6 +628,9 @@ def effect_section(flow, data, layer, w):
     if effect.target == 'MASK' and not (effect.kind == 'FILTER' and FILTER[effect.filter].sampling):
         flow.add('FX_BLEND', Rect(x, y, half, h), 'DROPDOWN', label='Blend', text=MASK_BLEND_LABEL[effect.blend],
                  tip='How this effect combines with the mask below it')
+    elif effect.kind in CONTENT_SOURCES:
+        flow.add('FX_BLEND', Rect(x, y, half, h), 'DROPDOWN', label='Blend', text=MASK_BLEND_LABEL[effect.blend],
+                 tip='How this effect combines with the layer content below it')
     else:
         flow.add('FX_KIND', Rect(x, y, half, h), 'NOTE', label=effect_label(effect))
     flow.add('FX_opacity', Rect(x + half + 4 * s, y, half, h), 'SLIDER', label='Opacity', value=effect.opacity, text=f'{effect.opacity * 100:.0f}%')
@@ -674,7 +687,7 @@ def effect_section(flow, data, layer, w):
     if effect.kind == 'GENERATOR':
         generator_section(flow, data, effect, w)
     slider_rows(flow, 'FX_', LevelsView(effect) if effect.kind == 'LEVELS' else effect, effect_sliders(effect), w)
-    colors = FILTER[effect.filter].colors if effect.kind == 'FILTER' else ()
+    colors = effect_colors(effect)
     if colors:
         x, y, h = flow.field()
         for index, (field, label) in enumerate(colors):
@@ -690,7 +703,7 @@ def effect_lines(data):
         lines += generator_lines(data, effect)
     if effect.kind == 'ID_COLOR':
         lines += 2 + len(effect.id_colors) + int('id' not in data.maps or data.maps['id'].image is None)
-    return lines + int(effect.kind == 'FILTER' and bool(FILTER[effect.filter].colors))
+    return lines + int(bool(effect_colors(effect)))
 
 
 def effect_menu(target):
@@ -827,7 +840,7 @@ def generator_section(flow, data, effect, w):
     s = flow.layout.scale
     x, y, h = flow.field()
     flow.add('GENERATOR', Rect(x, y, w, h), 'DROPDOWN', label='Generator', text=GENERATOR[effect.generator].label,
-             tip='Drive this mask effect from the baked mesh maps or a procedural pattern: wear, dirt, gradients, surfaces, UV borders, and more')
+             tip=f'Drive this {effect.target.lower()} effect from the baked mesh maps or a procedural pattern: wear, dirt, gradients, surfaces, UV borders, and more')
     missing = missing_maps(data, effect)
     if missing:
         x, y, h = flow.field()
@@ -850,7 +863,7 @@ def generator_section(flow, data, effect, w):
         for column, term in enumerate(terms):
             value = getattr(effect, term.weight)
             flow.add(term.slider, Rect(x + column * (width + 4 * s), y, width, h), 'SLIDER', label=term.label, value=value, text=f'{value:.2f}',
-                     tip=f'How much {term.label.lower()} feed the mask')
+                     tip=f'How much {term.label.lower()} feed the {effect.target.lower()}')
     breakup = BREAKUP[effect.gen_breakup]
     x, y, h = flow.field()
     flow.add('GEN_BREAKUP', Rect(x, y, half if breakup.detail else w, h), 'DROPDOWN', label='Breakup', text=breakup.label,

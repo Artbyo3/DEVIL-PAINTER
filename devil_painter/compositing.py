@@ -1,7 +1,7 @@
 import math
 from .blending import MIX_NODE_BLENDS
 from .document import PROJECTORS, active_tile, children, folder_mode, geometry_attribute, isolated_uids, linked_layer, set_channels, shown_layers, slot_value, uses_coordinates
-from .effects import COMPONENT_FIELDS, EFFECT_FIELDS
+from .effects import COMPONENT_FIELDS, CONTENT_KINDS, EFFECT_FIELDS
 from .filters import FILTER, content_warp, filter_color, filter_value, warp_vector, wrap_sampling
 from .masks import GENERATOR_VALUES, generator_mask, generator_name, id_selection, write_generators
 from .nodes import gray, link_or_set, math_node, mix_color, socket, vector_math
@@ -265,26 +265,46 @@ def combine_mask(build, value, other, blend, factor):
     return split.outputs['Red']
 
 
+def fill_texture(build, effect):
+    node = build.nodes.new('ShaderNodeTexImage')
+    node.image = effect.texture
+    if fill_projection(effect) == 'TRIPLANAR':
+        node.projection = 'BOX'
+        node.projection_blend = TRIPLANAR_BLEND
+    build.links.new(fill_vector(build, effect), node.inputs['Vector'])
+    return node.outputs['Color']
+
+
+def fill_pattern(build, effect):
+    texture, factor = pattern_node(build.nodes, effect.pattern, effect.uid + '.texture', (0, 0))
+    build.links.new(fill_vector(build, effect), texture.inputs['Vector'])
+    set_pattern_values(texture, effect.pattern, effect.scale, effect.detail)
+    ranged = build.nodes.new('ShaderNodeMapRange')
+    build.links.new(factor, ranged.inputs['Value'])
+    ranged.inputs['From Min'].default_value, ranged.inputs['From Max'].default_value = contrast_range(effect.pattern, effect.contrast)
+    return ranged.outputs['Result']
+
+
 def fill_effect_value(build, effect):
     if effect.source == 'VALUE':
         return effect.value
     if effect.source == 'IMAGE' and effect.texture is not None:
-        node = build.nodes.new('ShaderNodeTexImage')
-        node.image = effect.texture
-        if fill_projection(effect) == 'TRIPLANAR':
-            node.projection = 'BOX'
-            node.projection_blend = TRIPLANAR_BLEND
-        build.links.new(fill_vector(build, effect), node.inputs['Vector'])
-        return gray(build, node.outputs['Color'])
+        return gray(build, fill_texture(build, effect))
     if effect.source == 'PATTERN':
-        texture, factor = pattern_node(build.nodes, effect.pattern, effect.uid + '.texture', (0, 0))
-        build.links.new(fill_vector(build, effect), texture.inputs['Vector'])
-        set_pattern_values(texture, effect.pattern, effect.scale, effect.detail)
-        ranged = build.nodes.new('ShaderNodeMapRange')
-        build.links.new(factor, ranged.inputs['Value'])
-        ranged.inputs['From Min'].default_value, ranged.inputs['From Max'].default_value = contrast_range(effect.pattern, effect.contrast)
-        return ranged.outputs['Result']
+        return fill_pattern(build, effect)
     return None
+
+
+def fill_content(build, effect, colored):
+    if effect.source == 'IMAGE':
+        if effect.texture is None:
+            return None
+        color = fill_texture(build, effect)
+        return color if colored else gray(build, color)
+    if effect.source == 'PATTERN':
+        factor = fill_pattern(build, effect)
+        return mix_color(build, rgba(effect.color_b), rgba(effect.color), factor) if colored else factor
+    return rgba(effect.color) if colored else effect.value
 
 
 def fill_projection(effect):
@@ -472,8 +492,32 @@ def slot_content(build, layer, slot, vector, name, x, y):
 
 
 def content_effects_for(layer, key):
-    return [effect for effect in layer.effects if effect.enabled and effect.target == 'CONTENT' and effect.kind in {'LEVELS', 'FILTER'}
-            and effect.channel in {'ALL', key} and not (effect.kind == 'FILTER' and FILTER[effect.filter].sampling)]
+    return [effect for effect in layer.effects if effect.enabled and effect.target == 'CONTENT' and effect.kind in CONTENT_KINDS
+            and effect.channel in {'ALL', key} and not (effect.kind == 'FILTER' and FILTER[effect.filter].sampling)
+            and not (effect.kind == 'PAINT' and effect.image is None)]
+
+
+def content_source(build, layer, effect, colored, generated):
+    sample = sampling(build, layer, 'CONTENT')
+    if effect.kind == 'PAINT':
+        color, alpha = sample(effect.image)
+        return color if colored else gray(build, color), math_node(build.nodes, build.links, 'MULTIPLY', alpha, effect.opacity)
+    if effect.kind == 'FILL':
+        return fill_content(build, effect, colored), effect.opacity
+    if effect.uid not in generated:
+        generated[effect.uid] = generator_mask(build.nodes, build.links, effect, generator_name(layer, effect), build, sample)
+    return generated[effect.uid], effect.opacity
+
+
+def content_effect(build, layer, content, effect, colored, generated):
+    if effect.kind == 'LEVELS':
+        return levels_color(build, content, effect)
+    if effect.kind == 'FILTER':
+        return filter_color(build, content, effect)
+    other, factor = content_source(build, layer, effect, colored, generated)
+    if other is None:
+        return content
+    return mix_color(build, content, other, factor, MASK_MIXES.get(effect.blend, effect.blend))
 
 
 def flip_green(nodes, links, color):
@@ -643,6 +687,7 @@ def compose_layer(build, channels, layer, results, x):
     owner = stroke is not None and stroke[0] == layer.uid
     coverage, painted, weight = layer_coverage(build, layer, x, stroke[1] if owner else None)
     vector = layer_coordinates(nodes, links, layer, x) if uses_coordinates(layer) else None
+    generated = {}
     for row, channel in enumerate(channels):
         slot = layer.slots[channel.key]
         if not blended(slot):
@@ -671,7 +716,7 @@ def compose_layer(build, channels, layer, results, x):
             constant.name = name + '.const'
             content = constant.outputs[0]
         for effect in effects:
-            content = levels_color(build, content, effect) if effect.kind == 'LEVELS' else filter_color(build, content, effect)
+            content = content_effect(build, layer, content, effect, channel.width == 3, generated)
         if not native:
             content = custom_blend(build, slot.blend, results[channel.key], content)
         if content is not None:

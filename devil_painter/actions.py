@@ -254,7 +254,7 @@ def new_effect(data, layer, kind, target):
     data.serial += 1
     effect = layer.effects.add()
     effect.uid, effect.kind, effect.target = f'E{data.serial}', kind, target
-    effect.blend = EFFECT_BLENDS[kind]
+    effect.blend = 'MIX' if target == 'CONTENT' else EFFECT_BLENDS[kind]
     data.target, data.active_effect = 'EFFECT', effect.uid
     return effect
 
