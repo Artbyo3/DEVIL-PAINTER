@@ -2,7 +2,7 @@ import bpy
 from .blending import BLEND_MODES, CHANNEL, CHANNELS, FOLDER_BLENDS, STORED_BLENDS
 from .effects import EFFECT_KINDS, FILL_PROJECTIONS, LEVEL_COMPONENTS, MASK_BLENDS
 from .filters import FILTERS
-from .masks import GENERATORS
+from .masks import GENERATOR_FIELDS, GENERATORS
 from .procedural import PATTERNS
 
 RESOLUTIONS = (1024, 2048, 4096)
@@ -110,6 +110,15 @@ class DEVIL_PAINTER_PG_effect(bpy.types.PropertyGroup):
     offset_u: bpy.props.FloatProperty(default=0.0, min=0.0, max=1.0)
     offset_v: bpy.props.FloatProperty(default=0.0, min=0.0, max=1.0)
     id_colors: bpy.props.CollectionProperty(type=DEVIL_PAINTER_PG_id_color)
+    generator: bpy.props.EnumProperty(items=[(item.key, item.label, '') for item in GENERATORS])
+    gen_level: bpy.props.FloatProperty(default=.2, min=-1.0, max=1.0)
+    gen_contrast: bpy.props.FloatProperty(default=.5, min=0.0, max=1.0)
+    gen_noise: bpy.props.FloatProperty(default=.3, min=0.0, max=1.0)
+    gen_scale: bpy.props.FloatProperty(default=20.0, min=.5, max=200.0)
+    gen_invert: bpy.props.BoolProperty(default=False)
+    gen_edges: bpy.props.FloatProperty(default=.5, min=0.0, max=1.0)
+    gen_dirt: bpy.props.FloatProperty(default=.5, min=0.0, max=1.0)
+    gen_top: bpy.props.FloatProperty(default=0.0, min=0.0, max=1.0)
 
 
 class DEVIL_PAINTER_PG_layer(bpy.types.PropertyGroup):
@@ -384,6 +393,19 @@ def paint_target(data):
     if editing_mask(data) or layer.kind != 'PAINT':
         return layer.mask
     return layer.image
+
+
+def adopt_layer_generator(data, layer):
+    if layer.generator == 'NONE':
+        return False
+    data.serial += 1
+    effect = layer.effects.add()
+    effect.uid, effect.kind, effect.target, effect.blend, effect.opacity = f'E{data.serial}', 'GENERATOR', 'MASK', 'MULTIPLY', 1.0
+    for field in GENERATOR_FIELDS:
+        setattr(effect, field, getattr(layer, field))
+    layer.effects.move(len(layer.effects) - 1, 0)
+    layer.generator = 'NONE'
+    return True
 
 
 def geometry_attribute(data, layer):

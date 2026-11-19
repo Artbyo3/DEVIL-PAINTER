@@ -16,7 +16,7 @@ import numpy
 from .blending import CHANNELS, srgb_to_linear
 from .compositing import Build, Sampler, build_tree, write_values
 from .document import add_slots
-from .library import apply_definition, library_root
+from .library import apply_definition, definition_effects, library_root
 
 SIZE = 96
 PREVIEW_SIZE = 128
@@ -209,7 +209,8 @@ def render(path, definition):
     path.parent.mkdir(parents=True, exist_ok=True)
     scene = bpy.data.scenes.new('DP Thumbnail')
     definitions = [item for item in definition.get('layers', [definition]) if item.get('kind', 'FILL') == 'FILL']
-    mesh = preview_mesh(any('generator' in item for item in definitions))
+    generated = any(entry['kind'] == 'GENERATOR' for item in definitions for entry in definition_effects(item))
+    mesh = preview_mesh(generated)
     sphere = bpy.data.objects.new('DP Thumbnail', mesh)
     camera_data = bpy.data.cameras.new('DP Thumbnail')
     camera = bpy.data.objects.new('DP Thumbnail Camera', camera_data)
@@ -226,7 +227,7 @@ def render(path, definition):
             layer.uid, layer.kind = f'T{index}', 'FILL'
             add_slots(layer)
             apply_definition(layer, item)
-            for number, entry in enumerate(item.get('effects', ())):
+            for number, entry in enumerate(definition_effects(item)):
                 effect = layer.effects.add()
                 effect.uid = f'T{index}E{number}'
                 for field, value in entry.items():
@@ -235,7 +236,7 @@ def render(path, definition):
         build_tree(Build(tree.nodes, tree.links, Sampler(tree.nodes, tree.links, [1001], lambda image, number: image, ''), live=True, size=2.0),
                    CHANNELS, list(layers))
         write_values(material.node_tree.nodes, CHANNELS, list(layers))
-        if any('generator' in item for item in definitions):
+        if generated:
             sphere.rotation_euler = (.5, 0.0, .7)
         camera_data.type, camera_data.ortho_scale = 'ORTHO', 2.1
         camera.location, camera.rotation_euler = (0.0, -5.0, 0.0), (1.5708, 0.0, 0.0)

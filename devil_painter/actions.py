@@ -9,14 +9,14 @@ from .masks import GENERATOR, GENERATOR_FIELDS
 from .meshmaps import MESH_MAP
 from .blending import BLEND_MODES, CHANNEL, FOLDER_BLENDS, NORMAL_DETAIL
 from .procedural import PATTERN
-from .document import PROJECTIONS, PROJECTORS, SLOT_FIELDS, geometry_attribute, active_layer, add_set_channels, add_slots, children, descendants, fill_slots, find_layer, layer_index, set_slot_value
+from .document import PROJECTIONS, PROJECTORS, SLOT_FIELDS, geometry_attribute, active_effect, active_layer, adopt_layer_generator, add_set_channels, add_slots, children, descendants, fill_slots, find_layer, layer_index, set_slot_value
 
 KIND_NAMES = {'PAINT': 'Paint', 'FILL': 'Fill', 'FOLDER': 'Folder'}
-LAYER_FIELDS = ('kind', 'visible', 'opacity', 'projection', 'tiling', 'proj_offset', 'proj_rotation', 'proj_size', 'tile_match', 'material', 'folder_blend', 'geo_mask', 'link_set', 'link_uid') + GENERATOR_FIELDS
+LAYER_FIELDS = ('kind', 'visible', 'opacity', 'projection', 'tiling', 'proj_offset', 'proj_rotation', 'proj_size', 'tile_match', 'material', 'folder_blend', 'geo_mask', 'link_set', 'link_uid')
 ID_TOLERANCE = .15
 LAST_LAYER = 'A texture set keeps at least one layer. Add another layer before removing this one.'
 SAME_AS_FOLDER = 'FOLDER'
-EFFECT_BLENDS = {'PAINT': 'MIX', 'FILL': 'MULTIPLY', 'COMPARE': 'MULTIPLY', 'ANCHOR': 'MULTIPLY', 'LEVELS': 'MIX', 'FILTER': 'MIX', 'ID_COLOR': 'MULTIPLY'}
+EFFECT_BLENDS = {'PAINT': 'MIX', 'FILL': 'MULTIPLY', 'COMPARE': 'MULTIPLY', 'ANCHOR': 'MULTIPLY', 'LEVELS': 'MIX', 'FILTER': 'MIX', 'ID_COLOR': 'MULTIPLY', 'GENERATOR': 'MULTIPLY'}
 
 
 def image_for(obj, data, label, opaque):
@@ -40,10 +40,14 @@ def refresh(context, obj, data, message):
 def prepare(obj, data):
     fill_slots(data.brush_slots)
     add_set_channels(data)
+    adopted = False
     for layer in data.layers:
         if layer.kind in {'PAINT', 'FILL'}:
             fill_slots(layer.slots)
+        adopted = adopt_layer_generator(data, layer) or adopted
     strokes.ensure_buffer(obj, data)
+    if adopted:
+        compositing.sync(data)
 
 
 def start(context, obj, resolutions, use_udim, template_name, normal_format, normal_space, unwrap_mode):
@@ -245,12 +249,18 @@ def reimport_mesh(context, obj, project, mesh):
     return refresh(context, obj, project.sets[project.active_set], ' '.join(['Reimported.', *notes]))
 
 
-def add_effect(context, obj, data, kind, target):
-    layer = active_layer(data)
+def new_effect(data, layer, kind, target):
     data.serial += 1
     effect = layer.effects.add()
     effect.uid, effect.kind, effect.target = f'E{data.serial}', kind, target
     effect.blend = EFFECT_BLENDS[kind]
+    data.target, data.active_effect = 'EFFECT', effect.uid
+    return effect
+
+
+def add_effect(context, obj, data, kind, target):
+    layer = active_layer(data)
+    effect = new_effect(data, layer, kind, target)
     if kind == 'PAINT':
         effect.image = tiles.create(data, f'DP {obj.name} {data.name} {layer.uid} {effect.uid}', (0.0, 0.0, 0.0, 0.0))
     if kind == 'FILL':
@@ -261,7 +271,6 @@ def add_effect(context, obj, data, kind, target):
         effect.channel = 'base_color'
     if kind == 'ID_COLOR':
         effect.amount = ID_TOLERANCE
-    data.target, data.active_effect = 'EFFECT', effect.uid
     return refresh(context, obj, data, f'{EFFECT_LABEL[kind]} effect added to the {target.lower()} of {layer.name}.')
 
 
@@ -413,8 +422,7 @@ def paste_mask(context, obj, project, source_index, uid):
         if layer.mask is not None:
             tiles.release(target, layer.mask)
         layer.mask = carry(obj, source, target, origin.mask, f'DP {obj.name} {target.name} {layer.uid} mask')
-    for field in GENERATOR_FIELDS + ('geo_mask',):
-        setattr(layer, field, getattr(origin, field))
+    layer.geo_mask = origin.geo_mask
     copy_effects(obj, source, target, mask_effects(origin), layer)
     return refresh(context, obj, target, f'Pasted the mask of {origin.name} onto {layer.name}.')
 
@@ -932,19 +940,20 @@ def set_bake_object(context, obj, data, name, value):
     return set_bake(context, obj, data, name, target, f'{noun}: {value}.' if value else f'{noun}: none.')
 
 
-def set_generator(context, obj, data, values):
+def add_generator(context, obj, data, values):
     layer = active_layer(data)
-    library.apply_generator(layer, values)
-    if layer.generator == 'NONE':
-        return refresh(context, obj, data, f'{layer.name} has no generator.')
-    generator = GENERATOR[layer.generator]
+    effect = new_effect(data, layer, 'GENERATOR', 'MASK')
+    for field in GENERATOR_FIELDS:
+        if field in values:
+            setattr(effect, field, values[field])
+    generator = GENERATOR[effect.generator]
     absent = [key for key in generator.maps if key not in data.maps or data.maps[key].image is None]
     missing = f' Bake the {MESH_MAP[absent[0]].label.lower()} map to see it.' if absent else ''
-    return refresh(context, obj, data, f'{generator.label} masks {layer.name}.{missing}')
+    return refresh(context, obj, data, f'{generator.label} added to the mask of {layer.name}.{missing}')
 
 
 def set_generator_value(context, obj, data, field, value):
-    setattr(active_layer(data), field, value)
+    setattr(active_effect(data), field, value)
     compositing.update_values(data)
 
 

@@ -3,7 +3,7 @@ from .blending import MIX_NODE_BLENDS
 from .document import PROJECTORS, active_tile, children, folder_mode, geometry_attribute, isolated_uids, linked_layer, set_channels, shown_layers, slot_value, uses_coordinates
 from .effects import COMPONENT_FIELDS, EFFECT_FIELDS
 from .filters import FILTER, content_warp, filter_color, filter_value, warp_vector, wrap_sampling
-from .masks import generator_mask, id_selection, write_generator
+from .masks import GENERATOR_VALUES, generator_mask, generator_name, id_selection, write_generators
 from .nodes import gray, link_or_set, math_node, mix_color, socket, vector_math
 from .procedural import contrast_range, pattern_node, set_pattern_values
 from .tiles import numbers, variant
@@ -156,7 +156,8 @@ def slot_signature(slot):
 
 
 def effect_signature(effect):
-    values = '/'.join(str(getattr(effect, field)) if field not in {'texture'} else (effect.texture.name if effect.texture else '') for field in EFFECT_FIELDS)
+    values = '/'.join(str(getattr(effect, field)) if field not in {'texture'} else (effect.texture.name if effect.texture else '') for field in EFFECT_FIELDS
+                      if field not in GENERATOR_VALUES)
     components = ','.join(f'{value:.4f}' for field in COMPONENT_FIELDS for value in getattr(effect, field))
     extra = ','.join(f'{value:.4f}' for item in effect.id_colors for value in item.color)
     return f'{effect.uid}={values}={effect.image.name if effect.image else ""}={components}={extra}'
@@ -164,7 +165,7 @@ def effect_signature(effect):
 
 def layer_signature(layer):
     return ':'.join((layer.uid, layer.kind, layer.parent, layer.projection, str(layer.tile_match), f'{layer.proj_bend:.3f}',
-                     ','.join(f'{value:.3f}' for value in layer.proj_warp), layer.generator, layer.folder_blend, str(layer.geo_mask),
+                     ','.join(f'{value:.3f}' for value in layer.proj_warp), layer.folder_blend, str(layer.geo_mask),
                      ','.join(f'{item.name}={item.blend}' for item in layer.channel_blends),
                      layer.image.name if layer.image else '', layer.mask.name if layer.mask else '',
                      *(slot_signature(slot) for slot in layer.slots if slot.enabled), *(effect_signature(effect) for effect in layer.effects)))
@@ -323,10 +324,6 @@ def mask_value(build, layer):
     value = 1.0
     if layer.mask:
         value = sample(layer.mask)[1]
-    if layer.generator != 'NONE':
-        generated = generator_mask(nodes, links, layer, build, sample)
-        if generated is not None:
-            value = math_node(nodes, links, 'MULTIPLY', value, generated)
     if layer.geo_mask and build.data is not None:
         attribute = nodes.new('ShaderNodeAttribute')
         attribute.attribute_type = 'GEOMETRY'
@@ -347,6 +344,8 @@ def mask_value(build, layer):
                 other = fill_effect_value(build, effect)
             elif effect.kind == 'ID_COLOR':
                 other = id_selection(build, effect, sample)
+            elif effect.kind == 'GENERATOR':
+                other = generator_mask(nodes, links, effect, generator_name(layer, effect), build, sample)
             elif effect.kind == 'COMPARE':
                 target = build.layer_map.get(effect.other)
                 other = mask_value(build, target) if target is not None and target.uid != layer.uid else None
@@ -751,8 +750,7 @@ def isolated_tree(data, tree, roots, key, mask_uid=''):
     if mask_uid:
         layer = build.layer_map[mask_uid]
         value = mask_value(build, layer)
-        if layer.generator != 'NONE' and layer.uid + '.gen.range' in tree.nodes:
-            write_generator(tree.nodes, layer)
+        write_generators(tree.nodes, layer)
     else:
         channels = set_channels(data)
         chosen = {root.uid for root in roots}
@@ -835,8 +833,7 @@ def write_values(nodes, channels, layers, brush=None):
         nodes['stroke.opacity'].inputs[1].default_value = brush[0]
     for layer in shown_layers(layers):
         nodes[layer.uid + '.opacity'].inputs[1].default_value = layer.opacity
-        if layer.generator != 'NONE' and layer.uid + '.gen.range' in nodes:
-            write_generator(nodes, layer)
+        write_generators(nodes, layer)
         if layer.kind == 'FOLDER':
             continue
         if uses_coordinates(layer):

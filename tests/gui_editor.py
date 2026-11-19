@@ -15,7 +15,7 @@ sys.path.insert(0, str(ROOT))
 import devil_painter
 from devil_painter import editor, library, painting, shelf, shortcuts, smart, thumbnails
 from devil_painter.compositing import SIGNATURE_KEY, socket
-from devil_painter.document import texture_set
+from devil_painter.document import active_effect, texture_set
 from devil_painter.ui_system import SURFACE_FLOATING
 from tools.workspace import prepare_scratch
 from tests.gui_harness import settle, until
@@ -864,46 +864,66 @@ def journey():
     click(window, region, f'ITEM.{shelf_index("Steel")}')
     yield from settle()
     steel = next(layer for layer in data.layers if layer.uid == data.active_uid)
-    check(has('GENERATOR') and control('GENERATOR').text == 'None', 'every layer offers a mask generator')
+    check(not has('GENERATOR'), 'a layer without generator effects shows no generator controls')
+    yield from reveal(window, region, 'ADD_FX_MASK')
+    click(window, region, 'ADD_FX_MASK')
+    yield from settle()
+    check(has('NEW_FX.MASK.GENERATOR'), 'the mask effect menu offers a Generator effect')
+    click(window, region, 'NEW_FX.MASK.GENERATOR')
+    yield from settle()
+    wear = active_effect(data)
+    wear_uid = wear.uid
+    check(wear is not None and wear.kind == 'GENERATOR' and wear.target == 'MASK' and wear.blend == 'MULTIPLY' and has('GENERATOR'),
+          'adding a Generator effect selects it and shows its generator controls')
     yield from reveal(window, region, 'GENERATOR')
     click(window, region, 'GENERATOR')
     yield from settle()
+    check(not has('SET_GENERATOR.NONE'), 'a Generator effect is removed by deleting it, not by picking None')
     click(window, region, 'SET_GENERATOR.EDGE_WEAR')
     yield from settle()
     nodes = data.material.node_tree.nodes
-    check(steel.generator == 'EDGE_WEAR' and steel.uid + '.gen.range' in nodes and has('GEN_LEVEL') and has('GEN_INVERT'),
-          'Edge wear masks the layer from the baked curvature')
+    name = f'{steel.uid}.{wear_uid}'
+    wear = active_effect(data)
+    check(wear.generator == 'EDGE_WEAR' and name + '.gen.range' in nodes and has('GEN_LEVEL') and has('GEN_INVERT'),
+          'Edge wear masks the layer from the baked curvature, with nodes named after the effect')
     sampled = [node for node in nodes if node.type == 'TEX_IMAGE' and node.image == data.maps['curvature'].image]
     check(len(sampled) == 1, 'the generator samples the curvature map in the material')
     yield from reveal(window, region, 'GEN_INVERT')
     rect = control('GEN_LEVEL').rect
     press(window, 'LEFTMOUSE', region.x + rect.x + rect.w * .5, region.y + rect.y + rect.h / 2)
     yield from settle()
-    ranged = data.material.node_tree.nodes[steel.uid + '.gen.range']
-    check(abs(steel.gen_level - .5) < .05 and ranged.inputs['From Min'].default_value < steel.gen_level < ranged.inputs['From Max'].default_value,
+    wear = active_effect(data)
+    ranged = data.material.node_tree.nodes[name + '.gen.range']
+    check(abs(wear.gen_level - .5) < .05 and ranged.inputs['From Min'].default_value < wear.gen_level < ranged.inputs['From Max'].default_value,
           'the level slider moves the generator threshold')
     yield from reveal(window, region, 'GEN_INVERT')
     click(window, region, 'GEN_INVERT')
     yield from settle()
-    check(steel.gen_invert and data.material.node_tree.nodes[steel.uid + '.gen.range'].inputs['To Min'].default_value == 1.0, 'Invert flips the generated mask')
+    check(active_effect(data).gen_invert and data.material.node_tree.nodes[name + '.gen.range'].inputs['To Min'].default_value == 1.0,
+          'Invert flips the generated mask')
     click(window, region, 'SHELF_TAB.MASKS')
     yield from settle()
     yield from until(lambda: control('ITEM.0').preview is not None, 'control("ITEM.0").preview is not None')
     check(control('ITEM.0').preview is not None, 'smart masks show rendered previews')
     click(window, region, f'ITEM.{shelf_index("Dirt")}')
     yield from settle()
-    check(steel.generator == 'DIRT' and abs(steel.gen_level - .3) < 1e-4 and not steel.gen_invert
+    stack = [effect for effect in steel.effects if effect.kind == 'GENERATOR']
+    dirt = active_effect(data)
+    check([effect.generator for effect in stack] == ['EDGE_WEAR', 'DIRT'] and dirt.generator == 'DIRT' and abs(dirt.gen_level - .3) < 1e-4
+          and not dirt.gen_invert and stack[0].gen_invert
           and any(node.type == 'TEX_IMAGE' and node.image == data.maps['ao'].image for node in data.material.node_tree.nodes),
-          'clicking the Dirt smart mask drives the layer from the ambient occlusion map')
+          'clicking the Dirt smart mask adds a second generator from the ambient occlusion map and keeps the first')
     click(window, region, 'SHELF_TAB.MATERIALS')
     yield from settle()
-    yield from reveal(window, region, 'GENERATOR')
-    click(window, region, 'GENERATOR')
-    yield from settle()
-    click(window, region, 'SET_GENERATOR.NONE')
-    yield from settle()
-    check(steel.generator == 'NONE' and steel.uid + '.gen.range' not in data.material.node_tree.nodes and not has('GEN_LEVEL'),
-          'setting the generator to None removes it')
+    for effect_uid in (dirt.uid, wear_uid):
+        yield from reveal(window, region, f'FX_{steel.uid}.{effect_uid}', 'LAYERS')
+        click(window, region, f'FX_{steel.uid}.{effect_uid}', fx=.6)
+        yield from settle()
+        yield from reveal(window, region, 'FX_DELETE')
+        click(window, region, 'FX_DELETE')
+        yield from settle()
+    check(not any(effect.kind == 'GENERATOR' for effect in steel.effects) and not any('.gen.' in node.name for node in data.material.node_tree.nodes)
+          and not has('GEN_LEVEL'), 'deleting the Generator effects removes their nodes')
 
     def layer_by(uid):
         return next(layer for layer in data.layers if layer.uid == uid)
@@ -916,7 +936,8 @@ def journey():
     yield from settle()
     rusty = layer_by(data.active_uid)
     inside = [layer for layer in data.layers if layer.parent == rusty.uid]
-    check(rusty.kind == 'FOLDER' and rusty.name == 'Rusty Iron' and len(inside) == 3 and inside[1].generator == 'DIRT' and inside[2].generator == 'CAVITY',
+    generated = [[effect.generator for effect in layer.effects if effect.kind == 'GENERATOR'] for layer in inside]
+    check(rusty.kind == 'FOLDER' and rusty.name == 'Rusty Iron' and len(inside) == 3 and generated == [[], ['DIRT'], ['CAVITY']],
           'a smart material lands as a folder of layers with their generators')
     rusty_uid = rusty.uid
     click(window, region, 'ADD_PAINT')

@@ -1,7 +1,8 @@
 from dataclasses import dataclass
 from .nodes import math_node, mesh_signal
 
-GENERATOR_FIELDS = ('generator', 'gen_level', 'gen_contrast', 'gen_noise', 'gen_scale', 'gen_invert', 'gen_edges', 'gen_dirt', 'gen_top')
+GENERATOR_VALUES = ('gen_level', 'gen_contrast', 'gen_noise', 'gen_scale', 'gen_invert', 'gen_edges', 'gen_dirt', 'gen_top')
+GENERATOR_FIELDS = ('generator',) + GENERATOR_VALUES
 BUILDER_SLIDERS = (('GEN_EDGES', 'Edges', 'gen_edges'), ('GEN_DIRT', 'Dirt', 'gen_dirt'), ('GEN_TOP', 'Top', 'gen_top'))
 STRETCH = {'NOISE': (1.0, 1.0, 1.0), 'SCRATCH': (1.0, 1.0, 30.0), 'STREAKS': (6.0, 6.0, .3), 'CELLS': (1.0, 1.0, 1.0)}
 
@@ -79,7 +80,7 @@ def operate(nodes, links, operation, first, second, name=''):
     return node.outputs[0]
 
 
-def pattern(nodes, links, layer, kind):
+def pattern(nodes, links, name, kind):
     coordinates = nodes.new('ShaderNodeTexCoord')
     stretch = nodes.new('ShaderNodeVectorMath')
     stretch.operation = 'MULTIPLY'
@@ -92,17 +93,17 @@ def pattern(nodes, links, layer, kind):
         texture = nodes.new('ShaderNodeTexNoise')
         texture.inputs['Detail'].default_value = 8.0
         output = texture.outputs['Fac']
-    texture.name = layer.uid + '.gen.noise'
+    texture.name = name + '.gen.noise'
     links.new(stretch.outputs['Vector'], texture.inputs['Vector'])
     return output
 
 
-def term_signal(nodes, links, layer, term, build, sample):
+def term_signal(nodes, links, name, term, build, sample):
     value = operate(nodes, links, 'MULTIPLY', operate(nodes, links, 'ADD', mesh_signal(build, term.map_key, term.channel, sample), term.offset), term.gain)
     if term.absolute:
         value = operate(nodes, links, 'ABSOLUTE', value, 0.0)
     if term.weight:
-        value = operate(nodes, links, 'MULTIPLY', value, 0.0, f'{layer.uid}.gen.{term.weight}')
+        value = operate(nodes, links, 'MULTIPLY', value, 0.0, f'{name}.gen.{term.weight}')
     return value
 
 
@@ -117,24 +118,28 @@ def radial_signal(nodes, links, build, sample):
     return operate(nodes, links, 'MULTIPLY', distance.outputs['Value'], 2.0)
 
 
-def generator_mask(nodes, links, layer, build, sample):
-    generator = GENERATOR[layer.generator]
+def generator_name(layer, effect):
+    return f'{layer.uid}.{effect.uid}'
+
+
+def generator_mask(nodes, links, effect, name, build, sample):
+    generator = GENERATOR[effect.generator]
     if not build.live and any(key not in build.maps for key in generator.maps):
         return None
-    texture = pattern(nodes, links, layer, generator.breakup)
+    texture = pattern(nodes, links, name, generator.breakup)
     if generator.radial:
         signal = radial_signal(nodes, links, build, sample)
     elif generator.terms:
-        signal = term_signal(nodes, links, layer, generator.terms[0], build, sample)
+        signal = term_signal(nodes, links, name, generator.terms[0], build, sample)
         for term in generator.terms[1:]:
-            signal = operate(nodes, links, 'ADD', signal, term_signal(nodes, links, layer, term, build, sample))
+            signal = operate(nodes, links, 'ADD', signal, term_signal(nodes, links, name, term, build, sample))
     else:
         signal = texture
     if generator.flip:
         signal = operate(nodes, links, 'SUBTRACT', 1.0, signal)
-    breakup = operate(nodes, links, 'MULTIPLY', operate(nodes, links, 'SUBTRACT', texture, .5), 1.0, layer.uid + '.gen.amount')
+    breakup = operate(nodes, links, 'MULTIPLY', operate(nodes, links, 'SUBTRACT', texture, .5), 1.0, name + '.gen.amount')
     ranged = nodes.new('ShaderNodeMapRange')
-    ranged.name = layer.uid + '.gen.range'
+    ranged.name = name + '.gen.range'
     links.new(operate(nodes, links, 'ADD', signal, breakup), ranged.inputs['Value'])
     return ranged.outputs['Result']
 
@@ -161,16 +166,23 @@ def id_colors(effect):
     return (effect.color, *(item.color for item in effect.id_colors))
 
 
-def write_generator(nodes, layer):
-    ranged = nodes[layer.uid + '.gen.range']
-    width = (1 - layer.gen_contrast) * .5 + .01
-    ranged.inputs['From Min'].default_value = layer.gen_level - width
-    ranged.inputs['From Max'].default_value = layer.gen_level + width
-    ranged.inputs['To Min'].default_value = 1.0 if layer.gen_invert else 0.0
-    ranged.inputs['To Max'].default_value = 0.0 if layer.gen_invert else 1.0
-    nodes[layer.uid + '.gen.noise'].inputs['Scale'].default_value = layer.gen_scale
-    nodes[layer.uid + '.gen.amount'].inputs[1].default_value = layer.gen_noise * 2
+def write_generator(nodes, effect, name):
+    ranged = nodes[name + '.gen.range']
+    width = (1 - effect.gen_contrast) * .5 + .01
+    ranged.inputs['From Min'].default_value = effect.gen_level - width
+    ranged.inputs['From Max'].default_value = effect.gen_level + width
+    ranged.inputs['To Min'].default_value = 1.0 if effect.gen_invert else 0.0
+    ranged.inputs['To Max'].default_value = 0.0 if effect.gen_invert else 1.0
+    nodes[name + '.gen.noise'].inputs['Scale'].default_value = effect.gen_scale
+    nodes[name + '.gen.amount'].inputs[1].default_value = effect.gen_noise * 2
     for _, _, field in BUILDER_SLIDERS:
-        weight = nodes.get(f'{layer.uid}.gen.{field}')
+        weight = nodes.get(f'{name}.gen.{field}')
         if weight is not None:
-            weight.inputs[1].default_value = getattr(layer, field)
+            weight.inputs[1].default_value = getattr(effect, field)
+
+
+def write_generators(nodes, layer):
+    for effect in layer.effects:
+        name = generator_name(layer, effect)
+        if effect.kind == 'GENERATOR' and name + '.gen.range' in nodes:
+            write_generator(nodes, effect, name)

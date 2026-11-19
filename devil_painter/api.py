@@ -5,7 +5,7 @@ from . import actions, exporting, library, smart
 from .document import active_layer, find_layer, set_channels, set_slot_value, slot_value
 from .effects import effect_label
 
-__all__ = ['start', 'texture_sets', 'layers', 'add_fill', 'add_paint', 'add_smart_material', 'set_channel', 'set_generator', 'remove_layer',
+__all__ = ['start', 'texture_sets', 'layers', 'add_fill', 'add_paint', 'add_smart_material', 'set_channel', 'add_generator', 'remove_layer',
            'bake', 'export', 'materials', 'material_of', 'smart_materials', 'selected']
 
 
@@ -36,7 +36,7 @@ def texture_sets(obj):
 def layer_record(layer):
     channels = {slot.name: list(slot_value(slot)) for slot in layer.slots if slot.enabled and slot.source == 'VALUE'}
     return dict(uid=layer.uid, name=layer.name, kind=layer.kind, parent=layer.parent, visible=layer.visible, opacity=layer.opacity,
-                generator=layer.generator, mask=layer.mask is not None, channels=channels,
+                generators=[effect.generator for effect in layer.effects if effect.kind == 'GENERATOR'], mask=layer.mask is not None, channels=channels,
                 effects=[dict(uid=effect.uid, kind=effect.kind, target=effect.target, label=effect_label(effect)) for effect in layer.effects])
 
 
@@ -80,9 +80,9 @@ def set_channel(obj, uid, channel, value, set_index=None):
     return actions.refresh(bpy.context, obj, data, f'{layer.name} {channel} set from Python.')
 
 
-def set_generator(obj, uid, set_index=None, **values):
+def add_generator(obj, uid, set_index=None, **values):
     data, _ = chosen(obj, uid, set_index)
-    return actions.set_generator(bpy.context, obj, data, values)
+    return actions.add_generator(bpy.context, obj, data, values)
 
 
 def remove_layer(obj, uid, set_index=None):
