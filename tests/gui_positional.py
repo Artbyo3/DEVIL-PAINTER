@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(ROOT))
 import devil_painter
-from devil_painter import caches, compositing, editor, library
+from devil_painter import caches, compositing, editor, library, shelf
 from devil_painter.document import active_effect, active_layer, find_layer
 from tools.workspace import prepare_scratch
 from tests.gui_harness import settle, wait_for
@@ -19,6 +19,7 @@ from tests.gui_harness import settle, wait_for
 TIMEOUT = 900
 STARTED = time.time()
 CHANNELS = ('BaseColor', 'Roughness')
+FLAT_CHANNELS = ('BaseColor', 'Roughness', 'Metallic')
 REFRESH_TIMEOUT = 120.0
 
 
@@ -66,6 +67,10 @@ def spot(region, key, fx=.5, fy=.5):
 
 def click(window, region, key, kind='LEFTMOUSE', fx=.5, fy=.5):
     press(window, kind, *spot(region, key, fx, fy))
+
+
+def shelf_index(label):
+    return next(index for index, item in enumerate(shelf.items(editor._active.state.shelf_tab)) if item.label == label)
 
 
 def shown(key):
@@ -318,6 +323,54 @@ def journey():
     check(gap == 0.0, f'the reopened file exports the same channels ({gap})')
     print('POSITIONAL EVIDENCE', dict(fill_softened=softened, stroke_above=kept, stroke_under=smeared, base_kept=round(base_kept, 4), unhidden_gain=gain,
                                       mask_softened=mask_softened, reopen_gap=gap))
+
+    def exported_flat():
+        yield from exported()
+        return {name: png(export_dir / f'Cube_Material_{name}.png')[..., :3] for name in FLAT_CHANNELS}
+
+    click(window, region, 'ADD_FILL')
+    yield from settle()
+    flat_uid = active_layer(data).uid
+    yield from slide(window, region, 'VALUE.roughness', .2)
+    yield from slide(window, region, 'VALUE.metallic', .9)
+    flat_slots = find_layer(data, flat_uid).slots
+    constants = dict(roughness=round(flat_slots['roughness'].value, 3), metallic=round(flat_slots['metallic'].value, 3))
+    check(all(abs(value - .5) > .1 for value in constants.values()), f'a new Fill layer holds constant values away from 0.5 ({constants})')
+    plain = yield from exported_flat()
+    yield from add_effect(window, region, 'CONTENT', 'FILTER')
+    yield from menu(window, region, 'FX_FILTER', 'SET_FXFILTER.BLUR')
+    yield from slide(window, region, 'FX_radius', .4)
+    flat_filter_uid = active_effect(data).uid
+    check(active_effect(data).filter == 'BLUR' and active_effect(data).channel == 'ALL', 'a Blur set to All channels sits on the constant Fill layer')
+    yield from refreshed()
+    through = yield from exported_flat()
+    constant_gap = {name: float(numpy.abs(through[name] - plain[name]).max()) for name in FLAT_CHANNELS}
+    check(all(value == 0.0 for value in constant_gap.values()), f'the constant Fill values come through the Blur exactly ({constant_gap})')
+
+    yield from reveal(window, region, 'ROW_' + flat_uid, 'LAYERS')
+    click(window, region, 'ROW_' + flat_uid, fx=.6)
+    yield from settle()
+    yield from reveal(window, region, 'SOURCE.roughness')
+    click(window, region, 'SOURCE.roughness')
+    yield from settle()
+    click(window, region, 'PICK_PATTERN.roughness')
+    yield from settle()
+    click(window, region, f'ITEM.{shelf_index("Cells")}')
+    yield from settle()
+    check(find_layer(data, flat_uid).slots['roughness'].source == 'PATTERN', 'the Fill layer roughness switches to a pattern')
+    yield from refreshed()
+    patterned = yield from exported_flat()
+    yield from reveal(window, region, f'FXEYE_{flat_uid}.{flat_filter_uid}', 'LAYERS')
+    click(window, region, f'FXEYE_{flat_uid}.{flat_filter_uid}')
+    yield from settle()
+    pattern_sharp = yield from exported_flat()
+    click(window, region, f'FXEYE_{flat_uid}.{flat_filter_uid}')
+    yield from settle()
+    pattern_means = (round(float(pattern_sharp['Roughness'].mean()), 4), round(float(patterned['Roughness'].mean()), 4))
+    pattern_softened = round(detail(patterned['Roughness']) / detail(pattern_sharp['Roughness']), 3)
+    check(abs(pattern_means[0] - pattern_means[1]) < .01 and abs(pattern_means[1] - .5) > .05 and 0.0 < pattern_softened < 1.0,
+          f'the Blur softens the Fill pattern at its real values (means {pattern_means}, {pattern_softened} of the detail)')
+    print('FILL CONSTANT EVIDENCE', dict(constants=constants, constant_gap=constant_gap, pattern_means=pattern_means, pattern_softened=pattern_softened))
 
     click(window, region, 'CLOSE')
     yield from settle()
