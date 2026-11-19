@@ -1,4 +1,5 @@
 import colorsys
+import itertools
 import time
 import traceback
 from pathlib import Path
@@ -791,6 +792,8 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         tool = painting.active_tool(self.scene)
         if data.brush_radial > 1 and tool in painting.BUFFER_TOOLS - {'FILL'}:
             return True
+        if brushes.pressure_mapped(data) and tool in painting.BUFFER_TOOLS - {'FILL'}:
+            return True
         buffered = painting.uses_stroke_buffer(context, data)
         if tool == 'PAINT' and data.brush_dynamics != 'NONE':
             return True
@@ -849,15 +852,22 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         size = painting.brush_value(self.scene, 'size')
         elements = [dict(name='', location=(0.0, 0.0, 0.0), mouse=point, mouse_event=point, is_start=index == 0, pressure=pressure, size=size,
                          time=index * .01, x_tilt=0.0, y_tilt=0.0) for index, (point, pressure) in enumerate(points)]
+        mapped = brushes.pressure_mapped(data)
+        dabs = [list(group) for _, group in itertools.groupby(elements, key=lambda element: element['pressure'])] if mapped else [elements]
         original = obj.matrix_world.copy()
         axis = data.brush_radial_axis
         try:
             for turn in range(data.brush_radial):
                 obj.matrix_world = original @ Matrix.Rotation(math.tau * turn / data.brush_radial, 4, axis)
                 context.view_layer.update()
-                with context.temp_override(window=self._window, area=self._area, region=self._region):
-                    bpy.ops.paint.image_paint('EXEC_DEFAULT', False, stroke=elements, mode='NORMAL')
+                for dab in dabs:
+                    if mapped:
+                        brushes.sync_pressure(context, data, dab[0]['pressure'])
+                    with context.temp_override(window=self._window, area=self._area, region=self._region):
+                        bpy.ops.paint.image_paint('EXEC_DEFAULT', False, stroke=dab, mode='NORMAL')
         finally:
+            if mapped:
+                brushes.sync_pressure(context, data, 1.0)
             obj.matrix_world = original
             context.view_layer.update()
 
