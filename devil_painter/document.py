@@ -155,6 +155,8 @@ class DEVIL_PAINTER_PG_layer(bpy.types.PropertyGroup):
     tile_match: bpy.props.BoolProperty(default=False)
     proj_warp: bpy.props.FloatVectorProperty(size=8, default=(0.0,) * 8)
     proj_bend: bpy.props.FloatProperty(default=0.0, min=0.0, max=1.0)
+    uv_offset: bpy.props.FloatVectorProperty(size=2, default=(0.0, 0.0))
+    uv_rotation: bpy.props.FloatProperty(default=0.0, subtype='ANGLE')
     slots: bpy.props.CollectionProperty(type=DEVIL_PAINTER_PG_slot)
     image: bpy.props.PointerProperty(type=bpy.types.Image)
     mask: bpy.props.PointerProperty(type=bpy.types.Image)

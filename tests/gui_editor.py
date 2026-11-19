@@ -602,7 +602,8 @@ def journey():
     click(window, region, 'SET_PROJECTION.UV')
     yield from settle()
     nodes = data.material.node_tree.nodes
-    check(rust.projection == 'UV' and nodes[rust.uid + '.mapping'].inputs['Vector'].links[0].from_socket.name == 'UV',
+    check(rust.projection == 'UV' and nodes[rust.uid + '.mapping'].inputs['Vector'].links[0].from_node == nodes[rust.uid + '.uv_transform']
+          and nodes[rust.uid + '.uv_transform'].inputs['Vector'].links[0].from_socket.name == 'UV',
           'the projection dropdown switches the layer to UV mapping')
 
     click(window, region, 'SOURCE.roughness')

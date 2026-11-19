@@ -562,6 +562,20 @@ def per_tile(nodes, links, vector):
     return vector_math(nodes, links, 'FRACTION', vector)
 
 
+def uv_transform(nodes, links, layer, source, x):
+    transform = nodes.new('ShaderNodeMapping')
+    transform.name = layer.uid + '.uv_transform'
+    transform.vector_type = 'TEXTURE'
+    transform.location = (x - 750, -400)
+    links.new(source, transform.inputs['Vector'])
+    return transform.outputs['Vector']
+
+
+def uv_location(layer):
+    cos, sin = math.cos(layer.uv_rotation), math.sin(layer.uv_rotation)
+    return layer.uv_offset[0] + (.5 - (cos * .5 - sin * .5)), layer.uv_offset[1] + (.5 - (sin * .5 + cos * .5)), 0.0
+
+
 def layer_coordinates(nodes, links, layer, x):
     coordinates = nodes.new('ShaderNodeTexCoord')
     coordinates.location = (x - 900, -400)
@@ -573,7 +587,7 @@ def layer_coordinates(nodes, links, layer, x):
     elif layer.projection == 'TRIPLANAR':
         source = coordinates.outputs['Object']
     else:
-        source = per_tile(nodes, links, coordinates.outputs['UV']) if layer.tile_match else coordinates.outputs['UV']
+        source = uv_transform(nodes, links, layer, per_tile(nodes, links, coordinates.outputs['UV']) if layer.tile_match else coordinates.outputs['UV'], x)
     links.new(source, mapping.inputs['Vector'])
     return mapping.outputs['Vector']
 
@@ -1006,6 +1020,10 @@ def write_values(nodes, channels, layers, brush=None):
                 projector.inputs['Location'].default_value = tuple(layer.proj_offset)
                 projector.inputs['Rotation'].default_value = tuple(layer.proj_rotation)
                 projector.inputs['Scale'].default_value = (layer.proj_size,) * 3
+            transform = nodes.get(layer.uid + '.uv_transform')
+            if transform is not None:
+                transform.inputs['Location'].default_value = uv_location(layer)
+                transform.inputs['Rotation'].default_value = (0.0, 0.0, layer.uv_rotation)
         for channel in channels:
             slot = layer.slots[channel.key]
             if not blended(slot):

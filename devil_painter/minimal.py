@@ -823,6 +823,14 @@ def projection_section(flow, data, layer, w):
         flow.add('PROJ_RESET', Rect(x + half + 4 * s, y, half, h), 'CHIP', label='Reset', tip='Center the projector on the mesh again')
     elif layer.projection == 'UV':
         x, y, h = flow.field()
+        flow.add('UV_OFFSET_X', Rect(x, y, half, h), 'SLIDER', label='Offset X', value=layer.uv_offset[0] % 1.0, text=f'{layer.uv_offset[0] % 1.0:.2f}',
+                 tip='Slide the projection across the UVs')
+        flow.add('UV_OFFSET_Y', Rect(x + half + 4 * s, y, half, h), 'SLIDER', label='Offset Y', value=layer.uv_offset[1] % 1.0, text=f'{layer.uv_offset[1] % 1.0:.2f}',
+                 tip='Slide the projection up and down the UVs')
+        x, y, h = flow.field()
+        flow.add('UV_SPIN', Rect(x, y, w, h), 'SLIDER', label='Spin', value=(math.degrees(layer.uv_rotation) % 360) / 360,
+                 text=f'{math.degrees(layer.uv_rotation) % 360:.0f}°', tip='Turn the projection around the UV center')
+        x, y, h = flow.field()
         flow.add('TILE_MATCH', Rect(x, y, w, h), 'TOGGLE', label='Same on every UV tile', active=layer.tile_match,
                  tip='Repeat the fill identically in each UDIM tile')
 
@@ -928,7 +936,7 @@ def projection_lines(data):
     layer = active_layer(data)
     if not (layer.kind == 'FILL' and uses_coordinates(layer)):
         return 0
-    return 5 if layer.projection == 'PLANAR' else 3 if layer.projection in PROJECTORS else 2 if layer.projection == 'UV' else 1
+    return 5 if layer.projection == 'PLANAR' else 3 if layer.projection in PROJECTORS else 4 if layer.projection == 'UV' else 1
 
 
 def material_lines(data):

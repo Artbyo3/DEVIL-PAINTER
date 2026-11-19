@@ -1446,6 +1446,12 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         elif key == 'PROJ_SPIN' and data is not None:
             rotation = active_layer(data).proj_rotation
             actions.set_projector(context, obj, data, dict(proj_rotation=(rotation[0], rotation[1], math.radians(x * 360))), release)
+        elif key in {'UV_OFFSET_X', 'UV_OFFSET_Y'} and data is not None:
+            offset = list(active_layer(data).uv_offset)
+            offset['XY'.index(key[-1])] = x
+            actions.set_projector(context, obj, data, dict(uv_offset=tuple(offset)), release)
+        elif key == 'UV_SPIN' and data is not None:
+            actions.set_projector(context, obj, data, dict(uv_rotation=math.radians(x * 360)), release)
         elif key == 'RADIAL' and data is not None:
             data.brush_radial = 1 + round(x * 15)
         elif key in DRAG_FIELDS and data is not None:
