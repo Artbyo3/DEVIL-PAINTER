@@ -9,7 +9,7 @@ from .bridge import command as bridge_command
 from pathlib import Path
 from .blending import BLEND_MODES, CHANNEL, CHANNELS, FOLDER_BLENDS, linear_to_srgb
 from .canvas import Layout, Rect
-from .document import (BAKE_ID_LABELS, DYNAMICS, NORMAL_FORMATS, PROJECTORS, STROKE_METHODS, TRANSPARENCY, NORMAL_SPACES, PROJECTIONS, RESOLUTIONS, SHADERS, active_effect, active_layer, children, editing_mask, find_layer, isolated_uids,
+from .document import (BAKE_ID_LABELS, DYNAMICS, NORMAL_FORMATS, PROJECTORS, STROKE_METHODS, TEXTURE_SAMPLING, TRANSPARENCY, NORMAL_SPACES, PROJECTIONS, RESOLUTIONS, SHADERS, active_effect, active_layer, children, editing_mask, find_layer, isolated_uids,
                        linked_layer, set_channels, slot_value, uses_coordinates)
 from .effects import ANCHORED_KINDS, CONTENT_SOURCES, EFFECT_ICONS, EFFECT_KINDS, FILL_PROJECTIONS, LEVEL_COMPONENTS, MASK_BLEND_LABEL, LevelsView, effect_label
 from .filters import FILTER, FILTERS
@@ -763,6 +763,16 @@ def pattern_line(flow, channel, slot, w):
         flow.add(f'{name}.{channel.key}', Rect(x + index * (third + 4 * s), y, third, h), 'SLIDER', label=label, value=value, text=text)
 
 
+def sampling_line(flow, channel, slot, w):
+    s = flow.layout.scale
+    x, y, h = flow.field()
+    half = (w - 4 * s) / 2
+    for index, (field, label, tip) in enumerate((('wrap', 'Wrap', 'Repeat the texture, stretch its edge pixels, or flip it past the edge of the UVs'),
+                                                 ('filtering', 'Filtering', 'Blend between texels smoothly or keep them as hard squares'))):
+        options = {key: name for key, name, _ in TEXTURE_SAMPLING[field]}
+        flow.add(f'{field.upper()}.{channel.key}', Rect(x + index * (half + 4 * s), y, half, h), 'DROPDOWN', label=label, text=options[getattr(slot, field)], tip=tip)
+
+
 def channels_section(flow, data, layer, w):
     s = flow.layout.scale
     toggle, blend = TOGGLE_WIDTH * s, BLEND_WIDTH * s
@@ -795,6 +805,8 @@ def channels_section(flow, data, layer, w):
                  tip=f'How {channel.label.lower()} mixes with the layers below')
         if fill and slot.source == 'PATTERN':
             pattern_line(flow, channel, slot, w)
+        elif fill and slot.source == 'IMAGE' and slot.image is not None:
+            sampling_line(flow, channel, slot, w)
 
 
 def projection_section(flow, data, layer, w):
@@ -933,7 +945,8 @@ def two_lines(data):
 
 def channel_lines(data):
     layer = active_layer(data)
-    return sum(1 + (layer.kind == 'FILL' and layer.slots[channel.key].source == 'PATTERN') for channel in set_channels(data))
+    return sum(1 + (layer.kind == 'FILL' and (layer.slots[channel.key].source == 'PATTERN' or (layer.slots[channel.key].source == 'IMAGE' and layer.slots[channel.key].image is not None)))
+               for channel in set_channels(data))
 
 
 def projection_lines(data):

@@ -9,7 +9,7 @@ from .masks import GENERATOR, GENERATOR_FIELDS
 from .meshmaps import MESH_MAP
 from .blending import BLEND_MODES, CHANNEL, FOLDER_BLENDS, NORMAL_DETAIL
 from .procedural import PATTERN
-from .document import PROJECTIONS, PROJECTORS, SLOT_FIELDS, geometry_attribute, active_effect, active_layer, adopt_generator_breakups, adopt_layer_generator, add_set_channels, add_slots, children, descendants, fill_slots, find_layer, layer_index, set_slot_value
+from .document import PROJECTIONS, PROJECTORS, SLOT_FIELDS, TEXTURE_SAMPLING,geometry_attribute, active_effect, active_layer, adopt_generator_breakups, adopt_layer_generator, add_set_channels, add_slots, children, descendants, fill_slots, find_layer, layer_index, set_slot_value
 
 KIND_NAMES = {'PAINT': 'Paint', 'FILL': 'Fill', 'FOLDER': 'Folder'}
 LAYER_FIELDS = ('kind', 'visible', 'opacity', 'projection', 'tiling', 'proj_offset', 'proj_rotation', 'proj_size', 'uv_offset', 'uv_rotation', 'triplanar_blend', 'tile_match', 'material', 'folder_blend', 'geo_mask', 'link_set', 'link_uid')
@@ -727,6 +727,13 @@ def set_blend(context, obj, data, key, mode):
     layer = active_layer(data)
     layer.slots[key].blend = mode
     return refresh(context, obj, data, f'{CHANNEL[key].label} of {layer.name} blends with {dict(BLEND_MODES)[mode]}.')
+
+
+def set_sampling(context, obj, data, key, field, mode):
+    layer = active_layer(data)
+    setattr(layer.slots[key], field, mode)
+    label = next(name for value, name, _ in TEXTURE_SAMPLING[field] if value == mode)
+    return refresh(context, obj, data, f'{CHANNEL[key].label} texture of {layer.name} uses {label} {field}.')
 
 
 def rename_layer(context, obj, data, uid, name):
