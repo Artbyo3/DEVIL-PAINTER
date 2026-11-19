@@ -1,274 +1,306 @@
 # Devil Painter: product specification
 
-This records the requested target for future development. It is not a claim that
-all features below are complete or production-ready. Author identity: Artbyo3.
+Author identity: Artbyo3.
 
-## Product direction
+## How to read this document
 
-Bring non-destructive, layer-based texture painting directly inside Blender, in
-the same Devil workspace as Devil Designer. Blender's own 3D viewport stays the
-painting surface and Blender's native texture paint brushes do the painting.
-Devil Painter adds the layer stack, the tools around it, and texture export.
+This specification describes where Devil Painter is going and the
+invariants it keeps on the way. It is not a feature cap. Work that serves the
+stated direction is in scope even when this document does not list it, and a
+capability missing from these pages is unbuilt, not unwanted. Sections marked
+**Direction** describe work that does not exist yet. Everything else describes
+the product on `main` today.
 
-A separate 3D viewport inside Devil Painter's window was considered and
-rejected. Blender can draw a scene into an offscreen texture, but its brushes
-only paint in a real viewport region. A custom viewport would need its own
-brush engine, projection, and undo, which would be slower and weaker than
-Blender's native painting.
+## Product identity
 
-## MVP scope
+Devil Painter is layer-based texture painting inside Blender, at full
+behavioral parity with the dedicated layer-based texture painting
+applications artists already use. Parity is the current phase and the target:
+an artist coming from one of those applications should find every step of
+their workflow, behaving the way they expect, without leaving Blender. A
+Blender artist should be able to follow the same workflow without learning a
+second program.
 
-- Extension package `devil_painter` targeting Blender 5.2+, opened from
-  `View3D > View > Devil Painter` or Ctrl+Alt+P. No sidebars or docked panels.
-- Start painting on the selected mesh at 1K, 2K, or 4K. Meshes without UVs are
-  unwrapped automatically. The mesh gets a Devil Painter material, the viewport
-  switches to Material Preview, and the object enters Texture Paint mode with a
-  first paint layer selected.
-- Layer stack stored on the mesh object, so Blender undo and saving cover it.
-  Layers are addressed by uid, and the selection is a layer uid plus a target
-  (content or mask), so folders and effect stacks can join without changing
-  how selection and undo work.
-  - Channels come from one registry: base color, roughness, metallic, normal,
-    height, emission, and opacity. Each texture set chooses its channels from
-    the Channels menu (base color, roughness, metallic, normal, and height by
-    default). Only those channels are previewed, listed, and exported.
-  - Every layer has one slot per channel with its own enable, value, and blend
-    mode (Normal, Multiply, Screen, Overlay, Add), plus layer visibility,
-    opacity, rename, reorder, duplicate, and delete.
-  - Paint layers: one RGBA image. Painted color is the base color and painted
-    alpha is the coverage of every other enabled channel, so one stroke paints
-    color, roughness, metallic, height, and the rest together.
-  - Folders group layers. A folder composites its layers as a group, then
-    mixes the result into the stack with its own opacity and mask. Layers move
-    into and out of folders from the context menu, folders fold, and deleting
-    or duplicating a folder covers everything inside.
-  - Every channel slot also has its own opacity.
-  - Material layers: a fill layer added from a material remembers it. Its row
-    shows the rendered material, and Properties offers Replace (swap in
-    another shelf material, keeping the mask) and Reset (restore the material
-    values).
-  - Fill layers: each channel takes a plain value, an image texture, or a
-    procedural pattern (noise, grunge, cells, cracks, wood, stripes, bricks,
-    checker) with two values, scale, detail, and contrast. Textures and
-    patterns project by UV or tri-planar, with tiling.
-  - Masks: white or black, painted with the same brushes. Painted alpha reveals
-    the layer.
-- Tools: Paint, Erase, Fill, Blur, Smear, and Clone, plus Undo and Redo. Each
-  tool uses a Devil Painter brush, a local copy of Blender's essential brush
-  that Devil Painter configures.
-- Brushes: the tool strip holds color, size, opacity (the most one stroke can
-  cover), the brush alpha, the brush card, and a value chip per channel the
-  brush paints. The brush card sets flow, spacing, hardness (the falloff
-  curve), smoothing (the stroke stabilizer), jitter, pressure for size and
-  flow, random alpha angle, and which channels each stroke paints. The shelf
-  has Brushes (presets with stroke previews) and Alphas (stamp shapes); any
-  texture can become the brush alpha from its right-click menu.
-- Multi-channel painting: Paint and Fill strokes land in a per-set stroke
-  buffer that the material composites live over the selected paint layer and
-  its channels. When a stroke ends it merges into the layer's color and into
-  a canvas per enabled channel with the brush values, so one stroke paints
-  color, roughness, metallic, height, and the rest together. Undo and redo
-  restore the merged region on every channel. Erase, Blur, Smear, and Clone
-  work on the layer image directly.
-- Workspace UI, fully custom-drawn, laid out in fixed zones that new features
-  plug into (`shell.py`):
-  - Workspace bar across the top: texture set name and channels, Export, Close.
-    Future mode, view, and channel switches land here.
-  - Tool strip under it: active tool, brush color, size, strength. Future brush
-    settings land here.
-  - Tool dock on the left, top-aligned under the tool strip.
-  - Right column of collapsible, scrollable panels (Layers, Properties). Its
-    width is dragged at the left edge (260 to 480 px). A divider shares the
-    height between panels when they do not fit, and a collapsed panel gives
-    its height to the others. New panels are `ColumnPanel` entries.
-  - Stage: the free viewport area between dock and column. Toasts anchor to
-    it, and the future bottom shelf is carved from its bottom edge.
-  - Properties follows the selection. Clicking a layer row selects the layer
-    content, clicking the mask thumbnail selects the mask, and each selection
-    kind lists its own sections in `PROPERTY_SECTIONS`.
-  - Popovers for the color picker, dropdowns, layer context menus, and export.
-    Layers rename inline. Rows outside the scrolled view are not built. Blender's own header, tool
-  header, toolbar, brush shelf, and navigation gizmo are hidden while the
-  workspace is open. The only native Blender UI is the folder picker behind
-  Browse in the export card, and Browse and Import in the shelf's Textures tab.
-- Shelf: a collapsible zone under the stage with Materials, Textures, and
-  Patterns tabs of rendered thumbnails. Clicking a material adds it as a fill
-  layer. Built-in materials ship with the add-on, and any fill layer can be
-  saved as a user material from its context menu. The Textures tab lists the user
-  texture library (Import copies image files in, right-click removes them)
-  and a browsed texture folder (typed or picked with the OS folder picker).
-  Right-clicking a texture uses it for any channel of the selected fill layer
-  or starts a new fill layer. PBR texture sets
-  in that folder (color, roughness, metallic, normal, height, emission, opacity
-  maps named by suffix) appear as materials. A channel's source button picks a
-  texture or pattern from the shelf for that channel. Material and pattern
-  thumbnails are Cycles renders cached in Blender's user config folder with
-  the user library.
-- Mesh maps: Bake maps in the workspace bar opens a bake card. It bakes
-  ambient occlusion, curvature (bevel normal against the true normal, signed
-  by local occlusion), thickness (inverted inside occlusion), position
-  (normalized to the bounding box), world-space normal, and ID (a color per UV
-  island) from the mesh itself with Cycles, plus a tangent-space normal map
-  from a chosen high-poly source. Samples are adjustable. Baked maps appear as
-  thumbnails in the Mesh maps panel, and clicking one, or picking it in the
-  View menu, shows it on the model.
-- Mask generators: a Generator is a mask effect, so any layer or folder can
-  stack any number of them anywhere in its mask stack, driven by the baked
-  maps: Edge wear (convex curvature), Cavity (concave curvature), Dirt
-  (ambient occlusion), Ground gradient (height from the position map),
-  Thickness, and more. Each has its own blend mode and opacity like every
-  mask effect, plus level, contrast, noise breakup, noise scale, and invert,
-  and applies in stack order. Each Generator picks its own breakup texture
-  (noise, scratches, streaks, cells, or the grunge, cracks, wood, stripes,
-  bricks, and checker patterns), with a Detail slider for the noise-based
-  ones, and gives every mesh term its own weight (Edges, Dirt, Top,
-  Gradient, and so on). Documents saved before the breakup became a choice
-  get their generator's former breakup and full term weights on open, so
-  the mask is unchanged. Clicking a generator or smart mask preset in
-  the shelf adds a new Generator effect to the selected layer's mask stack
-  instead of replacing one. Documents saved before generators became effects
-  keep their generator: opening them moves it into the stack as the first
-  mask effect, multiplied at full opacity, so the mask is unchanged. The
-  Masks shelf tab holds smart mask presets whose thumbnails render the
-  generator live on a beveled cube.
-- Content effects: a layer's content stack holds Levels, Filter, Fill, Paint,
-  and Generator effects, applied in stack order to every channel the layer
-  writes. Fill, Paint, and Generator content effects add content of their
-  own and combine with the content below them through their blend mode
-  (Replace by default) and opacity. A Fill puts its color in color channels
-  and its value in the others; a pattern Fill blends its two colors through
-  the pattern, and a texture Fill uses the texture. A Paint effect holds the
-  brush strokes painted while it is selected. A Generator is the same
-  generator as in the mask stack, with its breakup and term weights, and
-  writes its grayscale result into the channels. Content effects save with
-  the file and in smart materials; Save as material keeps content
-  Generators.
-- Positional sampling filters: a blur-type Filter (every Filter that reads
-  neighbouring pixels: the blurs, sharpen, glow, the distorts, color fringe,
-  and the edge filters) processes only what is below it in its stack. In the
-  mask stack that is the painted mask, the geometry mask, and every mask
-  effect under the filter; in the content stack it is the layer's own content
-  for that channel plus every content effect under the filter, including
-  Fills and Generators. Effects above the filter composite after it and stay
-  untouched, so a sharp Paint effect above a Blur stays sharp. The result
-  below each such filter is baked to a cached texture at the texture set
-  resolution, refreshed after strokes, edits, undo, and before every export,
-  bake, flatten, and layer export; the cache is packed on save. A paint
-  layer's own transparency still passes through every blur-type filter set
-  to All channels, as before. Pointwise filters (Levels, Invert, Contrast,
-  color and lighting filters) are unchanged.
-- Slope blur and Height to normal: two positional filters that read the
-  height below them. Slope blur (Blur and sharpen) blurs the result below it
-  by how steep the height below it is: flat areas stay sharp and steep areas
-  blur up to Intensity pixels, with Slope min and Slope max setting which
-  slopes count as flat and which blur fully. In the content stack the slope
-  comes from the layer's own height channel at the filter's position (the
-  height content plus every content effect under the filter), or from the
-  channel being filtered when the layer has no height; in the mask stack it
-  comes from the mask below. Height to normal (Edges, content stack only)
-  turns the height below it into a tangent-space normal written into the
-  normal channel, in the project's normal format, with Strength setting how
-  far slopes tilt the normal; the other channels pass through. Neither filter
-  changes a paint layer's own transparency. Opacity and anchors set their
-  per-pixel strength like any other Filter, and both save and reopen with
-  the file.
-- Anchor inputs: a Generator or Filter effect, in the mask or content stack,
-  can take another layer's result as an extra input through its Anchor
-  dropdown, with a Channel dropdown and an Anchor strength slider. A
-  Generator adds the anchored channel to its signal as micro-detail around
-  mid-gray, so painting the anchor lighter or darker pushes the generator up
-  or down where it was painted. A Filter applies with the anchored value as
-  its per-pixel strength: full where the anchor is white, none where it is
-  black. At zero strength or with no anchor the effect renders exactly as
-  before. Anchor routings save with the file; a smart material keeps an
-  anchor that points inside the saved subtree and relinks it to the copied
-  layer, and drops one that points outside it.
-- Smart materials: Save as smart material on any layer or folder stores the
-  whole subtree (folders, fill sources, generators, opacity, painted masks,
-  paint images, and channel canvases as PNG files) in the user library. The
-  Smart shelf tab lists built-in generator-driven smart materials (Worn Paint,
-  Rusty Iron, Dusty Plastic, Scuffed Gold, Dirty Concrete) and saved ones with
-  rendered stack previews. Applying one rebuilds it as a folder above the
-  selection, scaling saved images to the texture set resolution.
-- 2D view: the 2D view button splits Blender's viewport area and docks
-  Blender's own Image Editor in Paint mode beside the model, with its headers
-  and toolbars hidden. It shows the selected canvas (layer color or mask) with
-  the UV layout and follows the selection, and the same Devil Painter brush
-  paints there in UV space. It closes with the button or with Devil Painter.
-  It is Blender's editor rather than a custom canvas, so painting stays on
-  Blender's brush engine.
-- Live preview: the stack compiles into the material's node tree. Normal feeds
-  a normal map, height feeds a bump on top of it, emission and opacity feed the
-  shader's emission and alpha. Value edits update node inputs without
-  recompiling. Structural edits rebuild the tree. The View menu shows the full
-  material or any one channel on its own.
-- Export: one PNG per texture set channel (base color and emission in sRGB,
-  the rest non-color), baked from the live material with Blender's bake
-  engine so textures, patterns, and tri-planar projection match the preview.
-  Empty UV space gets each channel's default value, with 16 px of padding
-  around UV islands.
-- Undo and redo, from the keyboard or the dock, keep the workspace open.
-- Layer rows show thumbnails: the painted image over a checkerboard or the
-  fill color, plus a grayscale mask thumbnail when the layer has a mask.
-- Saving packs every layer image and mask into the `.blend`.
+The product is past its MVP. Version 0.3.0 is the public announcement
+release, timed to the approval of Devil Painter on the Blender Extensions
+platform.
 
-## Long-term direction
+Devil Painter shares the Devil workspace with Devil Designer: the same shell,
+tokens, icons, and interaction behavior, re-hued to Painter's pink-red
+identity so the two products read as one family.
 
-The target is the complete workflow of a dedicated layer-based texture painting
-application, inside Blender, in a simple image-led UI. Artists coming from those
-applications should recognize every step. Blender artists should be able to
-follow the same workflow without learning a second program. Images replace text
-wherever they can: thumbnails, previews, and swatches.
+## Foundations
 
-Planned stages, each shipped as a tested increment:
+These are fixed points the product builds on. They enable the work; they are
+not limits on it.
 
-1. Project setup: a new-project card with mesh, template, resolution, and
-   channel choices, and a texture set per material slot with previews.
-2. Channels: base color, metallic, roughness, normal, height, emission,
-   opacity, and ambient occlusion, with a solo-channel view of any of them.
-3. Layers: folders, per-channel blend and opacity, drag reordering, and
-   duplicate, all with thumbnails.
-4. Mesh-map baking: normal, ambient occlusion, curvature, position, thickness,
-   and ID, from the mesh itself or a high-poly source.
-5. Masks and generators: curvature, ambient occlusion, position, and edge wear
-   generators driven by the baked maps, plus levels, blur, and fill effects.
-6. Materials and smart materials: a shelf of rendered material previews to drop
-   onto layers, and saving any layer or folder as a smart material.
-7. Brushes, alphas, and stencils: preview shelves, and painting several
-   channels in one stroke.
-8. A 2D texture view in the workspace.
-9. Export presets: glTF, game-engine packed maps, and custom channel packing per
-   texture set.
+### License and platform
 
-## Not in the MVP
+- Licensed GPL-3.0-or-later.
+- Published under the Blender Extensions platform rules:
+  - every shipped asset is CC0;
+  - every permission the add-on uses is declared in the manifest;
+  - no external binaries ship in the package;
+  - no self-update: Devil Painter never updates its own code;
+  - no telemetry.
+- The network is used only for the optional asset packs (catalog, previews,
+  and downloads). That use is declared as the manifest's network permission
+  and is gated by Blender's Allow Online Access setting: with online access
+  off, Devil Painter makes no network request.
+- One package for everyone. There are no editions, unlocks, or per-user
+  builds.
+- Targets Blender 5.2 and newer.
 
-- Painting normal detail with the brush (normal is a fill value per layer).
-- Multiple texture sets per object, UDIMs, and keeping other materials on a
-  multi-material mesh. Start painting replaces the mesh's material slots.
-- Scrolling for very long layer stacks; rows that do not fit are hidden.
+### Blender is the engine
 
-## Architecture requirements
+- Blender's own 3D viewport is the painting surface and Blender's texture
+  paint brush engine rasterizes strokes. Devil Painter builds its tools on top
+  of them, so every improvement Blender makes to its viewport and brushes
+  reaches Devil Painter's artists. Bake, shader nodes, image I/O, Cycles, and
+  undo are Blender's too.
+- The interface is Devil Painter's own: every control is custom GPU-drawn.
+  No native Blender panels, sidebars, popups, or dialogs. A native call is
+  used only where the engineering requires it, such as an OS file or folder
+  picker launched from a custom card. The `View3D > View > Devil Painter`
+  launcher entry is the one standing native entry point.
 
-1. Keep `devil_painter/` strictly reserved for add-on runtime code and manifest,
-   `tests/` for automated unit and real-Blender verification, and `tools/` for
-   packaging and repository checks.
-2. Enforce zero-comment / zero-docstring discipline (`tools/check_comments.py`),
-   import and dead-code integrity (`tools/check_dead_code.py`), and publication
-   hygiene (`tools/check_public.py`) from the first commit.
-3. Package reproducible extension archives in `dist/` via `tools/build.py` and
-   verify them with Blender's extension validator and headless smoke test.
-4. The layer stack is the source of truth. The material node tree is built from
-   it, and exported PNGs are baked from that tree, so preview and export share
-   one blending model.
+### The document is the source of truth
 
-## MVP acceptance examples
+The non-destructive layer document stored on the mesh is the single source of
+truth. The live material preview and every exported texture are downstream
+outputs of it, produced with one shared blending model, so what the artist
+sees is what the artist exports.
 
-- Build `dist/devil_painter-0.2.1.zip` cleanly via `python tools/build.py`.
-- Validate the packaged extension archive with `blender --command extension validate`.
-- Enable `devil_painter` in headless Blender and confirm its operators, menu
-  entry, and layer stack property register and unregister without errors.
-- In a real Blender window, open Devil Painter, start painting the default cube,
-  paint a stroke, add a fill layer and set its metallic, hide and show it, add a
-  black mask and paint it, export textures and confirm metallic appears only
-  where the mask was painted, save with packed layers, reorder layers, switch
-  tools, and close.
+## Product today
+
+### Opening and projects
+
+- `View3D > View > Devil Painter` or Ctrl+Alt+P opens the workspace over
+  Blender's 3D viewport. The close button or Ctrl+Alt+P closes it, and
+  Blender's header, tool header, toolbar, asset shelf, and navigation gizmo,
+  hidden while it is open, come back.
+- A start card sets up a project on the selected mesh: a project template,
+  resolution, normal format and space, UDIM tiles, and an automatic unwrap
+  for meshes without UVs. Starting switches the viewport to Material Preview and
+  enters Texture Paint mode with a first paint layer.
+- A project holds one texture set per material slot, each with its own
+  resolution, channels, shader, transparency, UDIM tiles, and layer stack.
+  Clicking faces in the viewport switches to their set.
+- Project settings cover normal format, tangent mode, real-world scale, mesh
+  reimport, autosave, and customizable shortcuts.
+- Saving the `.blend` packs every layer image, channel canvas, mask, cache,
+  and baked map. A scripting API exposes project, layer, bake, and export
+  operations to Python.
+
+### Document model
+
+- Layers are addressed by a stable uid. The selection is a layer plus a
+  target (content, mask, or one effect), so every new kind of layer or effect
+  joins without changing how selection and undo work.
+- Channels come from one registry: base color, roughness, metallic, normal,
+  height, emission, opacity, ambient occlusion, flow map, and user channels.
+  Each texture set chooses its channels; only enabled channels are previewed,
+  listed, and exported.
+- Every layer carries one slot per channel with its own enable, value or
+  source, opacity, and blend mode. The blend set covers the full range artists
+  expect from a dedicated painting application, including the normal-map
+  combine and detail modes.
+- Layer kinds:
+  - Paint layers hold painted color plus a canvas per channel, so one stroke
+    paints color, roughness, metallic, height, normal, and the rest together.
+  - Fill layers drive each channel from a value, an image texture, or a
+    procedural pattern.
+  - Material layers are fills that remember the material they came from and
+    can be replaced or reset.
+  - Folders composite their children as a group and mix the result into the
+    stack with Passthrough or any folder blend mode, per channel, with their
+    own opacity and mask stack.
+  - Instances mirror a source layer from another texture set, so editing the
+    source updates every instance.
+- Layers can be shown, hidden, isolated, renamed, reordered by dragging,
+  nested, multi-selected, copied, pasted, duplicated, flattened, exported on
+  their own, and moved or instanced between sets.
+
+### Effect stacks
+
+Layers carry two ordered stacks, applied in stack order, and folders carry
+the mask stack.
+
+- **Content stack**: Levels, Filter, Fill, Paint, and Generator effects,
+  applied to every channel the layer writes. Fill, Paint, and Generator
+  effects add content of their own and combine with the content below them
+  through their blend mode and opacity.
+- **Mask stack**: a painted mask (white or black), a geometry mask (picked
+  faces or mesh parts), and Paint, Fill, Levels, Filter, Generator, Compare
+  mask, Anchor, and ID color effects, each with its own blend mode from the
+  full mask blend set and its own opacity. A quick mask paints a temporary
+  mask and applies it to the selection, and the mask can be shown on the
+  model.
+- Levels work on all components or one at a time, with optional clamping.
+- A Generator is the same effect in either stack. It reads the baked mesh
+  maps (curvature, ambient occlusion, position, world normal, thickness,
+  height, UV border distance) or works procedurally, with level, contrast,
+  invert, a choice of breakup texture, and a weight per mesh term.
+- Effects, folders, and smart assets save with the file and reopen
+  unchanged. Documents saved by earlier versions open with the same result
+  they had.
+
+### Anchors
+
+A Generator or Filter effect in either stack can take another layer's result
+as an extra input, choosing the channel and the anchor strength. A Generator
+adds the anchored channel to its signal as detail around mid-gray, so painting
+the anchor pushes the generator up or down where it was painted. A Filter uses
+the anchored value as its per-pixel strength. At zero strength, or with no
+anchor, the effect renders exactly as it does unanchored. Anchors survive
+saving, and smart materials keep anchors that point inside the saved subtree.
+
+### Filters
+
+- Filters span adjust, color, lighting, blur and sharpen, distort, and edge
+  families, available in both stacks and from the shelf.
+- Pointwise filters work on each pixel independently.
+- Positional filters, the ones that read neighbouring pixels, process only
+  what is below them in their stack. Effects above them composite afterwards
+  and stay untouched. The result below each positional filter is baked to a
+  cached texture at the set resolution, refreshed after strokes, edits, undo,
+  and before every export, bake, and flatten, and packed on save.
+- Height-aware filters read the height below them: slope blur blurs by how
+  steep the height is, and height to normal writes a tangent-space normal
+  from it in the project's normal format.
+
+### Projections
+
+Texture and pattern sources project by UV, tri-planar, planar, spherical, or
+cylindrical mapping with tiling and an interactive 3D gizmo. Each projection
+carries the controls an artist expects from it: UV offset and spin with an
+option to repeat identically on every UDIM tile, tri-planar edge hardness, and
+planar bend, corner warp, and snap to surface. Fill effects in the effect
+stacks project by UV or tri-planar mapping with tiling and offset.
+
+### Painting
+
+- Tools: Paint, Erase, Fill, Blur, Smear, Clone, Polygon fill (triangle, face,
+  mesh part, UV chunk, loop), and Path (ribbon or filled shape), plus Undo
+  and Redo.
+- Paint and Fill strokes land in a per-set stroke buffer that the material
+  previews live; at stroke end it merges into the layer's color and every
+  enabled channel canvas.
+- Brushes are Devil Painter's own copies of Blender's essential brushes:
+  color, size, opacity, flow, spacing, hardness, smoothing, jitter, pressure,
+  stroke method, angle, symmetry and radial symmetry, normal tilt, stroke
+  dynamics, a brush alpha, a stencil (image, vector, or text), material
+  painting, and a value per channel the brush paints.
+- The 2D view docks Blender's Image Editor in Paint mode beside the model,
+  showing the selected canvas with its UV layout, painted by the same brush.
+
+### Mesh maps
+
+A bake card bakes ambient occlusion, curvature, thickness, position, world
+normal, ID (by UV island, material, object, or vertex color), normal (from a
+high-poly source or rounded edges from the mesh itself), height (from a
+high-poly source), and UV border distance with Cycles. It supports high-poly
+and cage objects, name matching, ray distance, samples, and automatic
+rebaking. Baked maps show as thumbnails and can be viewed on the model.
+
+### Compositing, preview, and export
+
+- The stack compiles into the material's node tree for the live preview.
+  Value edits update node inputs; structural edits rebuild the tree. The
+  View menu shows the full material, any one channel, or any baked map.
+- The viewport offers HDRI lighting, camera, color management, a path-traced
+  preview, and post effects. None of these change exported values.
+- Export bakes from the same compiled tree, so textures, patterns,
+  projections, filters, and effects match the preview. It writes PNG, TGA,
+  TIFF, or EXR at the bit depths each format supports, through built-in
+  templates for common engines and formats or editable custom templates with
+  packed outputs, with UDIM tiles, filename tokens, padding choices, a size
+  override, and an optional hand-off to another application.
+
+### Shelf, library, and packs
+
+- The shelf holds rendered previews of materials, smart materials, textures,
+  patterns, smart masks, generators, filters, brushes, alphas, and lighting,
+  with search and filters for built-in and user assets. Clicking or dragging
+  applies an asset.
+- Any fill layer, layer, or folder saves to the user library as a material,
+  smart material, or smart mask. User library folders and imported textures,
+  `.blend` materials, PBR texture sets, and SVG stencils join the shelf.
+- Packs are optional free CC0 asset collections listed in an online catalog:
+  alphas, textures, `.blend` materials, brushes, and generators. Every
+  download is checked against its published SHA-256 checksum before it
+  installs, and only catalog entries hosted on the project's own release
+  pages are accepted.
+
+### Workspace
+
+The custom-drawn workspace has fixed sections that new UI lands in: a
+workspace bar, a tool strip, a tool dock, a shelf, the stage (the free
+viewport area, which anchors toasts), and panels for Texture sets, Layers,
+Properties, and Mesh maps. Sections dock to any side of the stage, split
+into rows and columns, resize, collapse, and scroll, and the layout is
+remembered across sessions. Properties
+follows the selection. Popovers carry the color picker, dropdowns, context
+menus, and cards. The UI is image-led: thumbnails and previews wherever an
+image exists, text for names and values.
+
+## Quality discipline
+
+- **No regression means byte-identical exports.** For every behavior a change
+  does not intend to touch, exported textures are identical byte for byte
+  before and after the change. New controls default to the value that
+  reproduces the previous output exactly, and documents saved by earlier
+  versions reopen with the result they had.
+- **Acceptance is the owner's hands-on use.** Automated suites, real-Blender
+  load, draw, and end-to-end gates, static checks, and reviews are the floor a
+  build must clear before the owner tests it. They never replace that test.
+- **Motion and interaction changes carry GIF evidence** in their pull request,
+  cropped to the interaction.
+- Code carries no comments, docstrings, dead code, or unused imports; the
+  checks in `tools/` enforce this on every build.
+- Packages are reproducible archives in `dist/`, validated by Blender's
+  extension validator and loaded in a real Blender before anything is called
+  ready.
+- `devil_painter/` holds only add-on runtime code and its manifest, `tests/`
+  holds automated and real-Blender verification, and `tools/` holds packaging
+  and repository checks.
+
+## Direction
+
+**Direction.** Nothing in this section exists on `main` yet unless it says
+so. It is where the product is going, organized in the parity waves the
+issue tracker follows. The waves set an order, not a boundary: anything that
+brings the product closer to parity, or past it, belongs here.
+
+Waves 1 to 3 (blend and mask parity, effect stacks and anchors, positional
+filters) are on `main`.
+
+- **Wave 4, projection and sampling.** UV offset and spin and tri-planar
+  hardness are on `main`; texture wrap and filtering complete the wave.
+- **Wave 5, brushes.** Pen pressure for flow, hardness, and angle; separate
+  size, flow, and angle jitter; brush angle that follows the stroke path;
+  world-space brush size; shift-click straight lines; dragging the stencil in
+  the viewport; material brush textures projected along the stroke; clone in
+  screen and 3D space.
+- **Wave 6, channels and export.** More user channels; additional PBR
+  channels and shaders; per-channel bit depth up to 32-bit float; height
+  folded into the exported normal; mesh maps as export sources; padding and
+  dilation styles; specular-glossiness outputs; layered PSD export.
+- **Wave 7, baking.** Background baking with progress and cancel; bake
+  anti-aliasing; per-map settings; choosing which texture sets to bake; a
+  bake resolution separate from the texture set.
+- **Wave 8, workflow and viewport.** Dropping materials onto the mesh in the
+  viewport; dragging textures onto channel slots; importing files dropped
+  from the OS; instances of folders and within the same set; one unified undo
+  with a history panel; height displacement in the preview; rotating the
+  environment by dragging.
+- **Further out.** Particle brushes; strokes that re-render when the
+  resolution changes, so smart materials become resolution-independent; a
+  final-render view with image output; procedural material import within the
+  no-external-binaries foundation. These are sequenced after the waves, not
+  ruled out.
+
+Beyond parity, the product keeps going wherever artists' texture painting
+work in Blender takes it: faster time to a first painted texture, richer
+image-led previews, and workflows that only make sense because the painting
+lives inside Blender.
