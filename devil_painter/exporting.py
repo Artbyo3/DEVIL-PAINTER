@@ -20,6 +20,12 @@ SOURCES = {'base_color.r': ('Base R', 'base_color', 0), 'base_color.g': ('Base G
            'normal.b': ('Normal Z', 'normal', 2), 'height': ('Height', 'height', 0), 'emission.r': ('Emit R', 'emission', 0),
            'emission.g': ('Emit G', 'emission', 1), 'emission.b': ('Emit B', 'emission', 2), 'opacity': ('Opacity', 'opacity', 0),
            'ao': ('Ambient occlusion', 'ambient_occlusion', 0), 'flow.r': ('Flow X', 'flow', 0), 'flow.g': ('Flow Y', 'flow', 1),
+           'diffuse.r': ('Diffuse R', 'diffuse', 0), 'diffuse.g': ('Diffuse G', 'diffuse', 1), 'diffuse.b': ('Diffuse B', 'diffuse', 2),
+           'specular.r': ('Specular R', 'specular', 0), 'specular.g': ('Specular G', 'specular', 1), 'specular.b': ('Specular B', 'specular', 2),
+           'glossiness': ('Glossiness', 'glossiness', 0), 'displacement': ('Displacement', 'displacement', 0),
+           'anisotropy_level': ('Anisotropy level', 'anisotropy_level', 0), 'anisotropy_angle': ('Anisotropy angle', 'anisotropy_angle', 0),
+           'transmission': ('Transmission', 'transmission', 0), 'scattering': ('Scattering', 'scattering', 0), 'sheen': ('Sheen', 'sheen', 0),
+           'coat': ('Coat', 'coat', 0), 'ior': ('IOR', 'ior', 0),
            **{f'user{number}': (f'User {number}', f'user{number}', 0) for number in range(1, USER_CHANNELS + 1)}, 'white': ('White', None, 0), 'black': ('Black', None, 0)}
 INVERTED = {'smoothness', 'normal.g_dx'}
 TOKENS = ('{mesh}', '{set}', '{output}', '{udim}', '{material}', '{resolution}')
@@ -27,6 +33,8 @@ BASE = ['base_color.r', 'base_color.g', 'base_color.b']
 NORMAL_GL = ['normal.r', 'normal.g', 'normal.b']
 NORMAL_DX = ['normal.r', 'normal.g_dx', 'normal.b']
 EMISSION = ['emission.r', 'emission.g', 'emission.b']
+DIFFUSE = ['diffuse.r', 'diffuse.g', 'diffuse.b']
+SPECULAR = ['specular.r', 'specular.g', 'specular.b']
 
 
 def output(name, sources, file_format='PNG', depth='8', srgb=False):
@@ -36,7 +44,11 @@ def output(name, sources, file_format='PNG', depth='8', srgb=False):
 BUILTIN_TEMPLATES = (
     dict(name='Standard PBR', outputs=[output('BaseColor', BASE, srgb=True), output('Roughness', ['roughness']), output('Metallic', ['metallic']),
                                        output('Normal', NORMAL_GL, depth='16'), output('Height', ['height'], depth='16'),
-                                       output('Emission', EMISSION, srgb=True), output('Opacity', ['opacity']), output('AO', ['ao'])]),
+                                       output('Emission', EMISSION, srgb=True), output('Opacity', ['opacity']), output('AO', ['ao']),
+                                       output('Diffuse', DIFFUSE, srgb=True), output('Specular', SPECULAR, srgb=True), output('Glossiness', ['glossiness']),
+                                       output('Displacement', ['displacement'], depth='16'), output('AnisotropyLevel', ['anisotropy_level']),
+                                       output('AnisotropyAngle', ['anisotropy_angle']), output('Transmission', ['transmission']),
+                                       output('Scattering', ['scattering']), output('Sheen', ['sheen']), output('Coat', ['coat']), output('IOR', ['ior'])]),
     dict(name='glTF', outputs=[output('BaseColor', BASE + ['opacity'], srgb=True), output('OcclusionRoughnessMetallic', ['ao', 'roughness', 'metallic']),
                                output('Normal', NORMAL_GL), output('Emissive', EMISSION, srgb=True)]),
     dict(name='Unreal Engine', outputs=[output('BaseColor', BASE, srgb=True), output('OcclusionRoughnessMetallic', ['ao', 'roughness', 'metallic']),

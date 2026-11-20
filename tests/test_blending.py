@@ -14,16 +14,21 @@ class ChannelTests(unittest.TestCase):
     def test_registry_covers_the_standard_pbr_channels(self):
         self.assertEqual([channel.key for channel in CHANNELS],
                          ['base_color', 'roughness', 'metallic', 'normal', 'height', 'emission', 'opacity', 'ambient_occlusion',
-                          'flow', 'user1', 'user2', 'user3', 'user4', 'user5', 'user6', 'user7', 'user8'])
+                          'diffuse', 'specular', 'glossiness', 'displacement', 'anisotropy_level', 'anisotropy_angle', 'transmission',
+                          'scattering', 'sheen', 'coat', 'ior', 'flow', 'user1', 'user2', 'user3', 'user4', 'user5', 'user6', 'user7', 'user8'])
 
     def test_flow_and_user_channels_are_export_only(self):
         self.assertEqual({channel.key for channel in CHANNELS if not channel.in_shader}, {'flow', 'user1', 'user2', 'user3', 'user4', 'user5', 'user6', 'user7', 'user8'})
 
     def test_color_channels_are_three_wide_and_values_one_wide(self):
-        self.assertEqual({channel.key for channel in CHANNELS if channel.width == 3}, {'base_color', 'normal', 'emission', 'flow'})
+        self.assertEqual({channel.key for channel in CHANNELS if channel.width == 3}, {'base_color', 'normal', 'emission', 'diffuse', 'specular', 'flow'})
 
     def test_only_color_and_emission_are_srgb(self):
-        self.assertEqual({channel.key for channel in CHANNELS if channel.srgb}, {'base_color', 'emission'})
+        self.assertEqual({channel.key for channel in CHANNELS if channel.srgb}, {'base_color', 'emission', 'diffuse', 'specular'})
+
+    def test_added_pbr_channels_start_disabled(self):
+        added = {'diffuse', 'specular', 'glossiness', 'displacement', 'anisotropy_level', 'anisotropy_angle', 'transmission', 'scattering', 'sheen', 'coat', 'ior'}
+        self.assertFalse(any(CHANNEL[key].on_new_layers or CHANNEL[key].on_new_sets for key in added))
 
     def test_flat_normal_is_the_default(self):
         self.assertEqual(CHANNEL['normal'].default, (0.5, 0.5, 1.0))
