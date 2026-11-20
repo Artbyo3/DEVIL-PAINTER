@@ -14,7 +14,7 @@ No. While the workspace is open, Devil Painter hides Blender's 3D Viewport heade
 
 ### Why does Devil Painter warn that two copies are installed?
 
-If both a repository link and an installed ZIP copy are enabled at once, their operators and draw handlers conflict. Remove or disable one copy in **Edit > Preferences > Get Extensions** (or **Add-ons**) and restart Blender.
+If two copies are enabled at once, for example a development link to a source checkout and an installed copy from the repository or a ZIP, their operators and draw handlers conflict. Remove or disable one copy in **Edit > Preferences > Get Extensions** (or **Add-ons**) and restart Blender.
 
 !!! warning "Known issues (v0.2.1)"
     - **#148 — Damaged settings file crash:** Devil Painter can crash if `devil_painter/library.json` in Blender's user config folder is damaged. Remove or rename that file to reset local settings.

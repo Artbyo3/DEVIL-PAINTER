@@ -21,21 +21,21 @@ hide:
         Get Add-on
       </button>
       <div class="dp-install-drag-group" id="dp-install-drag-group">
-        <a href="https://github.com/Artbyo3/DEVIL-PAINTER/releases"
-           class="dp-install-drag-zone"
+        <a class="dp-install-drag-zone"
            id="dp-install-drag"
-           target="_blank"
-           rel="noopener"
-           aria-label="Download Devil Painter from GitHub Releases">
+           data-blender-drop href="https://github.com/Artbyo3/DEVIL-PAINTER/releases/latest"
+           aria-label="Drag and drop into Blender to install Devil Painter">
           <svg class="dp-install-drag-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
             <polyline points="7 10 12 15 17 10"></polyline>
             <line x1="12" y1="15" x2="12" y2="3"></line>
           </svg>
-          <span>Download from GitHub Releases</span>
+          <span>Drag and drop into Blender to install</span>
         </a>
         <div class="dp-install-fallback">
-          ...or follow the <a href="install/" class="dp-install-fallback-link">Install guide</a> to <a href="install/#build-and-install-from-source" class="dp-install-fallback-link">Install from Disk</a>
+          ...or add this repository in Blender's <a href="install/#add-the-repository-manually" class="dp-install-fallback-link">Get Extensions</a>:<br>
+          <code class="dp-install-repo-url">https://artbyo3.github.io/DEVIL-PAINTER/repo/index.json</code><br>
+          ...or download from <a href="https://github.com/Artbyo3/DEVIL-PAINTER/releases" class="dp-install-fallback-link" target="_blank" rel="noopener">GitHub Releases</a> and <a href="install/#install-from-disk" class="dp-install-fallback-link">Install from Disk</a>
         </div>
       </div>
     </div>

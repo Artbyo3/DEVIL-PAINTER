@@ -16,7 +16,15 @@ A layer-based texture painting add-on for Blender.
 
 ## Installation
 
-[Download the extension](https://github.com/Artbyo3/DEVIL-PAINTER/releases) · [Installation guide](https://artbyo3.github.io/DEVIL-PAINTER/install/)
+**Drag and drop:** open the [install card](https://artbyo3.github.io/DEVIL-PAINTER/install/#install-with-drag-and-drop) and drag it into Blender. Blender installs Devil Painter and adds its repository, so updates arrive in **Get Extensions**.
+
+**Or add the repository yourself** in **Edit > Preferences > Get Extensions > Repositories > + > Add Remote Repository**:
+
+```text
+https://artbyo3.github.io/DEVIL-PAINTER/repo/index.json
+```
+
+Offline? [Download the ZIP from GitHub Releases](https://github.com/Artbyo3/DEVIL-PAINTER/releases) and use **Install from Disk**. [Installation guide](https://artbyo3.github.io/DEVIL-PAINTER/install/)
 
 ## Links
 

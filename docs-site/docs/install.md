@@ -6,9 +6,35 @@ You need **Blender 5.2 or later**; no external Python packages or external tools
 
 Everything needed for painting, baking, and exporting works offline. If you want to browse or download optional free asset packs from the **Packs** shelf tab, also enable **Allow Online Access** in **Edit > Preferences > System**.
 
-## Install from GitHub Release ZIP
+## Install with Drag and Drop
 
-1. Download `devil_painter-0.2.1.zip` (or the latest `devil_painter-*.zip`) from the [GitHub releases page](https://github.com/Artbyo3/DEVIL-PAINTER/releases).
+<a class="dp-install-drag-zone" data-blender-drop href="https://github.com/Artbyo3/DEVIL-PAINTER/releases/latest">Drag and drop into Blender to install</a>
+
+1. Open Blender.
+2. Drag the box above from your browser and drop it anywhere in Blender's window.
+3. Blender asks to add the Devil Painter repository. Choose **Add Repository...** and confirm.
+4. Drag and drop the box again and confirm the install in the dialog that opens.
+
+Blender now knows where Devil Painter comes from, so new versions show up in **Get Extensions** as updates. The drop needs **Allow Online Access** turned on in **Edit > Preferences > System**.
+
+## Add the Repository Manually
+
+If drag and drop does not work in your setup, add the repository yourself. You only do this once.
+
+1. Copy the repository URL:
+   ```text
+   https://artbyo3.github.io/DEVIL-PAINTER/repo/index.json
+   ```
+2. In Blender, open **Edit > Preferences > Get Extensions**.
+3. Click **Repositories** at the top right, click **+**, and choose **Add Remote Repository**.
+4. Paste the URL into **URL** and confirm.
+5. Find **Devil Painter** in the **Get Extensions** list and click **Install**.
+
+## Install from Disk
+
+Use this only when Blender cannot reach the internet. A copy installed this way does not receive updates.
+
+1. Download the newest `devil_painter-*.zip` from the [GitHub releases page](https://github.com/Artbyo3/DEVIL-PAINTER/releases).
 2. Open Blender and choose **Edit > Preferences**.
 3. Open **Get Extensions** (or **Add-ons**).
 4. Open the top-right menu (`⌄`) and choose **Install from Disk...**.
@@ -46,6 +72,10 @@ From any 3D Viewport, use one of these options:
 - Choose **View > Devil Painter** from the 3D Viewport header menu.
 
 ## Upgrade or Reinstall
+
+**Installed from the repository (drag and drop or manual):** when Blender refreshes the repository, **Edit > Preferences > Get Extensions** shows the new version. Click **Update** next to Devil Painter. To refresh right away, choose **Refresh Remote** in the top-right menu (`⌄`).
+
+**Installed from disk:**
 
 1. Uncheck the older **Devil Painter** entry in **Edit > Preferences > Get Extensions** or **Add-ons** (or remove it).
 2. Restart Blender.
