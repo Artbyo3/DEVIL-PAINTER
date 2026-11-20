@@ -4,10 +4,13 @@ import json
 import math
 import bpy
 import numpy
+from bpy_extras import view3d_utils
+from mathutils import Vector
 from .blending import CHANNEL
 from .document import set_channels, set_slot_value
 from .library import library_root, load_image, save_settings, settings
 from .painting import STROKE_TOOLS, active_tool, brush_source
+from .sets import hit_under
 
 ALPHA_SIZE = 256
 PREVIEW_SIZE = 96
@@ -25,8 +28,8 @@ PRESETS = (
 )
 PRESSURE_FIELDS = ('pressure_flow', 'pressure_hardness', 'pressure_angle')
 JITTER_FIELDS = ('jitter_size', 'jitter_flow', 'jitter_angle')
-PRESET_FIELDS = ('hardness', 'flow', 'spacing', 'smoothing', 'jitter', 'random_angle', 'stroke', 'angle', *PRESSURE_FIELDS, *JITTER_FIELDS, 'follow_path')
-PRESET_DEFAULTS = dict(stroke='SPACE', angle=0.0, follow_path=False, **{field: False for field in PRESSURE_FIELDS}, **{field: 0.0 for field in JITTER_FIELDS})
+PRESET_FIELDS = ('hardness', 'flow', 'spacing', 'smoothing', 'jitter', 'random_angle', 'stroke', 'angle', *PRESSURE_FIELDS, *JITTER_FIELDS, 'follow_path', 'size_space', 'world_size')
+PRESET_DEFAULTS = dict(stroke='SPACE', angle=0.0, follow_path=False, size_space='SCREEN', world_size=.1, **{field: False for field in PRESSURE_FIELDS}, **{field: 0.0 for field in JITTER_FIELDS})
 JITTER_SEEDS = 100000
 FOLLOW_REACH = 24.0
 STENCIL_TEXTURE = 'DP Stencil'
@@ -148,8 +151,39 @@ def jittered(data):
     return any(getattr(data, 'brush_' + field) for field in JITTER_FIELDS)
 
 
+def world_sized(data):
+    return data.brush_size_space == 'WORLD'
+
+
 def per_point(data):
-    return jittered(data) or data.brush_follow_path
+    return jittered(data) or data.brush_follow_path or world_sized(data)
+
+
+def world_radius(region, view, obj, point, world_size):
+    face, location = hit_under(region, view, obj, point)
+    if face < 0:
+        return None
+    center = obj.matrix_world @ location
+    near = view3d_utils.location_3d_to_region_2d(region, view, center)
+    far = view3d_utils.location_3d_to_region_2d(region, view, center + view.view_rotation @ Vector((world_size / 2, 0.0, 0.0)))
+    return None if near is None or far is None else (far - near).length
+
+
+def world_sizes(context, data, region, view, obj, points):
+    found = [world_radius(region, view, obj, point, data.brush_world_size) for point, _ in points]
+    last = next((radius for radius in found if radius is not None), None)
+    if last is None:
+        return None
+    curve, sizes = context.tool_settings.image_paint.brush.curve_size, []
+    for radius, (_, pressure) in zip(found, points):
+        last = last if radius is None else radius
+        sizes.append(last * pressure_response(curve, pressure, data.brush_pressure_size))
+    return sizes
+
+
+def world_size_text(value):
+    units = bpy.context.scene.unit_settings
+    return bpy.utils.units.to_string(units.system, 'LENGTH', value * units.scale_length, precision=3)
 
 
 def per_dab(data):

@@ -6,6 +6,7 @@ import numpy
 from . import autosave, packs, shelf, thumbnails
 from .post import POST_SLIDERS
 from .bridge import command as bridge_command
+from .brushes import world_size_text
 from pathlib import Path
 from .blending import BLEND_MODES, CHANNEL, CHANNELS, FOLDER_BLENDS, linear_to_srgb
 from .canvas import Layout, Rect
@@ -28,6 +29,7 @@ from .shell import COLUMNS, HEADER, SECTIONS, arrange, flexible
 from .ui_system import ACCENT, MinimalMetrics
 
 MAX_BRUSH_SIZE = 500
+MAX_WORLD_SIZE = 1.0
 ROW_HEIGHT = 42
 LINE_HEIGHT = 28
 MENU_ROW = 26
@@ -263,6 +265,8 @@ BRUSH_TOGGLES = (('BRUSH_PRESSURE_SIZE', 'Pressure size', 'brush_pressure_size')
                  ('BRUSH_PRESSURE_FLOW', 'Pressure flow', 'brush_pressure_flow'), ('BRUSH_PRESSURE_HARDNESS', 'Pressure hardness', 'brush_pressure_hardness'),
                  ('BRUSH_PRESSURE_ANGLE', 'Pressure angle', 'brush_pressure_angle'), ('BRUSH_RANDOM_ANGLE', 'Random angle', 'brush_random_angle'),
                  ('BRUSH_FOLLOW_PATH', 'Follow path', 'brush_follow_path'))
+SIZE_SPACE_CHOICES = (('SCREEN', 'Screen size', 'Size the brush in screen pixels; it covers more of the model as you zoom out'),
+                      ('WORLD', 'World size', 'Size the brush in scene units; each dab covers the same area of the model at any zoom'))
 SHORT_NAMES = {'roughness': 'Rough', 'metallic': 'Metal', 'normal': 'Normal', 'height': 'Height', 'emission': 'Emit', 'opacity': 'Alpha'}
 
 
@@ -335,8 +339,12 @@ def tool_strip(layout, zone, tool, brush, data, state):
     layout.add('BRUSH_COLOR', Rect(x, y, 30 * s, h), 'SWATCH', color=color, tip='Brush color')
     x += 36 * s
     slider = max(80 * s, min(150 * s, (zone.x + zone.w - x) / 5))
-    layout.add('BRUSH_SIZE', Rect(x, y, slider, h), 'SLIDER', label='Size', value=size / MAX_BRUSH_SIZE, text=f'{size} px',
-               tip='Brush radius', shortcut='F')
+    if data.brush_size_space == 'WORLD':
+        layout.add('BRUSH_SIZE', Rect(x, y, slider, h), 'SLIDER', label='Size', value=min(1.0, data.brush_world_size / MAX_WORLD_SIZE),
+                   text=world_size_text(data.brush_world_size), tip='Brush size on the model, in scene units', shortcut='F')
+    else:
+        layout.add('BRUSH_SIZE', Rect(x, y, slider, h), 'SLIDER', label='Size', value=size / MAX_BRUSH_SIZE, text=f'{size} px',
+                   tip='Brush radius', shortcut='F')
     x += slider + 6 * s
     layout.add('BRUSH_STRENGTH', Rect(x, y, slider, h), 'SLIDER', label='Opacity', value=data.brush_opacity,
                text=f'{data.brush_opacity * 100:.0f}%', tip='Most a single stroke can cover', shortcut='Shift F')
@@ -1311,11 +1319,15 @@ def painting_normal(data):
 def brush_popover(layout, state, bounds, data):
     s = layout.scale
     channels = list(set_channels(data))
-    lines = len(BRUSH_SLIDERS) + len(BRUSH_TOGGLES) + len(channels) + 4 + int(painting_normal(data)) + int(bool(data.brush_material))
+    lines = len(BRUSH_SLIDERS) + len(BRUSH_TOGGLES) + len(channels) + 5 + int(painting_normal(data)) + int(bool(data.brush_material))
     card = place_popover(bounds, state.popover.anchor, 300 * s, (lines * LINE_HEIGHT + 20) * s, s)
     x, w = card.x + 12 * s, card.w - 24 * s
     y = card.top - 10 * s
     half = (w - 4 * s) / 2
+    y -= LINE_HEIGHT * s
+    for column, (space, label, tip) in enumerate(SIZE_SPACE_CHOICES):
+        layout.add('SIZE_SPACE.' + space, Rect(x + column * (half + 4 * s), y + 2 * s, half, 24 * s), 'TOGGLE', label=label,
+                   active=data.brush_size_space == space, tip=tip)
     for key, label, field, top, tip in BRUSH_SLIDERS:
         y -= LINE_HEIGHT * s
         value = getattr(data, field)
