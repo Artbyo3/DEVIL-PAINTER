@@ -5,7 +5,7 @@ import bpy
 import numpy
 from . import baking, tiles
 from .blending import CHANNEL, USER_CHANNELS, linear_to_srgb
-from .document import set_channels
+from .document import channel_depth, set_channels
 from .library import save_settings, settings
 
 FORMATS = {'PNG': ('png', ('8', '16')), 'TARGA': ('tga', ('8',)), 'TIFF': ('tif', ('8', '16')), 'OPEN_EXR': ('exr', ('16', '32'))}
@@ -146,6 +146,11 @@ def effective_depth(file_format, depth, override):
     return allowed[-1] if int(wanted) > int(allowed[-1]) else allowed[0]
 
 
+def deepest(data, item, present):
+    depths = [int(channel_depth(data, SOURCES[key][1])) for key in item['sources'] if SOURCES[key][1] in present]
+    return str(max([int(item['depth']), *depths]))
+
+
 def file_name(pattern, tokens, multi_tile):
     if multi_tile and '{udim}' not in pattern:
         pattern += '.{udim}'
@@ -280,5 +285,5 @@ def export(context, obj, project, template, wanted, directory, pattern, override
         present = {channel.key for channel in set_channels(data)}
         planes = [plane(key, baked.get((index, number), {}), ao[(index, number)], data.resolution, item['srgb'], file_format == 'OPEN_EXR', present, project.normal_format)
                   for key in item['sources']]
-        write(path, planes, file_format, effective_depth(file_format, item['depth'], override), size)
+        write(path, planes, file_format, effective_depth(file_format, deepest(data, item, present), override), size)
     return [path for path, *_ in planned]

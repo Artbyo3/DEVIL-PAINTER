@@ -100,7 +100,11 @@ sees is what the artist exports.
 - Channels come from one registry: base color, roughness, metallic, normal,
   height, emission, opacity, ambient occlusion, flow map, and user channels.
   Each texture set chooses its channels; only enabled channels are previewed,
-  listed, and exported.
+  listed, and exported. Each channel except base color stores its paint
+  canvases at 8-bit, 16-bit, or 32-bit float, 8-bit by default. Deeper
+  channels keep their precision through painting, saving, and export, where
+  an output is written at least as deep as its deepest source channel that
+  the file format allows.
 - Every layer carries one slot per channel with its own enable, value or
   source, opacity, and blend mode. The blend set covers the full range artists
   expect from a dedicated painting application, including the normal-map

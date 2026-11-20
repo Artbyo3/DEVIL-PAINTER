@@ -9,8 +9,8 @@ def numbers(data):
     return [tile.number for tile in data.tiles] or [FIRST_TILE]
 
 
-def blank(name, size, fill, data_values=False):
-    image = bpy.data.images.new(name, size, size, alpha=True)
+def blank(name, size, fill, data_values=False, float_buffer=False):
+    image = bpy.data.images.new(name, size, size, alpha=True, float_buffer=float_buffer)
     image.alpha_mode = 'STRAIGHT'
     if data_values:
         image.colorspace_settings.name = 'Non-Color'
@@ -36,12 +36,33 @@ def adopt(data, key, fill):
     data_values = key.colorspace_settings.is_data
     for number in numbers(data)[1:]:
         if variant(data, key, number) is key:
-            register(data, key, number, blank(f'{key.name} {number}', key.size[0], fill, data_values))
+            register(data, key, number, blank(f'{key.name} {number}', key.size[0], fill, data_values, key.is_float))
     return key
 
 
-def create(data, name, fill, data_values=False):
-    return adopt(data, blank(name, data.resolution, fill, data_values), fill)
+def create(data, name, fill, data_values=False, float_buffer=False):
+    return adopt(data, blank(name, data.resolution, fill, data_values, float_buffer), fill)
+
+
+def converted(image, float_buffer):
+    width, height = image.size
+    pixels = numpy.empty(width * height * 4, dtype=numpy.float32)
+    image.pixels.foreach_get(pixels)
+    name = image.name
+    target = bpy.data.images.new(name, width, height, alpha=True, float_buffer=float_buffer)
+    target.alpha_mode = image.alpha_mode
+    target.colorspace_settings.name = image.colorspace_settings.name
+    target.pixels.foreach_set(pixels)
+    target.pack()
+    image.user_remap(target)
+    bpy.data.images.remove(image)
+    target.name = name
+
+
+def conform(data, key, float_buffer):
+    for image in every_image(data, [key]):
+        if image.is_float != float_buffer:
+            converted(image, float_buffer)
 
 
 def duplicate(image, name):
