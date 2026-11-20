@@ -310,6 +310,8 @@ def journey():
     yield from close_cards(window, middle)
     click(window, region, 'SHELF_TAB.BRUSHES')
     yield from settle()
+    yield from until(lambda: any(control(key).label == 'Custom 1' and control(key).preview is not None for key in keys('ITEM.')),
+                     'the saved brush preset preview to stream in')
     labels = {control(key).label: key for key in keys('ITEM.')}
     check('Custom 1' in labels and control(labels['Custom 1']).preview is not None, 'the brush shelf shows the saved preset with a preview')
     click(window, region, labels['Soft Round'])

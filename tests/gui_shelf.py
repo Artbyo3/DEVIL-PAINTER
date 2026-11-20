@@ -16,7 +16,7 @@ import devil_painter
 from devil_painter import editor, library, shelf
 from devil_painter.document import active_layer, find_layer
 from tools.workspace import prepare_scratch
-from tests.gui_harness import settle, until
+from tests.gui_harness import bake_landed, settle, until
 
 TIMEOUT = 600
 STARTED = time.time()
@@ -376,6 +376,7 @@ def journey():
     yield from settle()
     click(window, region, 'BAKE_RUN')
     yield from settle()
+    yield from bake_landed()
     yield from open_tab(window, region, 'SMART')
     top = order(data)[-1]
     count = len(order(data))
