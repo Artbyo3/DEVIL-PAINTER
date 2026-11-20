@@ -37,19 +37,20 @@ def fixture_release(folder, version):
 
 
 class ExtensionRepositoryTests(unittest.TestCase):
-    def test_index_lists_every_release_newest_first_with_the_real_hash_and_size(self):
+    def test_index_lists_only_the_newest_release_with_its_real_hash_and_size(self):
         with tempfile.TemporaryDirectory() as folder:
             packages = [fixture_release(folder, version) for version in ('0.2.0', '0.10.0', '0.2.1')]
             repo.write_repository(Path(folder) / 'repo', repo.repository_index(packages))
             index = json.loads((Path(folder) / 'repo' / 'index.json').read_text(encoding='utf-8'))
             self.assertEqual((index['version'], index['blocklist'], index['assetlib_auth_method']), ('v1', [], 'PER_LIBRARY'))
-            self.assertEqual([entry['version'] for entry in index['data']], ['0.10.0', '0.2.1', '0.2.0'])
-            for path, url in packages:
-                entry = next(item for item in index['data'] if item['archive_url'] == url)
-                self.assertEqual(entry['archive_hash'], 'sha256:' + hashlib.sha256(path.read_bytes()).hexdigest())
-                self.assertEqual(entry['archive_size'], len(path.read_bytes()))
-                self.assertEqual(entry['permissions'], dict(files='Save and load texture layers'))
-                self.assertNotIn('build', entry)
+            self.assertEqual(len(index['data']), 1)
+            entry = index['data'][0]
+            path, url = packages[1]
+            self.assertEqual((entry['version'], entry['archive_url']), ('0.10.0', url))
+            self.assertEqual(entry['archive_hash'], 'sha256:' + hashlib.sha256(path.read_bytes()).hexdigest())
+            self.assertEqual(entry['archive_size'], len(path.read_bytes()))
+            self.assertEqual(entry['permissions'], dict(files='Save and load texture layers'))
+            self.assertNotIn('build', entry)
 
     def test_entries_keep_the_server_generate_field_order(self):
         with tempfile.TemporaryDirectory() as folder:

@@ -42,7 +42,7 @@ def package_entry(path, archive_url):
 
 def repository_index(packages):
     entries = [package_entry(path, url) for path, url in packages]
-    return dict(version='v1', blocklist=[], assetlib_auth_method='PER_LIBRARY', data=sorted(entries, key=version_key, reverse=True))
+    return dict(version='v1', blocklist=[], assetlib_auth_method='PER_LIBRARY', data=[max(entries, key=version_key)])
 
 
 def write_repository(folder, index):
