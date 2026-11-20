@@ -5,6 +5,7 @@ import bpy
 import numpy
 from . import baking, tiles
 from .blending import CHANNEL, USER_CHANNELS, linear_to_srgb
+from .compositing import DIELECTRIC_F0
 from .document import channel_depth, set_channels
 from .filters import NORMAL_DEPTH
 from .library import save_settings, settings
@@ -45,6 +46,34 @@ def mesh_source_entries(item):
 MESH_SOURCES = tuple(entry for item in MESH_MAPS for entry in mesh_source_entries(item))
 MAP_SOURCES = {key: (map_key, component) for key, _, map_key, component in MESH_SOURCES}
 SOURCES.update({key: (label, None, component) for key, label, _, component in MESH_SOURCES})
+
+
+def diffuse_from_metal(base, metallic):
+    return base * (1 - metallic)
+
+
+def specular_from_metal(base, metallic):
+    return DIELECTRIC_F0 * (1 - metallic) + base * metallic
+
+
+def glossiness_from_roughness(roughness):
+    return 1 - roughness
+
+
+CONVERSIONS = {'diffuse': (('base_color', 'metallic'), diffuse_from_metal), 'specular': (('base_color', 'metallic'), specular_from_metal),
+               'glossiness': (('roughness',), glossiness_from_roughness)}
+
+
+def converted_entries(target):
+    label = 'Converted ' + CHANNEL[target].label
+    if CHANNEL[target].width == 1:
+        return [(f'converted_{target}', label, target, 0)]
+    return [(f'converted_{target}.{letter}', f'{label} {letter.upper()}', target, component) for component, letter in enumerate('rgb')]
+
+
+CONVERTED_SOURCES = tuple(entry for target in CONVERSIONS for entry in converted_entries(target))
+CONVERTED = {key: (target, component) for key, _, target, component in CONVERTED_SOURCES}
+SOURCES.update({key: (label, None, component) for key, label, _, component in CONVERTED_SOURCES})
 INVERTED = {'smoothness', 'normal.g_dx'}
 TOKENS = ('{mesh}', '{set}', '{output}', '{udim}', '{material}', '{resolution}')
 BASE = ['base_color.r', 'base_color.g', 'base_color.b']
@@ -53,6 +82,8 @@ NORMAL_DX = ['normal.r', 'normal.g_dx', 'normal.b']
 EMISSION = ['emission.r', 'emission.g', 'emission.b']
 DIFFUSE = ['diffuse.r', 'diffuse.g', 'diffuse.b']
 SPECULAR = ['specular.r', 'specular.g', 'specular.b']
+CONVERTED_DIFFUSE = ['converted_diffuse.r', 'converted_diffuse.g', 'converted_diffuse.b']
+CONVERTED_SPECULAR = ['converted_specular.r', 'converted_specular.g', 'converted_specular.b']
 
 
 def output(name, sources, file_format='PNG', depth='8', srgb=False):
@@ -81,6 +112,8 @@ BUILTIN_TEMPLATES = (
     dict(name='Linear EXR', outputs=[output('BaseColor', BASE, 'OPEN_EXR', '32'), output('Roughness', ['roughness'], 'OPEN_EXR', '32'),
                                      output('Metallic', ['metallic'], 'OPEN_EXR', '32'), output('Normal', NORMAL_GL, 'OPEN_EXR', '32'),
                                      output('Height', ['height'], 'OPEN_EXR', '32'), output('Emission', EMISSION, 'OPEN_EXR', '32')]),
+    dict(name='Spec-Gloss from Metal-Rough', outputs=[output('Diffuse', CONVERTED_DIFFUSE, srgb=True), output('Specular', CONVERTED_SPECULAR, srgb=True),
+                                                      output('Glossiness', ['converted_glossiness'])]),
 )
 
 
@@ -164,8 +197,15 @@ def effective_depth(file_format, depth, override):
     return allowed[-1] if int(wanted) > int(allowed[-1]) else allowed[0]
 
 
+def source_channels(key):
+    if key in CONVERTED:
+        return CONVERSIONS[CONVERTED[key][0]][0]
+    channel = SOURCES[key][1]
+    return (channel,) if channel else ()
+
+
 def deepest(data, item, present):
-    depths = [int(channel_depth(data, SOURCES[key][1])) for key in item['sources'] if SOURCES[key][1] in present]
+    depths = [int(channel_depth(data, channel)) for key in item['sources'] for channel in source_channels(key) if channel in present]
     return str(max([int(item['depth']), *depths]))
 
 
@@ -179,15 +219,15 @@ def file_name(pattern, tokens, multi_tile):
 
 
 def source_available(data, key, ao):
-    channel = SOURCES[key][1]
-    present = channel in {item.key for item in set_channels(data)}
+    present = {item.key for item in set_channels(data)}
     if key == 'ao':
-        return ao is not None or present
-    return channel is None or present
+        return ao is not None or 'ambient_occlusion' in present
+    channels = source_channels(key)
+    return not channels or any(channel in present for channel in channels)
 
 
 def needed_channels(template):
-    return {SOURCES[key][1] for item in template['outputs'] for key in item['sources'] if SOURCES[key][1]}
+    return {channel for item in template['outputs'] for key in item['sources'] for channel in source_channels(key)}
 
 
 def map_image(data, key, number, size):
@@ -220,8 +260,23 @@ def mesh_pixels(data, number, item, cache):
     return cache
 
 
+def channel_plane(channel, component, baked, size, present):
+    if channel not in present:
+        return numpy.full((size, size), CHANNEL[channel].default[component], dtype=numpy.float32)
+    return numpy.clip(baked[channel][..., component], 0, 1)
+
+
+def converted_plane(key, baked, size, encode, present):
+    target, component = CONVERTED[key]
+    channels, formula = CONVERSIONS[target]
+    values = formula(*(channel_plane(channel, component if CHANNEL[channel].width == 3 else 0, baked, size, present) for channel in channels))
+    return numpy.clip(linear_to_srgb(values) if encode and CHANNEL[target].srgb else values, 0, 1)
+
+
 def plane(key, baked, ao, size, srgb, linear_file, present, normal_format, meshes):
     _, channel, component = SOURCES[key]
+    if key in CONVERTED:
+        return converted_plane(key, baked, size, srgb and not linear_file, present)
     if key in MAP_SOURCES:
         map_key, component = MAP_SOURCES[key]
         return meshes[map_key][..., component]
