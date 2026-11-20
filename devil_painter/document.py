@@ -19,6 +19,7 @@ BAKE_IDS = (('ISLAND', 'UV islands', ''), ('MATERIAL', 'Materials', ''), ('OBJEC
 BAKE_ID_LABELS = {key: label for key, label, _ in BAKE_IDS}
 TRANSPARENCY = (('AUTO', 'Automatic', ''), ('DITHERED', 'Order independent', ''), ('BLENDED', 'Blended', ''))
 DYNAMICS = (('NONE', 'None', ''), ('DRIPS', 'Drips', ''), ('SPLATTER', 'Splatter', ''), ('SPEED', 'Speed', ''))
+SIZE_SPACES = (('SCREEN', 'Screen', ''), ('WORLD', 'World', ''))
 STROKE_METHODS = (('SPACE', 'Space', ''), ('LINE', 'Line', ''), ('DOTS', 'Dots', ''), ('AIRBRUSH', 'Airbrush', ''), ('ANCHORED', 'Anchored', ''))
 NORMAL_FORMATS = (('OPENGL', 'OpenGL', ''), ('DIRECTX', 'DirectX', ''))
 NORMAL_SPACES = (('TANGENT', 'Tangent', ''), ('OBJECT', 'Object', ''))
@@ -217,6 +218,8 @@ class DEVIL_PAINTER_PG_texture_set(bpy.types.PropertyGroup):
     brush_pressure_hardness: bpy.props.BoolProperty(default=False)
     brush_pressure_angle: bpy.props.BoolProperty(default=False)
     brush_follow_path: bpy.props.BoolProperty(default=False)
+    brush_size_space: bpy.props.EnumProperty(items=SIZE_SPACES, default='SCREEN')
+    brush_world_size: bpy.props.FloatProperty(default=.1, min=.001, max=100.0)
     brush_alpha: bpy.props.PointerProperty(type=bpy.types.Image)
     brush_preset: bpy.props.StringProperty(default='Soft Round')
     brush_stroke: bpy.props.EnumProperty(items=STROKE_METHODS, default='SPACE')

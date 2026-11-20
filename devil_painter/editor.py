@@ -27,7 +27,7 @@ from .privacy import masked
 from .masks import BREAKUPS, GENERATORS
 from .polyfill import POLY_NOUN
 from .meshmaps import MESH_MAPS
-from .minimal import MENU_HEADING, SAMPLE_TOP, EXPOSURE_RANGE, GAMMA_RANGE, PROJECTOR_RANGE, NORMAL_SLIDERS, STENCIL_SLIDERS, FX_RANGES, effect_menu, layer_rows, FOV_RANGE, RECENT_COLORS, SHADER_SLIDERS, BRUSH_SLIDERS, BRUSH_TOGGLES, BREAKUP_DETAIL, GENERATOR_SLIDERS, MAX_BRUSH_SIZE, REPLACE_TARGET, EFFECT_TARGET, SCALE_RANGE, TILING_RANGE, from_slider, painter_layout
+from .minimal import MENU_HEADING, SAMPLE_TOP, EXPOSURE_RANGE, GAMMA_RANGE, PROJECTOR_RANGE, NORMAL_SLIDERS, STENCIL_SLIDERS, FX_RANGES, effect_menu, layer_rows, FOV_RANGE, RECENT_COLORS, SHADER_SLIDERS, BRUSH_SLIDERS, BRUSH_TOGGLES, BREAKUP_DETAIL, GENERATOR_SLIDERS, MAX_BRUSH_SIZE, MAX_WORLD_SIZE, REPLACE_TARGET, EFFECT_TARGET, SCALE_RANGE, TILING_RANGE, from_slider, painter_layout
 from .shell import COLUMNS, HEADER, HEIGHTS, PANELS, ROWS_ONLY, SECTIONS, SIDES, WIDTHS, clamp_length, clamp_strip, default_strips, flexible, place, resize_run
 from .state import Popover, TextEdit, WorkspaceState
 
@@ -163,6 +163,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         self.below_pending, self.below_since = (), 0.0
         self.drag_origin = (0.0, 0.0)
         self.engine_before = ''
+        self.world_pixels = (0, 0)
         self.fonts = []
         self.flat_area = None
         self.saved_mask = None
@@ -379,6 +380,9 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         if action in {'SIZE_DOWN', 'SIZE_UP'}:
             size = painting.brush_value(self.scene, 'size')
             factor = shortcuts.SIZE_STEP if action == 'SIZE_UP' else 1 / shortcuts.SIZE_STEP
+            if data is not None and brushes.world_sized(data):
+                data.brush_world_size = data.brush_world_size * factor
+                return f'Brush size {brushes.world_size_text(data.brush_world_size)}.'
             painting.set_brush_value(self.scene, 'size', max(1, min(MAX_BRUSH_SIZE, round(size * factor) + (1 if action == 'SIZE_UP' else -1))))
             return f'Brush size {painting.brush_value(self.scene, "size")} px.'
         if action == 'VIEW2D':
@@ -500,6 +504,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             return {'FINISHED'}
         if event.type == 'MOUSEMOVE':
             self._area.tag_redraw()
+            self.track_world_size()
         if self.state.text is not None:
             result = self.text_event(context, event, pointer_event)
             if result is not None:
@@ -826,6 +831,19 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             return self.finish_message(self.run_gesture(context, points))
         return {'RUNNING_MODAL'}
 
+    def track_world_size(self):
+        obj, data = self.painted()
+        if data is None or not brushes.world_sized(data) or obj.mode != 'TEXTURE_PAINT':
+            return
+        source = painting.brush_source(self.scene, 'size')
+        owner, written = self.world_pixels
+        if owner == source.as_pointer() and written and source.size != written:
+            data.brush_world_size = data.brush_world_size * source.size / written
+        radius = brushes.world_radius(self._region, self._area.spaces.active.region_3d, obj, self.pointer, data.brush_world_size)
+        if radius is not None:
+            source.size = max(1, round(2 * radius))
+        self.world_pixels = (source.as_pointer(), source.size)
+
     def texture_point(self, obj, data, pointer):
         face, location = sets.hit_under(self._region, self._area.spaces.active.region_3d, obj, pointer)
         if face < 0:
@@ -856,8 +874,10 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         if brushes.per_point(data):
             jitter = brushes.dab_jitter(data, len(points), brushes.jitter_seed(points)) if brushes.jittered(data) else [(1.0, 1.0, 0.0)] * len(points)
             headings = brushes.path_angles(points) if data.brush_follow_path else [0.0] * len(points)
-            for element, (size_scale, _, _) in zip(elements, jitter):
-                element['size'] = size * size_scale
+            bases = (brushes.world_sized(data) and brushes.world_sizes(context, data, self._region, self._area.spaces.active.region_3d, obj, points)
+                     or [size] * len(points))
+            for element, base, (size_scale, _, _) in zip(elements, bases, jitter):
+                element['size'] = base * size_scale
             dabs = [([element], flow_scale, heading + angle_offset) for element, (_, flow_scale, angle_offset), heading in zip(elements, jitter, headings)]
         elif mapped:
             dabs = [(list(group), 1.0, 0.0) for _, group in itertools.groupby(elements, key=lambda element: element['pressure'])]
@@ -1427,6 +1447,8 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
                 self.save_column()
         elif key.startswith(('DRAG_SECTION.', 'GRAB_SECTION.')):
             self.track_section(key.partition('.')[2], release, key.startswith('DRAG_SECTION.'))
+        elif key == 'BRUSH_SIZE' and data is not None and brushes.world_sized(data):
+            data.brush_world_size = max(.001, x * MAX_WORLD_SIZE)
         elif key == 'BRUSH_SIZE':
             painting.set_brush_value(self.scene, 'size', max(1, round(x * MAX_BRUSH_SIZE)))
         elif key == 'BRUSH_STRENGTH' and data is not None:
@@ -1788,6 +1810,12 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
                                                   painting.uses_stroke_buffer(context, data))
         elif key == 'BRUSH_CARD':
             self.state.popover = None if self.state.popover is not None and self.state.popover.kind == 'BRUSH' else Popover('BRUSH', control.rect)
+        elif key.startswith('SIZE_SPACE.'):
+            data.brush_size_space = key.removeprefix('SIZE_SPACE.')
+            self.world_pixels = (0, 0)
+            self.brush_changed(context, data)
+            self.message = ('The brush keeps its size on the model at any zoom.' if brushes.world_sized(data)
+                            else 'The brush keeps its size on screen.')
         elif key in BRUSH_FLAGS:
             setattr(data, BRUSH_FLAGS[key], not getattr(data, BRUSH_FLAGS[key]))
             self.brush_changed(context, data)
