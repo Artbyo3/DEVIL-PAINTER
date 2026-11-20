@@ -589,7 +589,7 @@ def journey():
           'Rust lays down a procedural grunge pattern')
     check(has('SCALE.base_color') and has('SWATCHB.base_color') and has('PROJECTION') and control('PROJECTION').text == 'Tri-planar',
           'Properties shows the pattern parameters and the tri-planar projection')
-    mapping = nodes[rust.uid + '.mapping']
+    mapping = nodes[rust.uid + ':mapping']
     check(mapping.inputs['Vector'].links[0].from_socket.name == 'Object', 'tri-planar patterns use object coordinates')
     rect = control('SCALE.base_color').rect
     press(window, 'LEFTMOUSE', region.x + rect.x + rect.w * .8, region.y + rect.y + rect.h / 2)
@@ -602,8 +602,8 @@ def journey():
     click(window, region, 'SET_PROJECTION.UV')
     yield from settle()
     nodes = data.material.node_tree.nodes
-    check(rust.projection == 'UV' and nodes[rust.uid + '.mapping'].inputs['Vector'].links[0].from_node == nodes[rust.uid + '.uv_transform']
-          and nodes[rust.uid + '.uv_transform'].inputs['Vector'].links[0].from_socket.name == 'UV',
+    check(rust.projection == 'UV' and nodes[rust.uid + ':mapping'].inputs['Vector'].links[0].from_node == nodes[rust.uid + ':uv_transform']
+          and nodes[rust.uid + ':uv_transform'].inputs['Vector'].links[0].from_socket.name == 'UV',
           'the projection dropdown switches the layer to UV mapping')
 
     click(window, region, 'SOURCE.roughness')
@@ -753,7 +753,7 @@ def journey():
     drag_to('OPACITY', .3)
     yield from settle()
     nodes = data.material.node_tree.nodes
-    check(abs(nodes[folder_uid + '.opacity'].inputs[1].default_value - next(layer for layer in data.layers if layer.uid == folder_uid).opacity) < 1e-5 and next(layer for layer in data.layers if layer.uid == folder_uid).opacity < .4
+    check(abs(nodes[folder_uid + ':opacity'].inputs[1].default_value - next(layer for layer in data.layers if layer.uid == folder_uid).opacity) < 1e-5 and next(layer for layer in data.layers if layer.uid == folder_uid).opacity < .4
           and folder_uid + '.base_color' in nodes, 'folder opacity mixes the whole folder into the stack')
 
     library.import_textures([textures / 'lone.png'])
@@ -1163,7 +1163,7 @@ def journey():
     click(window, region, 'PHYS_USE')
     yield from settle()
     triplanar = next(layer for layer in data.layers if layer.name == 'Wood')
-    scale = data.material.node_tree.nodes[triplanar.uid + '.mapping'].inputs['Scale'].default_value
+    scale = data.material.node_tree.nodes[triplanar.uid + ':mapping'].inputs['Scale'].default_value
     check(cube.devil_painter.use_physical and abs(scale[0] - triplanar.tiling * cube.scale[0] / cube.devil_painter.physical_size) < 1e-4,
           'real-world scale sizes tri-planar fills in meters')
     press(window, 'ESC', *middle)

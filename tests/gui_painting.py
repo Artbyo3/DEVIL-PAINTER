@@ -553,14 +553,14 @@ def journey():
     wood_uid = active_layer(data).uid
     yield from pick(window, region, 'PROJECTION', 'SET_PROJECTION.PLANAR')
     wood = find_layer(data, wood_uid)
-    check(wood.projection == 'PLANAR' and f'{wood_uid}.projector' in nodes(data) and has('GIZMO_MOVE') and has('GIZMO_SIZE'),
+    check(wood.projection == 'PLANAR' and f'{wood_uid}:projector' in nodes(data) and has('GIZMO_MOVE') and has('GIZMO_SIZE'),
           'a planar projection adds a projector and its gizmo on the model')
     check(len(control('GIZMO_MOVE').points) >= 8, 'the gizmo draws the projector frame')
     gx, gy = spot_of(region, 'GIZMO_MOVE')
     drag(window, gx, gy, 60, 0)
     yield from settle()
     wood = find_layer(data, wood_uid)
-    check(Vector(wood.proj_offset).length > .1 and tuple(nodes(data)[f'{wood_uid}.projector'].inputs['Location'].default_value) == tuple(wood.proj_offset),
+    check(Vector(wood.proj_offset).length > .1 and tuple(nodes(data)[f'{wood_uid}:projector'].inputs['Location'].default_value) == tuple(wood.proj_offset),
           'dragging the gizmo moves the projection')
     size = wood.proj_size
     sx, sy = spot_of(region, 'GIZMO_SIZE')
