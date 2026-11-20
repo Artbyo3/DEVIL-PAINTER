@@ -191,6 +191,10 @@ def world_size_text(value):
     return bpy.utils.units.to_string(units.system, 'LENGTH', value * units.scale_length, precision=3)
 
 
+def textured(data):
+    return any(slot.enabled and slot.source == 'IMAGE' and slot.image is not None for slot in data.brush_slots)
+
+
 def per_dab(data):
     return pressure_mapped(data) or per_point(data)
 

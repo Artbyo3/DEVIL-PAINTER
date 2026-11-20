@@ -2369,5 +2369,27 @@
   ]
  ],
  "gui_shift_line.py": [],
- "gui_stencil_drag.py": []
+ "gui_stencil_drag.py": [],
+ "gui_material_stroke.py": [
+  [
+   "export_material_stroke/Cube_Material_BaseColor.png",
+   "ad233ea6e27b61ddd37156d563fbcb7583b30cf1c8b77b66618e54c6c7112e91"
+  ],
+  [
+   "export_material_stroke/Cube_Material_Roughness.png",
+   "d702c979d12f16a8bfdddd5f632cffb40729b9c4b24a002b071be484dc6ce29f"
+  ],
+  [
+   "export_material_stroke/Cube_Material_Metallic.png",
+   "f17af6dbbb62a595fbfcf68266cda9c3f1f426d72d79e9789318f71e9ef49c86"
+  ],
+  [
+   "export_material_stroke/Cube_Material_Normal.png",
+   "0fa6dcb39a8ecbe28f6ae9a865f1399e261074391732eb0ae29cf95a4598d1a4"
+  ],
+  [
+   "export_material_stroke/Cube_Material_Height.png",
+   "0bb6bef9d428fd3a5daae91ab62e2c015a487fdef69395ae111e938571f00621"
+  ]
+ ]
 }
