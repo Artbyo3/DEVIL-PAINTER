@@ -1,6 +1,6 @@
 schema_version = "1.0.0"
 id = "devil_painter"
-version = "0.2.1"
+version = "0.3.0"
 name = "Devil Painter"
 tagline = "Layer-based texture painting inside Blender"
 maintainer = "Artbyo3"

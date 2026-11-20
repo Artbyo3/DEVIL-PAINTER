@@ -1,5 +1,5 @@
 bl_info = {
-    "name": "Devil Painter", "author": "Artbyo3", "version": (0, 2, 1),
+    "name": "Devil Painter", "author": "Artbyo3", "version": (0, 3, 0),
     "blender": (5, 2, 0), "location": "View3D > View > Devil Painter; Ctrl+Alt+P",
     "description": "Layer-based texture painting inside Blender", "category": "Paint",
 }
