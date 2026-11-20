@@ -43,6 +43,9 @@ jobs:
           REPOSITORY: ${{ github.repository }}
         run: python -B tools/extension_repo.py docs-site/site/repo
 
+      - name: Point the install cards at the newest release
+        run: python -B tools/install_card.py docs-site/site
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
