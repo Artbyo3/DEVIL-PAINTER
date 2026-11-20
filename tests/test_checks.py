@@ -24,6 +24,6 @@ class RepositoryChecksTests(unittest.TestCase):
         manifest = tomllib.loads((ROOT / 'devil_painter' / 'blender_manifest.toml').read_text(encoding='utf-8'))
         self.assertEqual(manifest['id'], 'devil_painter')
         self.assertEqual(manifest['name'], 'Devil Painter')
-        self.assertEqual(manifest['version'], '0.3.0')
+        self.assertEqual(manifest['version'], '0.4.0')
         self.assertEqual(manifest['blender_version_min'], '5.2.0')
         self.assertEqual(manifest['type'], 'add-on')
