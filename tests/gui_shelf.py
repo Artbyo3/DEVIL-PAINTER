@@ -238,10 +238,10 @@ def journey():
     check({'MATERIALS', 'SMART', 'TEXTURES', 'PATTERNS', 'MASKS', 'GENERATORS', 'FILTERS', 'BRUSHES', 'ALPHAS', 'ENVIRONMENTS'} <= tabs,
           'the shelf browses materials, smart materials, textures, patterns, masks, generators, filters, brushes, alphas, and lighting')
     masks_tab = control('SHELF_TAB.MASKS')
-    check(masks_tab.icon == 'MASK' and masks_tab.rect.w < control('SHELF_TAB.MATERIALS').rect.w / 2
+    check(masks_tab.icon == 'MASK' and masks_tab.rect.w == masks_tab.rect.h
           and control('SHELF_TAB.GENERATORS').rect.x - (masks_tab.rect.x + masks_tab.rect.w)
           == control('SHELF_TAB.SMART').rect.x - (control('SHELF_TAB.MATERIALS').rect.x + control('SHELF_TAB.MATERIALS').rect.w),
-          'the Masks tab is an icon-sized chip and the tabs after it close the gap')
+          'the Masks tab is a square icon chip and the tabs after it close the gap')
     for tab in ('MATERIALS', 'SMART', 'MASKS', 'GENERATORS', 'FILTERS', 'PATTERNS', 'BRUSHES', 'ENVIRONMENTS'):
         yield from open_tab(window, region, tab)
         shown = yield from wait_preview('ITEM.0')
