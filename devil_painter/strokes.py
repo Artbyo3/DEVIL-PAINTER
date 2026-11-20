@@ -7,6 +7,7 @@ from .tiles import blank, create, variant
 
 HISTORY_LIMIT = 80
 SMEAR_STRENGTH = .85
+TRACE_STEP = .5
 MERGE_TOOLS = {'PAINT', 'FILL', 'ERASE', 'BLUR', 'SMEAR', 'CLONE'}
 _history = []
 _future = []
@@ -59,6 +60,7 @@ class Gesture:
     path: list
     radius: float
     source: tuple = None
+    copies: tuple = ()
 
 
 def box_blur(pixels, radius):
@@ -111,13 +113,76 @@ def flow_colors(shape, gesture, base):
     return colors
 
 
-def brush_values(slot, shape):
+def trace(path, radius):
+    spots = numpy.asarray(path, dtype=numpy.float64).reshape(-1, 2)
+    step = max(radius * TRACE_STEP, 2.0)
+    kept = [spots[0]]
+    for spot in spots[1:]:
+        if numpy.hypot(*(spot - kept[-1])) >= step:
+            kept.append(spot)
+    tail = numpy.hypot(*(spots[-1] - kept[-1]))
+    if len(kept) > 1 and tail < step / 2:
+        kept[-1] = spots[-1]
+    elif tail > 1e-6:
+        kept.append(spots[-1])
+    return numpy.array(kept)
+
+
+def ribbon(points, paths, radius):
+    best = numpy.full(len(points), numpy.inf)
+    along, across = numpy.zeros(len(points)), numpy.zeros(len(points))
+    for path in paths:
+        spots = trace(path, radius)
+        if len(spots) == 1:
+            offset = points - spots[0]
+            distance = numpy.hypot(offset[:, 0], offset[:, 1])
+            closer = distance < best
+            best, along, across = numpy.where(closer, distance, best), numpy.where(closer, offset[:, 0], along), numpy.where(closer, offset[:, 1], across)
+            continue
+        vectors = numpy.diff(spots, axis=0)
+        lengths = numpy.hypot(vectors[:, 0], vectors[:, 1])
+        offsets = numpy.concatenate(([0.0], numpy.cumsum(lengths)[:-1]))
+        last = len(vectors) - 1
+        for index, (start, vector, length, offset) in enumerate(zip(spots, vectors, lengths, offsets)):
+            unit = vector / length
+            relative = points - start
+            reach = numpy.clip(relative @ unit, -numpy.inf if index == 0 else 0.0, numpy.inf if index == last else length)
+            gap = relative - reach[:, None] * unit
+            distance = numpy.hypot(gap[:, 0], gap[:, 1])
+            side = unit[0] * relative[:, 1] - unit[1] * relative[:, 0]
+            closer = distance < best
+            best = numpy.where(closer, distance, best)
+            along = numpy.where(closer, offset + reach, along)
+            across = numpy.where(closer, numpy.copysign(distance, side), across)
+    return along, across
+
+
+def along_stroke(source, covered, gesture):
+    span = max(2 * gesture.radius, 1.0)
+    height, width = source.shape[:2]
+    factor = max(1, int(min(height, width) // span))
+    if factor > 1:
+        height, width = height // factor, width // factor
+        source = source[:height * factor, :width * factor].reshape(height, factor, width, factor, 3).mean(axis=(1, 3))
+    rows, columns = numpy.nonzero(covered)
+    points = numpy.stack((columns, rows), axis=-1) + .5
+    along, across = ribbon(points, [path for path in (gesture.path, *gesture.copies) if path], gesture.radius)
+    picked = (numpy.floor(across / span * height + height / 2).astype(numpy.int64) % height,
+              numpy.floor(along / span * height).astype(numpy.int64) % width)
+    values = numpy.zeros(covered.shape + (3,), dtype=numpy.float32)
+    values[rows, columns] = source[picked]
+    return values
+
+
+def brush_values(slot, added, gesture):
     if slot.source == 'IMAGE' and slot.image is not None and slot.image.size[0]:
-        source = read(slot.image)
-        rows = numpy.arange(shape[0]) * source.shape[0] // shape[0]
-        columns = numpy.arange(shape[1]) * source.shape[1] // shape[1]
-        return source[rows][:, columns][..., :3]
-    return numpy.broadcast_to(rgb(slot_value(slot)), shape + (3,))
+        source = read(slot.image)[..., :3]
+        if gesture is not None and (gesture.path or any(gesture.copies)):
+            return along_stroke(source, added > 0, gesture)
+        rows = numpy.arange(added.shape[0]) * source.shape[0] // added.shape[0]
+        columns = numpy.arange(added.shape[1]) * source.shape[1] // added.shape[1]
+        return source[rows][:, columns]
+    return numpy.broadcast_to(rgb(slot_value(slot)), added.shape + (3,))
 
 
 def merge_targets(data, layer, tile, tool):
@@ -156,7 +221,7 @@ def apply_tool(data, tool, key, pixels, stroke, added, gesture):
         elif key == 'base_color' and not (slot.source == 'IMAGE' and slot.image is not None):
             values = stroke[..., :3]
         else:
-            values = brush_values(slot, added.shape)
+            values = brush_values(slot, added, gesture)
         pixels[..., :3] += weight * (values - pixels[..., :3])
         pixels[..., 3:] = total
     return True
