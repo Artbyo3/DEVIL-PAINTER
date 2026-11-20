@@ -15,6 +15,7 @@ from .procedural import PATTERN, PATTERNS
 TABS = (('MATERIALS', 'Materials'), ('SMART', 'Smart'), ('TEXTURES', 'Textures'), ('PATTERNS', 'Patterns'), ('MASKS', 'Masks'),
         ('GENERATORS', 'Generators'), ('FILTERS', 'Filters'), ('BRUSHES', 'Brushes'), ('ALPHAS', 'Alphas'), ('ENVIRONMENTS', 'Lighting'),
         ('PACKS', 'Packs'))
+TAB_ICONS = {'MASKS': 'MASK'}
 SCOPES = (('ALL', 'All'), ('BUILTIN', 'Built-in'), ('MINE', 'Mine'))
 FILTER_BASE = 'filter_base.png'
 FILTER_BASE_SIZE = 64
