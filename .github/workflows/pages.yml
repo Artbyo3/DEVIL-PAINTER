@@ -37,6 +37,12 @@ jobs:
         working-directory: docs-site
         run: zensical build
 
+      - name: Build extension repository index
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: python -B tools/extension_repo.py docs-site/site/repo
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:

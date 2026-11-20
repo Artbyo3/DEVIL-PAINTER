@@ -22,8 +22,7 @@ Blender artist should be able to follow the same workflow without learning a
 second program.
 
 The product is past its MVP. Version 0.3.0 is the public announcement
-release, timed to the approval of Devil Painter on the Blender Extensions
-platform.
+release, shipped through the project's own Blender extension repository.
 
 Devil Painter shares the Devil workspace with Devil Designer: the same shell,
 tokens, icons, and interaction behavior, re-hued to Painter's pink-red
@@ -37,7 +36,8 @@ not limits on it.
 ### License and platform
 
 - Licensed GPL-3.0-or-later.
-- Published under the Blender Extensions platform rules:
+- Published through the project's own Blender extension repository, under
+  these rules:
   - every shipped asset is CC0;
   - every permission the add-on uses is declared in the manifest;
   - no external binaries ship in the package;
