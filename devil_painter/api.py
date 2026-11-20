@@ -99,7 +99,7 @@ def export(obj, directory, template=None):
     project = obj.devil_painter
     wanted = [index for index, data in enumerate(project.sets) if data.export]
     written = exporting.export(bpy.context, obj, project, exporting.find_template(template or project.export_template), wanted, str(directory),
-                               project.export_pattern, project.export_depth, project.export_size, project.export_padding)
+                               project.export_pattern, project.export_depth, project.export_size, project.export_padding, project.export_padding_style)
     return [str(Path(path)) for path in written]
 
 

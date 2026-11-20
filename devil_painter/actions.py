@@ -1049,7 +1049,7 @@ def export_files(context, obj, project, directory):
         return [], 'Pick at least one texture set to export.'
     template = exporting.find_template(project.export_template)
     written = exporting.export(context, obj, project, template, wanted, directory, project.export_pattern, project.export_depth,
-                               project.export_size, project.export_padding)
+                               project.export_size, project.export_padding, project.export_padding_style)
     painting.enter_paint_mode(context, obj)
     sets.mask_faces(obj, project)
     painting.update_canvas(context, project.sets[project.active_set])

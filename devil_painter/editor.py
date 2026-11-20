@@ -56,12 +56,12 @@ POINTER_TOKENS = ('MOUSE', 'TRACKPAD', 'NDOF', 'PEN', 'ERASER')
 HIDDEN_REGIONS = ('show_region_header', 'show_region_tool_header', 'show_region_toolbar', 'show_region_asset_shelf', 'show_gizmo_navigate')
 FLAT_REGIONS = ('show_region_header', 'show_region_tool_header', 'show_region_toolbar', 'show_region_ui', 'show_region_asset_shelf')
 MOVES = {'MOVE_UP': 1, 'MOVE_DOWN': -1}
-EXPORT_MENUS = {'EXPORT_TEMPLATE', 'EXPORT_DEPTH', 'EXPORT_SIZE', 'EXPORT_PADDING'}
+EXPORT_MENUS = {'EXPORT_TEMPLATE', 'EXPORT_DEPTH', 'EXPORT_SIZE', 'EXPORT_PADDING', 'EXPORT_PADDING_STYLE'}
 HIGHLIGHT_ALPHA = .35
 SHADER_RANGES = {key: (field, top) for key, _, field, top in SHADER_SLIDERS}
 TOOL_ACTIONS = {'PAINT', 'ERASE', 'FILL', 'BLUR', 'SMEAR', 'CLONE'}
 EXPORT_MENU_PREFIXES = ('OUT_SRC.', 'OUT_FORMAT.', 'OUT_DEPTH.')
-EXPORT_EDITS = ('SET_TEMPLATE.', 'SET_EXPORT_DEPTH.', 'SET_EXPORT_SIZE.', 'SET_EXPORT_PADDING.', 'OUT_REMOVE.', 'SET_SRC.', 'SET_FORMAT.', 'SET_DEPTH.')
+EXPORT_EDITS = ('SET_TEMPLATE.', 'SET_EXPORT_DEPTH.', 'SET_EXPORT_SIZE.', 'SET_EXPORT_PADDING.', 'SET_EXPORT_PADDING_STYLE.', 'OUT_REMOVE.', 'SET_SRC.', 'SET_FORMAT.', 'SET_DEPTH.')
 PROJECTION_LABELS = {key: label for key, label, _ in PROJECTIONS}
 CIRCLE_STEPS = 32
 BRUSH_RANGES = {key: (field, top, .01 if key == 'BRUSH_FLOW' else 1.0 if key == 'BRUSH_SPACING' else 0.0) for key, _, field, top, _ in BRUSH_SLIDERS}
@@ -2377,6 +2377,9 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         elif key == 'EXPORT_PADDING':
             items = tuple((f'SET_EXPORT_PADDING.{padding}', 'Infinite' if padding < 0 else f'{padding} px', padding == project.export_padding)
                           for padding in exporting.PADDINGS)
+        elif key == 'EXPORT_PADDING_STYLE':
+            items = tuple((f'SET_EXPORT_PADDING_STYLE.{style}', label, style == project.export_padding_style)
+                          for style, label in exporting.PADDING_STYLES.items())
         elif key.startswith('OUT_SRC.'):
             _, index, slot = key.split('.')
             items = tuple((f'SET_SRC.{index}.{slot}.{source}', label, False) for source, (label, _, _) in exporting.SOURCES.items())
@@ -2402,6 +2405,9 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         if key.startswith('SET_EXPORT_SIZE.'):
             project.export_size = int(key.removeprefix('SET_EXPORT_SIZE.'))
             return 'Export size set.'
+        if key.startswith('SET_EXPORT_PADDING_STYLE.'):
+            project.export_padding_style = key.removeprefix('SET_EXPORT_PADDING_STYLE.')
+            return 'Padding style set.'
         if key.startswith('SET_EXPORT_PADDING.'):
             project.export_padding = int(key.removeprefix('SET_EXPORT_PADDING.'))
             return 'Padding set.'

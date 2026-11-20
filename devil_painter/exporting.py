@@ -15,6 +15,8 @@ FORMAT_LABELS = {'PNG': 'PNG', 'TARGA': 'TGA', 'TIFF': 'TIFF', 'OPEN_EXR': 'EXR'
 DEPTHS = ('TEMPLATE', '8', '16', '32')
 SIZES = (0, 512, 1024, 2048, 4096)
 PADDINGS = (0, 4, 16, 64, -1)
+PADDING_STYLES = {'DILATION': 'Dilation', 'TRANSPARENT': 'Transparent', 'DIFFUSION': 'Diffusion'}
+WHITE = (1.0, 1.0, 1.0, 1.0)
 INFINITE_PADDING = -1
 SOURCES = {'base_color.r': ('Base R', 'base_color', 0), 'base_color.g': ('Base G', 'base_color', 1), 'base_color.b': ('Base B', 'base_color', 2),
            'roughness': ('Roughness', 'roughness', 0), 'smoothness': ('Smoothness', 'roughness', 0), 'metallic': ('Metallic', 'metallic', 0),
@@ -334,7 +336,19 @@ def refuse_collisions(planned, project):
             raise ValueError(f'Two outputs would both export {path.name}. Give every output its own name, or add {{output}} to the file name pattern.')
 
 
-def export(context, obj, project, template, wanted, directory, pattern, override, size=0, padding=baking.BAKE_MARGIN):
+def with_alpha(planes, coverage):
+    if len(planes) == 4:
+        return [*planes[:3], planes[3] * coverage]
+    return [*(planes * 3 if len(planes) == 1 else planes), coverage]
+
+
+def island_coverage(context, obj, project, wanted):
+    def prepare(data):
+        baking.emission_tree(data.material.node_tree, WHITE)
+    return {key: (pixels[..., 3] >= .5).astype(numpy.float32) for key, pixels in baking.bake_pass(context, obj, project, wanted, prepare, margin=0).items()}
+
+
+def export(context, obj, project, template, wanted, directory, pattern, override, size=0, padding=baking.BAKE_MARGIN, style='DILATION'):
     planned = planned_files(obj, project, template, wanted, Path(directory), pattern, size)
     refuse_collisions(planned, project)
     present_anywhere = {item.key for index in wanted for item in set_channels(project.sets[index])}
@@ -343,11 +357,12 @@ def export(context, obj, project, template, wanted, directory, pattern, override
     baked = {}
     for key in channels:
         margin = max(project.sets[index].resolution for index in wanted) if padding == INFINITE_PADDING else padding
-        for (index, number), values in baking.bake_channel(context, obj, project, wanted, CHANNEL[key], margin).items():
+        for (index, number), values in baking.bake_channel(context, obj, project, wanted, CHANNEL[key], margin, style).items():
             baked.setdefault((index, number), {})[key] = values
     for (index, number), maps in baked.items():
         if 'normal' in maps and 'height' in maps:
             maps['normal'] = fold_height(maps['normal'], maps['height'][..., 0], project.sets[index].bump_strength, project.normal_format)
+    coverage = island_coverage(context, obj, project, wanted) if style == 'TRANSPARENT' else {}
     ao = {}
     meshes = {}
     for path, index, number, item in planned:
@@ -360,5 +375,7 @@ def export(context, obj, project, template, wanted, directory, pattern, override
         mesh = mesh_pixels(data, number, item, meshes)
         planes = [plane(key, baked.get((index, number), {}), ao[(index, number)], data.resolution, item['srgb'], file_format == 'OPEN_EXR', present, project.normal_format, mesh)
                   for key in item['sources']]
+        if coverage:
+            planes = with_alpha(planes, coverage[(index, number)])
         write(path, planes, file_format, effective_depth(file_format, deepest(data, item, present), override), size)
     return [path for path, *_ in planned]
