@@ -827,9 +827,9 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
     def start_gesture(self, context, event):
         obj, data = self.painted()
         if event.ctrl and painting.active_tool(self.scene) == 'CLONE':
-            spot = self.texture_point(obj, data, self.pointer)
-            self.state.clone_source = spot
-            return self.finish_message('Clone source set. Paint to copy from it.' if spot else 'Ctrl+click on the model to set the clone source.')
+            face, location = sets.hit_under(self._region, self._area.spaces.active.region_3d, obj, self.pointer)
+            self.state.clone_source = None if face < 0 else (self.surface_point(obj, data, face, location)[0], location)
+            return self.finish_message('Clone source set. Paint to copy from it.' if face >= 0 else 'Ctrl+click on the model to set the clone source.')
         self.begin_stroke(context)
         self.stroke_pending = False
         self.state.gesture = [(self.pointer, max(event.pressure, .01))]
@@ -1029,12 +1029,21 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         path = [(spot[1], spot[2]) for spot in spots if spot and spot[0] == tile]
         first, edge = spots[0], self.texture_point(obj, data, (points[0][0][0] + size, points[0][0][1]))
         radius = math.dist(first[1:], edge[1:]) if first and edge and first[0] == edge[0] else size
-        source = self.state.clone_source[1:] if self.state.clone_source and self.state.clone_source[0] == tile else None
-        if painting.active_tool(self.scene) == 'CLONE' and source is None:
+        source = self.state.clone_source[1] if self.state.clone_source and self.state.clone_source[0] == tile else None
+        cloning = painting.active_tool(self.scene) == 'CLONE'
+        if cloning and source is None:
             strokes.merge(obj, data, None)
             return None, 'Ctrl+click on the model to set the clone source first.'
+        if cloning:
+            source = self.clone_offset(obj, data, points, tile, source)
         copies = self.symmetric_paths(obj, data, points, tile) if brushes.textured(data) else ()
         return strokes.merge(obj, data, strokes.Gesture(path, radius, source, copies)), ''
+
+    def clone_offset(self, obj, data, points, tile, source):
+        view = self._area.spaces.active.region_3d
+        hits = (sets.hit_under(self._region, view, obj, point) for point, _ in points)
+        start = next((location for face, location in hits if face >= 0 and self.surface_point(obj, data, face, location)[0] == tile), None)
+        return None if start is None else source - start
 
     def begin_stroke(self, context):
         caches.touch()
