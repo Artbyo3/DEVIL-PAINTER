@@ -822,7 +822,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             return True
         if obj.devil_painter.cross_tiles and len(tiles.numbers(data)) > 1 and tool in painting.BUFFER_TOOLS - {'FILL'}:
             return True
-        return buffered and (tool in GESTURE_TOOLS or (tool == 'PAINT' and 'flow' in data.brush_slots and data.brush_slots['flow'].enabled))
+        return buffered and (tool in GESTURE_TOOLS or (tool == 'PAINT' and (brushes.textured(data) or ('flow' in data.brush_slots and data.brush_slots['flow'].enabled))))
 
     def start_gesture(self, context, event):
         obj, data = self.painted()
@@ -911,11 +911,29 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
 
     def texture_point(self, obj, data, pointer):
         face, location = sets.hit_under(self._region, self._area.spaces.active.region_3d, obj, pointer)
-        if face < 0:
-            return None
+        return None if face < 0 else self.surface_point(obj, data, face, location)
+
+    def surface_point(self, obj, data, face, location):
         uv = sets.uv_at(obj.data, obj.devil_painter.uv_map, sets.triangle_at(obj.data, face, location), location)
         tile = FIRST_TILE + int(uv.x // 1) + 10 * int(uv.y // 1)
         return tile, uv.x % 1 * data.resolution, uv.y % 1 * data.resolution
+
+    def symmetric_paths(self, obj, data, points, tile):
+        turns = [Matrix.Rotation(-math.tau * turn / data.brush_radial, 3, data.brush_radial_axis) for turn in range(data.brush_radial)]
+        flips = [Vector(signs) for signs in itertools.product(*(((1.0, -1.0) if mirrored else (1.0,)) for mirrored in data.brush_mirror))]
+        hits = [sets.hit_under(self._region, self._area.spaces.active.region_3d, obj, point) for point, _ in points]
+        copies = []
+        for turn, flip in [(turn, flip) for turn in turns for flip in flips][1:]:
+            path = []
+            for face, location in hits:
+                if face < 0:
+                    continue
+                found, spot, _, near = obj.closest_point_on_mesh((turn @ location) * flip)
+                texel = self.surface_point(obj, data, near, spot) if found else None
+                if texel is not None and texel[0] == tile:
+                    path.append(texel[1:])
+            copies.append(path)
+        return tuple(copies)
 
     def gesture_path(self, data, points):
         if data.brush_stroke == 'LINE' and len(points) > 1:
@@ -1015,7 +1033,8 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         if painting.active_tool(self.scene) == 'CLONE' and source is None:
             strokes.merge(obj, data, None)
             return None, 'Ctrl+click on the model to set the clone source first.'
-        return strokes.merge(obj, data, strokes.Gesture(path, radius, source)), ''
+        copies = self.symmetric_paths(obj, data, points, tile) if brushes.textured(data) else ()
+        return strokes.merge(obj, data, strokes.Gesture(path, radius, source, copies)), ''
 
     def begin_stroke(self, context):
         caches.touch()
