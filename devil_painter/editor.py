@@ -853,11 +853,12 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         elements = [dict(name='', location=(0.0, 0.0, 0.0), mouse=point, mouse_event=point, is_start=index == 0, pressure=pressure, size=size,
                          time=index * .01, x_tilt=0.0, y_tilt=0.0) for index, (point, pressure) in enumerate(points)]
         mapped = brushes.per_dab(data)
-        if brushes.jittered(data):
-            jitter = brushes.dab_jitter(data, len(points), brushes.jitter_seed(points))
+        if brushes.per_point(data):
+            jitter = brushes.dab_jitter(data, len(points), brushes.jitter_seed(points)) if brushes.jittered(data) else [(1.0, 1.0, 0.0)] * len(points)
+            headings = brushes.path_angles(points) if data.brush_follow_path else [0.0] * len(points)
             for element, (size_scale, _, _) in zip(elements, jitter):
                 element['size'] = size * size_scale
-            dabs = [([element], flow_scale, angle_offset) for element, (_, flow_scale, angle_offset) in zip(elements, jitter)]
+            dabs = [([element], flow_scale, heading + angle_offset) for element, (_, flow_scale, angle_offset), heading in zip(elements, jitter, headings)]
         elif mapped:
             dabs = [(list(group), 1.0, 0.0) for _, group in itertools.groupby(elements, key=lambda element: element['pressure'])]
         else:

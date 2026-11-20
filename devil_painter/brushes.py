@@ -25,9 +25,10 @@ PRESETS = (
 )
 PRESSURE_FIELDS = ('pressure_flow', 'pressure_hardness', 'pressure_angle')
 JITTER_FIELDS = ('jitter_size', 'jitter_flow', 'jitter_angle')
-PRESET_FIELDS = ('hardness', 'flow', 'spacing', 'smoothing', 'jitter', 'random_angle', 'stroke', 'angle', *PRESSURE_FIELDS, *JITTER_FIELDS)
-PRESET_DEFAULTS = dict(stroke='SPACE', angle=0.0, **{field: False for field in PRESSURE_FIELDS}, **{field: 0.0 for field in JITTER_FIELDS})
+PRESET_FIELDS = ('hardness', 'flow', 'spacing', 'smoothing', 'jitter', 'random_angle', 'stroke', 'angle', *PRESSURE_FIELDS, *JITTER_FIELDS, 'follow_path')
+PRESET_DEFAULTS = dict(stroke='SPACE', angle=0.0, follow_path=False, **{field: False for field in PRESSURE_FIELDS}, **{field: 0.0 for field in JITTER_FIELDS})
 JITTER_SEEDS = 100000
+FOLLOW_REACH = 24.0
 STENCIL_TEXTURE = 'DP Stencil'
 
 
@@ -147,8 +148,26 @@ def jittered(data):
     return any(getattr(data, 'brush_' + field) for field in JITTER_FIELDS)
 
 
+def per_point(data):
+    return jittered(data) or data.brush_follow_path
+
+
 def per_dab(data):
-    return pressure_mapped(data) or jittered(data)
+    return pressure_mapped(data) or per_point(data)
+
+
+def path_angles(points):
+    spots = numpy.array([point for point, _ in points], dtype=numpy.float64).reshape(-1, 2)
+    travel = numpy.concatenate(([0.0], numpy.cumsum(numpy.hypot(*numpy.diff(spots, axis=0).T))))
+    behind = numpy.maximum(numpy.searchsorted(travel, travel - FOLLOW_REACH / 2, side='right') - 1, 0)
+    ahead = numpy.minimum(numpy.searchsorted(travel, travel + FOLLOW_REACH / 2), len(spots) - 1)
+    angles, heading = [], 0.0
+    for index, (back, front) in enumerate(zip(behind, ahead)):
+        dx, dy = spots[front] - spots[back]
+        if index and math.hypot(dx, dy) > 1e-6:
+            heading = math.degrees(math.atan2(dy, dx))
+        angles.append(heading)
+    return angles
 
 
 def jitter_seed(points):

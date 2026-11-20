@@ -216,6 +216,7 @@ class DEVIL_PAINTER_PG_texture_set(bpy.types.PropertyGroup):
     brush_pressure_flow: bpy.props.BoolProperty(default=False)
     brush_pressure_hardness: bpy.props.BoolProperty(default=False)
     brush_pressure_angle: bpy.props.BoolProperty(default=False)
+    brush_follow_path: bpy.props.BoolProperty(default=False)
     brush_alpha: bpy.props.PointerProperty(type=bpy.types.Image)
     brush_preset: bpy.props.StringProperty(default='Soft Round')
     brush_stroke: bpy.props.EnumProperty(items=STROKE_METHODS, default='SPACE')

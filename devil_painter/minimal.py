@@ -261,7 +261,8 @@ STENCIL_SLIDERS = (('STENCIL_SCALE', 'Scale', 'stencil_scale', 4.0), ('STENCIL_A
                    ('STENCIL_X', 'Left to right', 'stencil_x', 1.0), ('STENCIL_Y', 'Bottom to top', 'stencil_y', 1.0))
 BRUSH_TOGGLES = (('BRUSH_PRESSURE_SIZE', 'Pressure size', 'brush_pressure_size'), ('BRUSH_PRESSURE_OPACITY', 'Pressure opacity', 'brush_pressure_opacity'),
                  ('BRUSH_PRESSURE_FLOW', 'Pressure flow', 'brush_pressure_flow'), ('BRUSH_PRESSURE_HARDNESS', 'Pressure hardness', 'brush_pressure_hardness'),
-                 ('BRUSH_PRESSURE_ANGLE', 'Pressure angle', 'brush_pressure_angle'), ('BRUSH_RANDOM_ANGLE', 'Random angle', 'brush_random_angle'))
+                 ('BRUSH_PRESSURE_ANGLE', 'Pressure angle', 'brush_pressure_angle'), ('BRUSH_RANDOM_ANGLE', 'Random angle', 'brush_random_angle'),
+                 ('BRUSH_FOLLOW_PATH', 'Follow path', 'brush_follow_path'))
 SHORT_NAMES = {'roughness': 'Rough', 'metallic': 'Metal', 'normal': 'Normal', 'height': 'Height', 'emission': 'Emit', 'opacity': 'Alpha'}
 
 
