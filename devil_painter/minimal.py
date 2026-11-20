@@ -26,7 +26,7 @@ from .painting import TOOLS
 from .polyfill import POLY_MODES
 from .privacy import masked, masked_path
 from .shell import COLUMNS, HEADER, SECTIONS, arrange, flexible
-from .ui_system import ACCENT, MinimalMetrics
+from .ui_system import ACCENT, CHIP_ICON_SIZE, MinimalMetrics
 
 MAX_BRUSH_SIZE = 500
 MAX_WORLD_SIZE = 1.0
@@ -1085,12 +1085,18 @@ def tab_rows(zone, s):
 def shelf_header(layout, state, zone, header):
     s = layout.scale
     tab_w, per_row, rows = tab_rows(zone, s)
+    x = zone.x + 8 * s
     for index, (tab, label) in enumerate(shelf.TABS):
         row, column = divmod(index, per_row)
-        x = zone.x + 8 * s + column * (tab_w + 4 * s)
-        layout.add('SHELF_TAB.' + tab, Rect(x, header.y - row * 26 * s, tab_w, header.h), 'CHIP', label=label, icon=shelf.TAB_ICONS.get(tab, ''),
+        if column == 0:
+            x = zone.x + 8 * s
+        icon = shelf.TAB_ICONS.get(tab, '')
+        width = (CHIP_ICON_SIZE + 8) * s if icon else tab_w
+        layout.add('SHELF_TAB.' + tab, Rect(x, header.y - row * 26 * s, width, header.h), 'CHIP', label=label, icon=icon,
                    active=state.shelf_open and tab == state.shelf_tab, tip=f'Browse {label.lower()}')
-    x = zone.x + 8 * s + len(shelf.TABS) * (tab_w + 4 * s) if rows == 1 else zone.x + zone.w
+        x += width + 4 * s
+    if rows != 1:
+        x = zone.x + zone.w
     toggle = Rect(zone.x + zone.w - 30 * s, header.y, 22 * s, header.h)
     layout.add('SHELF_TOGGLE', toggle, 'ICON', icon='DOWN' if state.shelf_open else 'DISCLOSURE',
                tip='Hide the shelf' if state.shelf_open else 'Show the shelf')

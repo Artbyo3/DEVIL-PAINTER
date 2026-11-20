@@ -9,7 +9,7 @@ from .icons import ICON_LEVELS, icon_pixels, icon_spans
 from .minimal import THUMBNAIL
 from .previews import draw_image
 from .privacy import masked
-from .ui_system import (ACCENT, ACCENT_BG, ACCENT_BORDER, ACCENT_HOVER, BG_ELEVATED, BG_WELL, BORDER, SURFACE_FLOATING,
+from .ui_system import (ACCENT, ACCENT_BG, ACCENT_BORDER, ACCENT_HOVER, BG_ELEVATED, BG_WELL, BORDER, CHIP_ICON_SIZE, SURFACE_FLOATING,
                         SURFACE_OUTLINE, TEXT_MUTED, TEXT_ON_ACCENT, TEXT_PRIMARY, TEXT_SECONDARY, ComponentRenderer, Tooltip)
 
 TOAST_SECONDS = 3
@@ -293,7 +293,7 @@ class Renderer:
             self.round_rect_outline(rect, ACCENT_BORDER, radius=metrics.regular)
         color = ACCENT if control.active else TEXT_PRIMARY if hover else TEXT_SECONDARY
         if control.icon:
-            self.draw_icon(control.icon, rect.x + rect.w / 2, rect.y + rect.h / 2, 16, color)
+            self.draw_icon(control.icon, rect.x + rect.w / 2, rect.y + rect.h / 2, CHIP_ICON_SIZE, color)
         else:
             self.text(rect.x + rect.w / 2, rect.y + (rect.h - 10 * self.s) / 2, control.label, 10, color, True, max_width=rect.w - 8 * self.s)
 
