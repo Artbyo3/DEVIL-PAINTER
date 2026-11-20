@@ -26,6 +26,7 @@ jobs:
     timeout-minutes: 60
     permissions:
       contents: write
+      actions: write
     steps:
       - name: Check the VirusTotal secret
         if: inputs.simulate != true
@@ -67,3 +68,10 @@ jobs:
           SIMULATE: ${{ inputs.simulate }}
           VT_API_KEY: ${{ inputs.simulate != true && secrets.VIRUS_TOTAL_TOKEN || '' }}
         run: python -B tools/vt_release_gate.py
+
+      - name: Rebuild the extension repository
+        if: steps.gate.outputs.published == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: gh workflow run pages.yml --repo "$REPOSITORY" --ref main
