@@ -161,6 +161,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         obj = context.view_layer.objects.active
         data = texture_set(obj)
         self.stroke_pending = False
+        self.stencil_pending = False
         self.line_anchor = None
         self.below_pending, self.below_since = (), 0.0
         self.drag_origin = (0.0, 0.0)
@@ -477,6 +478,8 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             return {'FINISHED'}
         if event.type in {'TIMER', 'MOUSEMOVE'} and self.stroke_pending:
             self.finish_stroke(context)
+        if self.stencil_pending and not self.stencil_moving():
+            self.finish_stencil(context)
         if event.type == 'TIMER':
             self.auto_bake(context)
             self.refresh_below(context)
@@ -525,6 +528,8 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         layout = self.workspace
         control = layout.hit(*self.pointer)
         over = layout.covers(*self.pointer) or control is not None
+        if press and event.type == 'RIGHTMOUSE' and not over:
+            self.stencil_pending = True
         if self.state.popover is not None:
             inside = layout.popover is not None and layout.popover.contains(*self.pointer)
             if press and event.type == 'ESC':
@@ -1626,6 +1631,16 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         elif key == 'COLOR_HUE':
             self.state.hsv = (x, self.state.hsv[1], self.state.hsv[2])
             self.apply_color(context, release)
+
+    def stencil_moving(self):
+        return any(operator.bl_idname == 'BRUSH_OT_stencil_control' for operator in self._window.modal_operators)
+
+    def finish_stencil(self, context):
+        self.stencil_pending = False
+        data = self.painted()[1]
+        brush = context.tool_settings.image_paint.brush
+        if data is not None and brush is not None and brushes.read_stencil(context, brush, data):
+            self.brush_changed(context, data)
 
     def brush_changed(self, context, data):
         data.brush_preset = 'Custom'

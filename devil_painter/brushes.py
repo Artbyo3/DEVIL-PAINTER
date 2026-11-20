@@ -281,6 +281,19 @@ def stencil_frame(data, width, height):
     return (data.stencil_x * width, data.stencil_y * height), dimension, math.radians(data.stencil_angle)
 
 
+def read_stencil(context, brush, data):
+    region = view_region(context)
+    if region is None or data.brush_stencil is None or brush.texture is None:
+        return False
+    values = dict(stencil_x=brush.stencil_pos[0] / region.width, stencil_y=brush.stencil_pos[1] / region.height,
+                  stencil_scale=2 * min(brush.stencil_dimension) / min(region.width, region.height),
+                  stencil_angle=math.degrees(brush.texture_slot.angle) % 360)
+    changed = any(abs(getattr(data, field) - value) > 1e-4 for field, value in values.items())
+    for field, value in values.items():
+        setattr(data, field, value)
+    return changed
+
+
 def sync_stencil(context, brush, data):
     if data.brush_stencil is None:
         brush.texture = None
