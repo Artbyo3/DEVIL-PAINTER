@@ -6,6 +6,7 @@ import numpy
 from . import baking, tiles
 from .blending import CHANNEL, USER_CHANNELS, linear_to_srgb
 from .document import channel_depth, set_channels
+from .filters import NORMAL_DEPTH
 from .library import save_settings, settings
 
 FORMATS = {'PNG': ('png', ('8', '16')), 'TARGA': ('tga', ('8',)), 'TIFF': ('tif', ('8', '16')), 'OPEN_EXR': ('exr', ('16', '32'))}
@@ -203,6 +204,24 @@ def plane(key, baked, ao, size, srgb, linear_file, present, normal_format):
     return 1 - values if inverted else values
 
 
+def unit(vectors):
+    length = numpy.sqrt((vectors * vectors).sum(axis=-1, keepdims=True))
+    return vectors / numpy.maximum(length, 1e-12)
+
+
+def fold_height(normal, height, strength, normal_format):
+    across = numpy.roll(height, -1, 1) - numpy.roll(height, 1, 1)
+    up = numpy.roll(height, -1, 0) - numpy.roll(height, 1, 0)
+    if strength == 0 or not (across.any() or up.any()):
+        return normal
+    gain = -strength * NORMAL_DEPTH * height.shape[0] / 2
+    detail = unit(numpy.stack([across * gain, up * gain, numpy.ones_like(height)], axis=-1))
+    flip = numpy.array([1.0, -1.0 if normal_format == 'DIRECTX' else 1.0, 1.0], dtype=numpy.float32)
+    painted = (normal * 2 - 1) * flip
+    combined = unit(numpy.stack([painted[..., 0] + detail[..., 0], painted[..., 1] + detail[..., 1], painted[..., 2] * detail[..., 2]], axis=-1))
+    return (combined * flip * .5 + .5).astype(numpy.float32)
+
+
 def write(path, planes, file_format, depth, target):
     size = planes[0].shape[0]
     pixels = numpy.ones((size, size, 4), dtype=numpy.float32)
@@ -270,12 +289,16 @@ def export(context, obj, project, template, wanted, directory, pattern, override
     planned = planned_files(obj, project, template, wanted, Path(directory), pattern, size)
     refuse_collisions(planned, project)
     present_anywhere = {item.key for index in wanted for item in set_channels(project.sets[index])}
-    channels = needed_channels(template) & present_anywhere
+    needed = needed_channels(template)
+    channels = (needed | ({'height'} if 'normal' in needed else set())) & present_anywhere
     baked = {}
     for key in channels:
         margin = max(project.sets[index].resolution for index in wanted) if padding == INFINITE_PADDING else padding
         for (index, number), values in baking.bake_channel(context, obj, project, wanted, CHANNEL[key], margin).items():
             baked.setdefault((index, number), {})[key] = values
+    for (index, number), maps in baked.items():
+        if 'normal' in maps and 'height' in maps:
+            maps['normal'] = fold_height(maps['normal'], maps['height'][..., 0], project.sets[index].bump_strength, project.normal_format)
     ao = {}
     for path, index, number, item in planned:
         data = project.sets[index]

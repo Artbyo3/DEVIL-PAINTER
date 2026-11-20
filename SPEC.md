@@ -220,6 +220,10 @@ rebaking. Baked maps show as thumbnails and can be viewed on the model.
   templates for common engines and formats or editable custom templates with
   packed outputs, with UDIM tiles, filename tokens, padding choices, a size
   override, and an optional hand-off to another application.
+- The exported normal folds in the painted height, converted with the same
+  math as the height to normal effect at the texture set's height strength and
+  in the project's normal format. The Height output is still written on its
+  own.
 
 ### Shelf, library, and packs
 
