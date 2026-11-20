@@ -8,7 +8,10 @@ ICON_LEVELS = 32
 
 @lru_cache(maxsize=1)
 def icon_geometry():
-    return json.loads((Path(__file__).parent / 'assets' / 'icons' / 'geometry.json').read_text(encoding='utf-8'))
+    folder = Path(__file__).parent / 'assets' / 'icons'
+    geometry = json.loads((folder / 'geometry.json').read_text(encoding='utf-8'))
+    geometry.update(json.loads((folder / 'devil-painter' / 'geometry.json').read_text(encoding='utf-8')))
+    return geometry
 
 
 def icon_spans(name):

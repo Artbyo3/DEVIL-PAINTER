@@ -8,7 +8,7 @@ CONTENT_KINDS = frozenset(key for key, _, targets in EFFECT_KINDS if 'CONTENT' i
 CONTENT_SOURCES = frozenset({'PAINT', 'FILL', 'GENERATOR'})
 ANCHORED_KINDS = frozenset({'GENERATOR', 'FILTER'})
 EFFECT_LABEL = {key: label for key, label, _ in EFFECT_KINDS}
-EFFECT_ICONS = {'PAINT': 'PAINT', 'FILL': 'FILL', 'LEVELS': 'SETTINGS', 'FILTER': 'BLUR', 'COMPARE': 'SHAPE', 'ANCHOR': 'PIN', 'ID_COLOR': 'EYEDROPPER', 'GENERATOR': 'GRID'}
+EFFECT_ICONS = {'PAINT': 'PAINT', 'FILL': 'FILL', 'LEVELS': 'SETTINGS', 'FILTER': 'BLUR', 'COMPARE': 'SHAPE', 'ANCHOR': 'PIN', 'ID_COLOR': 'EYEDROPPER', 'GENERATOR': 'GENERATOR'}
 MASK_BLENDS = (('MIX', 'Replace', 3), ('MINIMUM', 'Darken', 4), ('MULTIPLY', 'Multiply', 0), ('BURN', 'Color burn', 7), ('MAXIMUM', 'Lighten', 5),
                ('SCREEN', 'Screen', 8), ('DODGE', 'Color dodge', 9), ('ADD', 'Linear dodge (Add)', 1), ('OVERLAY', 'Overlay', 10),
                ('SOFT_LIGHT', 'Soft light', 11), ('LINEAR_LIGHT', 'Linear light', 12), ('DIFFERENCE', 'Difference', 6), ('EXCLUSION', 'Exclusion', 13),
