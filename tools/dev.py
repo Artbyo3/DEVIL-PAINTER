@@ -23,7 +23,7 @@ if not os.path.exists(BLENDER_PATH):
             BLENDER_PATH = p
             break
 
-GUI_SUITES = ("gui_editor.py", "gui_project.py", "gui_layers.py", "gui_baking.py", "gui_masks.py", "gui_content.py", "gui_anchors.py", "gui_positional.py", "gui_slope_normal.py", "gui_uv_transform.py", "gui_triplanar_hardness.py", "gui_pressure.py", "gui_jitter.py", "gui_follow_path.py", "gui_texture_sampling.py", "gui_painting.py", "gui_shelf.py", "gui_extras.py", "gui_packs.py", "gui_udim.py", "gui_library.py", "gui_layout.py", "gui_reopen.py", "gui_layer_delete.py", "gui_world_size.py")
+GUI_SUITES = ("gui_editor.py", "gui_project.py", "gui_layers.py", "gui_baking.py", "gui_masks.py", "gui_content.py", "gui_anchors.py", "gui_positional.py", "gui_slope_normal.py", "gui_uv_transform.py", "gui_triplanar_hardness.py", "gui_pressure.py", "gui_jitter.py", "gui_follow_path.py", "gui_texture_sampling.py", "gui_painting.py", "gui_shelf.py", "gui_extras.py", "gui_packs.py", "gui_udim.py", "gui_library.py", "gui_layout.py", "gui_reopen.py", "gui_layer_delete.py", "gui_world_size.py", "gui_shift_line.py")
 JOURNEYS = ("blender_api.py",) + GUI_SUITES
 SLOWEST_JOURNEYS = ("gui_layers.py", "gui_project.py", "gui_positional.py", "gui_slope_normal.py", "gui_extras.py", "gui_masks.py", "gui_anchors.py", "gui_editor.py")
 EXCLUSIVE_JOURNEYS = ("blender_api.py", "gui_library.py", "gui_packs.py")

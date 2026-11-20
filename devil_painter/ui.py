@@ -1,7 +1,7 @@
 import bpy
 from bpy.app.handlers import persistent
 from . import actions, autosave, caches, document, operators, strokes, thumbnails, tiles
-from .editor import DEVIL_PAINTER_OT_editor, close_active
+from .editor import DEVIL_PAINTER_OT_editor, DEVIL_PAINTER_OT_stroke_end, close_active
 
 
 def launch_menu(self, context):
@@ -35,7 +35,7 @@ def on_save(_):
             image.pack()
 
 
-classes = (DEVIL_PAINTER_OT_editor,) + operators.CLASSES
+classes = (DEVIL_PAINTER_OT_editor, DEVIL_PAINTER_OT_stroke_end) + operators.CLASSES
 
 
 def register():
