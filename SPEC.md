@@ -229,6 +229,10 @@ rebaking. Baked maps show as thumbnails and can be viewed on the model.
   export source like any channel, with one entry per color component for the
   three-channel maps. An output that uses a mesh map that is not baked yet is
   skipped, and the export message names it and the map to bake.
+- Export padding has a size and a style. Dilation, the default, repeats
+  edge colors outward. Transparent leaves everything past the UV islands at
+  zero alpha. Diffusion spreads each island's own edge colors outward, so
+  the padding never takes colors from neighboring faces.
 
 ### Shelf, library, and packs
 

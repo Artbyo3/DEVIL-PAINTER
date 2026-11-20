@@ -267,6 +267,7 @@ class DEVIL_PAINTER_PG_project(bpy.types.PropertyGroup):
     export_pattern: bpy.props.StringProperty(default='{mesh}_{set}_{output}')
     export_size: bpy.props.IntProperty(default=0, min=0, max=8192)
     export_padding: bpy.props.IntProperty(default=16, min=-1, max=256)
+    export_padding_style: bpy.props.StringProperty(default='DILATION')
     template: bpy.props.StringProperty(default='PBR Metal Rough')
     normal_format: bpy.props.EnumProperty(items=NORMAL_FORMATS)
     normal_space: bpy.props.EnumProperty(items=NORMAL_SPACES)

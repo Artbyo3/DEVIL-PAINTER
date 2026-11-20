@@ -15,7 +15,7 @@ from .document import (BAKE_ID_LABELS, DEPTH_LABELS, DYNAMICS, NORMAL_FORMATS, P
 from .effects import ANCHORED_KINDS, CONTENT_SOURCES, EFFECT_ICONS, EFFECT_KINDS, FILL_PROJECTIONS, LEVEL_COMPONENTS, MASK_BLEND_LABEL, LevelsView, effect_label
 from .filters import FILTER, FILTERS
 from .library import capture, libraries as library_folders, texture_folder
-from .exporting import FORMAT_LABELS, SOURCES, TOKENS, find_template, is_custom
+from .exporting import FORMAT_LABELS, PADDING_STYLES, SOURCES, TOKENS, find_template, is_custom
 from .projects import UNWRAP_MODES
 from .shortcuts import ACTIONS, bindings, key_label
 from .masks import BREAKUP, GENERATOR
@@ -1692,13 +1692,16 @@ def export_popover(layout, state, bounds, data, directory):
                    label=f'{item.name}  ·  {item.resolution} px' + (f'  ·  {count} UDIM tiles' if count > 1 else ''), tip='Export this texture set')
     y -= LINE_HEIGHT * s
     depth = 'From template' if project.export_depth == 'TEMPLATE' else project.export_depth + '-bit'
-    third = (w - 8 * s) / 3
-    layout.add('EXPORT_DEPTH', Rect(x, y, third, 24 * s), 'DROPDOWN', label='Depth', text=depth,
+    quarter = (w - 12 * s) / 4
+    layout.add('EXPORT_DEPTH', Rect(x, y, quarter, 24 * s), 'DROPDOWN', label='Depth', text=depth,
                tip='Override the bit depth; formats that cannot hold it use their closest depth')
-    layout.add('EXPORT_SIZE', Rect(x + third + 4 * s, y, third, 24 * s), 'DROPDOWN', label='Size', text=size_label(project.export_size),
+    layout.add('EXPORT_SIZE', Rect(x + quarter + 4 * s, y, quarter, 24 * s), 'DROPDOWN', label='Size', text=size_label(project.export_size),
                tip='Write every file at this size, or at each texture set resolution')
-    layout.add('EXPORT_PADDING', Rect(x + 2 * (third + 4 * s), y, third, 24 * s), 'DROPDOWN', label='Padding', text=padding_label(project.export_padding),
+    layout.add('EXPORT_PADDING', Rect(x + 2 * (quarter + 4 * s), y, quarter, 24 * s), 'DROPDOWN', label='Padding', text=padding_label(project.export_padding),
                tip='How far colors bleed past the UV islands')
+    layout.add('EXPORT_PADDING_STYLE', Rect(x + 3 * (quarter + 4 * s), y, quarter, 24 * s), 'DROPDOWN', label='Style',
+               text=PADDING_STYLES[project.export_padding_style],
+               tip='Dilation repeats edge colors, Transparent leaves alpha empty past the islands, Diffusion blends the edge colors of each island')
     y -= LINE_HEIGHT * s
     editing = state.text is not None and state.text.key == 'EXPORT_PATTERN'
     layout.add('EXPORT_PATTERN', Rect(x, y, w, 24 * s), 'FIELD', text=state.text.text if editing else project.export_pattern,

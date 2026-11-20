@@ -10,6 +10,7 @@ BELOW_MARGIN = 64
 BAKE_SAMPLES = 1
 DUMMY_SIZE = 8
 GPU_BACKENDS = ('OPTIX', 'CUDA', 'HIP', 'ONEAPI', 'METAL')
+NEIGHBORS = ((-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1))
 
 
 def usable_gpu(preferences):
@@ -183,7 +184,31 @@ def refresh_below(context, obj, project):
     return True
 
 
-def bake_channel(context, obj, project, wanted, channel, margin=BAKE_MARGIN):
+def diffuse(values, outside, rings):
+    height, width = outside.shape
+    filled = numpy.pad(~outside, 1)
+    fillable = numpy.pad(outside, 1)
+    colors = numpy.pad(values, ((1, 1), (1, 1), (0, 0)))
+    flat_filled, flat_fillable, flat_colors = filled.ravel(), fillable.ravel(), colors.reshape(-1, values.shape[-1])
+    offsets = numpy.array([row * (width + 2) + column for row, column in NEIGHBORS])
+    touching = numpy.zeros_like(filled)
+    for row, column in NEIGHBORS:
+        touching[1:-1, 1:-1] |= filled[1 + row:height + 1 + row, 1 + column:width + 1 + column]
+    ring = numpy.flatnonzero(touching & fillable)
+    for _ in range(rings):
+        if not ring.size:
+            break
+        around = ring[:, None] + offsets
+        weights = flat_filled[around]
+        flat_colors[ring] = (flat_colors[around] * weights[..., None]).sum(axis=1) / weights.sum(axis=1, keepdims=True)
+        flat_filled[ring] = True
+        flat_fillable[ring] = False
+        ring = numpy.unique(around)
+        ring = ring[flat_fillable[ring]]
+    return colors[1:-1, 1:-1], ~filled[1:-1, 1:-1]
+
+
+def bake_channel(context, obj, project, wanted, channel, margin=BAKE_MARGIN, style='DILATION'):
     def prepare(data):
         if channel in set_channels(data):
             compositing.rebuild(data, solo=channel, raw=True)
@@ -192,8 +217,11 @@ def bake_channel(context, obj, project, wanted, channel, margin=BAKE_MARGIN):
             emission_tree(data.material.node_tree, rgba(channel.default))
 
     results = {}
-    for key, pixels in bake_pass(context, obj, project, wanted, prepare, margin=margin).items():
+    for key, pixels in bake_pass(context, obj, project, wanted, prepare, margin=margin if style == 'DILATION' else 0).items():
         values = pixels[..., :3].copy()
-        values[pixels[..., 3] < .5] = channel.default
+        outside = pixels[..., 3] < .5
+        if style == 'DIFFUSION':
+            values, outside = diffuse(values, outside, margin)
+        values[outside] = channel.default
         results[key] = values
     return results
