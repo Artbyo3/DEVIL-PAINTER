@@ -1,12 +1,14 @@
 import copy
 import re
+import struct
+from dataclasses import dataclass
 from pathlib import Path
 import bpy
 import numpy
-from . import baking, tiles
+from . import baking, compositing, tiles
 from .blending import CHANNEL, USER_CHANNELS, linear_to_srgb
 from .compositing import DIELECTRIC_F0
-from .document import channel_depth, set_channels
+from .document import channel_depth, set_channels, shown_layers
 from .filters import NORMAL_DEPTH
 from .library import save_settings, settings
 from .meshmaps import MESH_MAP, MESH_MAPS
@@ -75,6 +77,12 @@ CONVERTED_SOURCES = tuple(entry for target in CONVERSIONS for entry in converted
 CONVERTED = {key: (target, component) for key, _, target, component in CONVERTED_SOURCES}
 SOURCES.update({key: (label, None, component) for key, label, _, component in CONVERTED_SOURCES})
 INVERTED = {'smoothness', 'normal.g_dx'}
+PSD_BLENDS = {'MIX': b'norm', 'MULTIPLY': b'mul ', 'DIVIDE': b'fdiv', 'DARKEN': b'dark', 'LIGHTEN': b'lite', 'ADD': b'lddg', 'SUBTRACT': b'fsub',
+              'DIFFERENCE': b'diff', 'EXCLUSION': b'smud', 'OVERLAY': b'over', 'SCREEN': b'scrn', 'LINEAR_BURN': b'lbrn', 'BURN': b'idiv',
+              'DODGE': b'div ', 'SOFT_LIGHT': b'sLit', 'HARD_LIGHT': b'hLit', 'VIVID_LIGHT': b'vLit', 'LINEAR_LIGHT': b'lLit', 'PIN_LIGHT': b'pLit',
+              'HUE': b'hue ', 'SATURATION': b'sat ', 'COLOR': b'colr', 'VALUE': b'lum '}
+PSD_NORMAL = b'norm'
+PSD_HIDDEN = 2
 TOKENS = ('{mesh}', '{set}', '{output}', '{udim}', '{material}', '{resolution}')
 BASE = ['base_color.r', 'base_color.g', 'base_color.b']
 NORMAL_GL = ['normal.r', 'normal.g', 'normal.b']
@@ -434,3 +442,156 @@ def export(context, obj, project, template, wanted, directory, pattern, override
             planes = with_alpha(planes, coverage[(index, number)])
         write(path, planes, file_format, effective_depth(file_format, deepest(data, item, present), override), size)
     return [path for path, *_ in planned]
+
+
+class FlatSlot:
+    def __init__(self, slot):
+        self.slot = slot
+
+    def __getattr__(self, name):
+        return getattr(self.slot, name)
+
+    @property
+    def blend(self):
+        return 'MIX' if compositing.blended(self.slot) else self.slot.blend
+
+    @property
+    def opacity(self):
+        return 1.0
+
+
+class FlatSlots:
+    def __init__(self, slots):
+        self.items = [FlatSlot(slot) for slot in slots]
+
+    def __iter__(self):
+        return iter(self.items)
+
+    def __getitem__(self, key):
+        return next(item for item in self.items if item.name == key)
+
+
+class Contribution(compositing.Rooted):
+    @property
+    def opacity(self):
+        return 1.0
+
+    @property
+    def slots(self):
+        return FlatSlots(self.layer.slots)
+
+
+@dataclass(frozen=True)
+class PsdLayer:
+    name: str
+    pixels: numpy.ndarray
+    opacity: int
+    blend: bytes
+    hidden: bool
+
+
+def contribution_tree(data, layer, key, background):
+    tree = data.material.node_tree
+    build = compositing.set_build(data, tree, raw=True)
+    tree.nodes.clear()
+    build.sampler.cache.clear()
+    build.layer_map = {item.uid: item for item in compositing.resolved(data.layers)}
+    output = tree.nodes.new('ShaderNodeOutputMaterial')
+    emission = tree.nodes.new('ShaderNodeEmission')
+    tree.links.new(emission.outputs[0], output.inputs['Surface'])
+    channels = set_channels(data)
+    start = {}
+    for channel in channels:
+        node = tree.nodes.new('ShaderNodeRGB')
+        node.outputs[0].default_value = (background, background, background, 1.0)
+        start[channel.key] = node.outputs[0]
+    results = compositing.compose(build, channels, [layer], '', start, [0])
+    compositing.write_values(tree.nodes, channels, [layer])
+    tree.links.new(results[key], emission.inputs['Color'])
+
+
+def encoded(values, channel):
+    return linear_to_srgb(values) if channel.srgb else numpy.clip(values, 0, 1)
+
+
+def unmixed(dark, light, channel):
+    factor = numpy.clip(1 - (light[..., :3] - dark[..., :3]).mean(axis=-1), 0, 1)
+    factor[(dark[..., 3] < .5) | (light[..., 3] < .5)] = 0
+    color = dark[..., :3] / numpy.maximum(factor, 1e-6)[..., None]
+    return numpy.dstack([encoded(color, channel), factor])
+
+
+def contribution(context, obj, project, index, layer, channel, margin):
+    passes = []
+    for background in (0.0, 1.0):
+        def prepare(data, background=background):
+            contribution_tree(data, Contribution(layer), channel.key, background)
+        passes.append(baking.bake_pass(context, obj, project, [index], prepare, margin=margin))
+    return {number: unmixed(dark, passes[1][(index, number)], channel) for (_, number), dark in passes[0].items()}
+
+
+def psd_stack(data, key):
+    layers = compositing.resolved(data.layers)
+    shown = {layer.uid for layer in shown_layers(layers)}
+    return [(layer, layer.uid not in shown) for layer in layers if layer.kind != 'FOLDER' and compositing.blended(layer.slots[key])]
+
+
+def bytes8(values):
+    return numpy.round(numpy.clip(values, 0, 1) * 255).astype(numpy.uint8)[::-1]
+
+
+def pascal_name(name):
+    raw = name.encode('mac_roman', 'replace')[:255]
+    record = bytes([len(raw)]) + raw
+    return record + bytes(-len(record) % 4)
+
+
+def unicode_name(name):
+    text = name.encode('utf-16-be')
+    body = struct.pack('>I', len(text) // 2) + text
+    body += bytes(-len(body) % 4)
+    return b'8BIMluni' + struct.pack('>I', len(body)) + body
+
+
+def layer_record(layer):
+    height, width = layer.pixels.shape[:2]
+    channels = b''.join(struct.pack('>hI', ident, height * width + 2) for ident in (-1, 0, 1, 2))
+    extra = struct.pack('>II', 0, 0) + pascal_name(layer.name) + unicode_name(layer.name)
+    flags = PSD_HIDDEN if layer.hidden else 0
+    return (struct.pack('>iiiiH', 0, 0, height, width, 4) + channels + b'8BIM' + layer.blend + struct.pack('>BBBB', layer.opacity, 0, flags, 0)
+            + struct.pack('>I', len(extra)) + extra)
+
+
+def layer_pixels(layer):
+    return b''.join(bytes(2) + numpy.ascontiguousarray(layer.pixels[..., index]).tobytes() for index in (3, 0, 1, 2))
+
+
+def write_psd(path, layers, composite):
+    height, width = composite.shape[:2]
+    info = struct.pack('>h', len(layers)) + b''.join(layer_record(layer) for layer in layers) + b''.join(layer_pixels(layer) for layer in layers)
+    info += bytes(-len(info) % 4)
+    masks = struct.pack('>I', len(info)) + info + struct.pack('>I', 0)
+    header = b'8BPS' + struct.pack('>H6xHIIHH', 1, 3, height, width, 8, 3)
+    image = bytes(2) + b''.join(numpy.ascontiguousarray(composite[..., index]).tobytes() for index in range(3))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(header + struct.pack('>II', 0, 0) + struct.pack('>I', len(masks)) + masks + image)
+
+
+def export_psd(context, obj, project, index, key, directory, pattern, padding, style):
+    data = project.sets[index]
+    channel = CHANNEL[key]
+    margin = data.resolution if padding == INFINITE_PADDING else padding
+    stack = psd_stack(data, key)
+    renders = [contribution(context, obj, project, index, layer, channel, margin if style == 'DILATION' else 0) for layer, _ in stack]
+    flat = baking.bake_channel(context, obj, project, [index], channel, margin, style)
+    set_tiles = tiles.numbers(data)
+    written = []
+    for number in set_tiles:
+        layers = [PsdLayer(layer.name, bytes8(render[number]), round(255 * layer.opacity * layer.slots[key].opacity),
+                           PSD_BLENDS.get(layer.slots[key].blend, PSD_NORMAL), hidden) for (layer, hidden), render in zip(stack, renders)]
+        tokens = dict(mesh=bpy.path.clean_name(obj.name), set=bpy.path.clean_name(data.name), output=channel.suffix, udim=number,
+                      material=bpy.path.clean_name(data.material.name), resolution=data.resolution)
+        path = Path(directory) / (file_name(pattern, tokens, len(set_tiles) > 1) + '.psd')
+        write_psd(path, layers, bytes8(encoded(flat[(index, number)], channel)))
+        written.append(path)
+    return written
