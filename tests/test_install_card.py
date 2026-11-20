@@ -6,7 +6,7 @@ from urllib.parse import parse_qsl, urlsplit
 from tools import install_card
 
 ZIP_URL = 'https://github.com/Artbyo3/DEVIL-PAINTER/releases/download/v0.3.0/devil_painter-0.3.0.zip'
-CARD = '<a class="dp-install-drag-zone" data-blender-drop href="https://github.com/Artbyo3/DEVIL-PAINTER/releases/latest">Drag</a>'
+CARD = '<a href="https://github.com/Artbyo3/DEVIL-PAINTER/releases/download/v0.2.1/devil_painter-0.2.1.zip?repository=x&amp;blender_version_min=5.2.0">Download</a>'
 
 
 def fixture_site(folder, pages):
@@ -32,7 +32,7 @@ class InstallCardTests(unittest.TestCase):
             escaped = href.replace('&', '&amp;')
             self.assertEqual((site / 'index.html').read_text(encoding='utf-8').count(f'href="{escaped}"'), 1)
             self.assertEqual((site / 'install' / 'index.html').read_text(encoding='utf-8').count(f'href="{escaped}"'), 2)
-            self.assertNotIn('releases/latest', (site / 'install' / 'index.html').read_text(encoding='utf-8'))
+            self.assertNotIn('v0.2.1', (site / 'install' / 'index.html').read_text(encoding='utf-8'))
 
     def test_a_page_without_its_card_fails_the_build(self):
         with tempfile.TemporaryDirectory() as folder:

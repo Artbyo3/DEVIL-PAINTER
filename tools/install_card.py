@@ -7,7 +7,7 @@ from urllib.parse import quote
 
 REPOSITORY_URL = 'https://artbyo3.github.io/DEVIL-PAINTER/repo/index.json'
 CARD_PAGES = ('index.html', 'install/index.html')
-CARD_HREF = re.compile(r'data-blender-drop href="[^"]*"')
+CARD_HREF = re.compile(r'href="https://github\.com/Artbyo3/DEVIL-PAINTER/releases/download/[^"]*"')
 
 
 class CardError(Exception):
@@ -25,7 +25,7 @@ def card_href(index):
 
 def stamp_cards(site):
     href = card_href(json.loads((site / 'repo' / 'index.json').read_text(encoding='utf-8')))
-    attribute = f'data-blender-drop href="{html.escape(href)}"'
+    attribute = f'href="{html.escape(href)}"'
     for name in CARD_PAGES:
         page = site / name
         text, count = CARD_HREF.subn(lambda _match: attribute, page.read_text(encoding='utf-8'))

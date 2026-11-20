@@ -259,10 +259,6 @@ body:has(.dp-landing-container) .md-content__inner {
   user-select: none;
 }
 
-.dp-install-repo-url {
-  user-select: all;
-}
-
 .dp-install-fallback-link {
   color: var(--dp-text-secondary) !important;
   text-decoration: underline !important;
