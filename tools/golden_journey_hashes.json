@@ -1963,6 +1963,28 @@
   ]
  ],
  "gui_pressure.py": [],
+ "gui_jitter.py": [
+  [
+   "export_jitter/Cube_Material_BaseColor.png",
+   "d0ce2da094cc8d62fd8b537c064bf61819782ce7073c3638356e5ad8f43a6c1b"
+  ],
+  [
+   "export_jitter/Cube_Material_Roughness.png",
+   "930180c406c0d4a99d703ec8e61cee5456a40d979ef58512d460bae078c5c45f"
+  ],
+  [
+   "export_jitter/Cube_Material_Metallic.png",
+   "f17af6dbbb62a595fbfcf68266cda9c3f1f426d72d79e9789318f71e9ef49c86"
+  ],
+  [
+   "export_jitter/Cube_Material_Normal.png",
+   "0fa6dcb39a8ecbe28f6ae9a865f1399e261074391732eb0ae29cf95a4598d1a4"
+  ],
+  [
+   "export_jitter/Cube_Material_Height.png",
+   "0bb6bef9d428fd3a5daae91ab62e2c015a487fdef69395ae111e938571f00621"
+  ]
+ ],
  "gui_texture_sampling.py": [
   [
    "sampling_export/Cube_Material_BaseColor.png",

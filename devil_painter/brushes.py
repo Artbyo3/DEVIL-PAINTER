@@ -24,8 +24,10 @@ PRESETS = (
     dict(name='Scratches', hardness=.7, flow=.8, spacing=40.0, smoothing=0.0, jitter=.5, alpha='Scratches', random_angle=True),
 )
 PRESSURE_FIELDS = ('pressure_flow', 'pressure_hardness', 'pressure_angle')
-PRESET_FIELDS = ('hardness', 'flow', 'spacing', 'smoothing', 'jitter', 'random_angle', 'stroke', 'angle', *PRESSURE_FIELDS)
-PRESET_DEFAULTS = dict(stroke='SPACE', angle=0.0, **{field: False for field in PRESSURE_FIELDS})
+JITTER_FIELDS = ('jitter_size', 'jitter_flow', 'jitter_angle')
+PRESET_FIELDS = ('hardness', 'flow', 'spacing', 'smoothing', 'jitter', 'random_angle', 'stroke', 'angle', *PRESSURE_FIELDS, *JITTER_FIELDS)
+PRESET_DEFAULTS = dict(stroke='SPACE', angle=0.0, **{field: False for field in PRESSURE_FIELDS}, **{field: 0.0 for field in JITTER_FIELDS})
+JITTER_SEEDS = 100000
 STENCIL_TEXTURE = 'DP Stencil'
 
 
@@ -141,20 +143,41 @@ def pressure_mapped(data):
     return any(getattr(data, 'brush_' + field) for field in PRESSURE_FIELDS)
 
 
+def jittered(data):
+    return any(getattr(data, 'brush_' + field) for field in JITTER_FIELDS)
+
+
+def per_dab(data):
+    return pressure_mapped(data) or jittered(data)
+
+
+def jitter_seed(points):
+    return int(sum(point[0] + point[1] for point, _ in points)) % JITTER_SEEDS
+
+
+def dab_jitter(data, count, seed):
+    size, flow, angle = numpy.random.default_rng(seed).random((3, count))
+    return [(1 - data.brush_jitter_size * size[index], 1 - data.brush_jitter_flow * flow[index], data.brush_jitter_angle * 180 * (2 * angle[index] - 1))
+            for index in range(count)]
+
+
 def pressure_response(curve, pressure, mapped):
     return curve.evaluate(curve.curves[0], pressure) if mapped else 1.0
 
 
-def sync_pressure(context, data, pressure):
+def sync_pressure(context, data, pressure, flow_scale=1.0, angle_offset=0.0):
     brush = context.tool_settings.image_paint.brush
-    flow = data.brush_flow * pressure_response(brush.curve_strength, pressure, data.brush_pressure_flow)
+    flow = data.brush_flow * pressure_response(brush.curve_strength, pressure, data.brush_pressure_flow) * flow_scale
     setattr(brush_source(context, 'strength'), 'strength', flow if active_tool(context) in STROKE_TOOLS else data.brush_opacity)
     hardness = data.brush_hardness * pressure_response(brush.curve_hardness, pressure, data.brush_pressure_hardness)
     if abs(brush.get('dp_hardness', -1.0) - hardness) > 1e-4:
         set_hardness(brush, hardness)
         brush['dp_hardness'] = hardness
     if brush.mask_texture is not None:
-        brush.mask_texture_slot.angle = math.radians(data.brush_angle * pressure_response(brush.curve_strength, pressure, data.brush_pressure_angle))
+        angle = data.brush_angle * pressure_response(brush.curve_strength, pressure, data.brush_pressure_angle)
+        if angle_offset:
+            angle = (angle + angle_offset) % 360
+        brush.mask_texture_slot.angle = math.radians(angle)
 
 
 def sync(context, data):
