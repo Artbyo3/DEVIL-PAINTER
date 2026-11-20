@@ -8,6 +8,7 @@ from .blending import CHANNEL, USER_CHANNELS, linear_to_srgb
 from .document import channel_depth, set_channels
 from .filters import NORMAL_DEPTH
 from .library import save_settings, settings
+from .meshmaps import MESH_MAP, MESH_MAPS
 
 FORMATS = {'PNG': ('png', ('8', '16')), 'TARGA': ('tga', ('8',)), 'TIFF': ('tif', ('8', '16')), 'OPEN_EXR': ('exr', ('16', '32'))}
 FORMAT_LABELS = {'PNG': 'PNG', 'TARGA': 'TGA', 'TIFF': 'TIFF', 'OPEN_EXR': 'EXR'}
@@ -28,6 +29,20 @@ SOURCES = {'base_color.r': ('Base R', 'base_color', 0), 'base_color.g': ('Base G
            'transmission': ('Transmission', 'transmission', 0), 'scattering': ('Scattering', 'scattering', 0), 'sheen': ('Sheen', 'sheen', 0),
            'coat': ('Coat', 'coat', 0), 'ior': ('IOR', 'ior', 0),
            **{f'user{number}': (f'User {number}', f'user{number}', 0) for number in range(1, USER_CHANNELS + 1)}, 'white': ('White', None, 0), 'black': ('Black', None, 0)}
+GRAY_MESH_MAPS = frozenset({'ao', 'curvature', 'thickness', 'height', 'uv_border'})
+SHORT_MESH_LABELS = {'ao': 'AO', 'world_normal': 'World N', 'uv_border': 'UV border'}
+
+
+def mesh_source_entries(item):
+    label = 'Mesh ' + SHORT_MESH_LABELS.get(item.key, item.label)
+    if item.key in GRAY_MESH_MAPS:
+        return [(f'map:{item.key}', label, item.key, 0)]
+    return [(f'map:{item.key}.{letter}', f'{label} {letter.upper()}', item.key, component) for component, letter in enumerate('rgb')]
+
+
+MESH_SOURCES = tuple(entry for item in MESH_MAPS for entry in mesh_source_entries(item))
+MAP_SOURCES = {key: (map_key, component) for key, _, map_key, component in MESH_SOURCES}
+SOURCES.update({key: (label, None, component) for key, label, _, component in MESH_SOURCES})
 INVERTED = {'smoothness', 'normal.g_dx'}
 TOKENS = ('{mesh}', '{set}', '{output}', '{udim}', '{material}', '{resolution}')
 BASE = ['base_color.r', 'base_color.g', 'base_color.b']
@@ -173,12 +188,16 @@ def needed_channels(template):
     return {SOURCES[key][1] for item in template['outputs'] for key in item['sources'] if SOURCES[key][1]}
 
 
-def ao_image(data, number, size):
-    item = data.maps.get('ao')
+def map_image(data, key, number, size):
+    item = data.maps.get(key)
     if item is None or item.image is None:
         return None
     image = tiles.variant(data, item.image, number)
     return image if image.size[1] == size else None
+
+
+def ao_image(data, number, size):
+    return map_image(data, 'ao', number, size)
 
 
 def ao_pixels(data, number, size):
@@ -186,8 +205,24 @@ def ao_pixels(data, number, size):
     return None if image is None else baking.read_pixels(image)[..., 0]
 
 
-def plane(key, baked, ao, size, srgb, linear_file, present, normal_format):
+def unbaked_maps(data, number, item):
+    keys = dict.fromkeys(MAP_SOURCES[key][0] for key in item['sources'] if key in MAP_SOURCES)
+    return [MESH_MAP[key].label for key in keys if map_image(data, key, number, data.resolution) is None]
+
+
+def mesh_pixels(data, number, item, cache):
+    for key in item['sources']:
+        if key in MAP_SOURCES and MAP_SOURCES[key][0] not in cache:
+            map_key = MAP_SOURCES[key][0]
+            cache[map_key] = baking.read_pixels(map_image(data, map_key, number, data.resolution))
+    return cache
+
+
+def plane(key, baked, ao, size, srgb, linear_file, present, normal_format, meshes):
     _, channel, component = SOURCES[key]
+    if key in MAP_SOURCES:
+        map_key, component = MAP_SOURCES[key]
+        return meshes[map_key][..., component]
     if key == 'white':
         return numpy.ones((size, size), dtype=numpy.float32)
     if key == 'black':
@@ -263,14 +298,28 @@ def planned_files(obj, project, template, wanted, folder, pattern, size):
         for number in set_tiles:
             ao = ao_image(data, number, data.resolution)
             for item in template['outputs']:
-                varying = [key for key in item['sources'] if key not in {'white', 'black'}]
+                varying = [key for key in item['sources'] if key not in {'white', 'black'} and key not in MAP_SOURCES]
                 if varying and not any(source_available(data, key, ao) for key in varying):
+                    continue
+                if unbaked_maps(data, number, item):
                     continue
                 tokens = dict(mesh=bpy.path.clean_name(obj.name), set=bpy.path.clean_name(data.name), output=item['name'], udim=number,
                               material=bpy.path.clean_name(data.material.name), resolution=size or data.resolution)
                 path = folder / (file_name(pattern, tokens, len(set_tiles) > 1) + '.' + FORMATS[item['format']][0])
                 planned.append((path, index, number, item))
     return planned
+
+
+def skipped_outputs(project, template, wanted):
+    skipped = []
+    for index in wanted:
+        data = project.sets[index]
+        for item in template['outputs']:
+            labels = [label.lower() for label in dict.fromkeys(label for number in tiles.numbers(data) for label in unbaked_maps(data, number, item))]
+            if labels:
+                names = labels[0] if len(labels) == 1 else ', '.join(labels[:-1]) + ' and ' + labels[-1]
+                skipped.append(f'{item["name"]} for {data.name} needs the {names} {"map" if len(labels) == 1 else "maps"} baked')
+    return skipped
 
 
 def refuse_collisions(planned, project):
@@ -300,13 +349,16 @@ def export(context, obj, project, template, wanted, directory, pattern, override
         if 'normal' in maps and 'height' in maps:
             maps['normal'] = fold_height(maps['normal'], maps['height'][..., 0], project.sets[index].bump_strength, project.normal_format)
     ao = {}
+    meshes = {}
     for path, index, number, item in planned:
         data = project.sets[index]
         if (index, number) not in ao:
             ao = {(index, number): ao_pixels(data, number, data.resolution)}
+            meshes = {}
         file_format = item['format']
         present = {channel.key for channel in set_channels(data)}
-        planes = [plane(key, baked.get((index, number), {}), ao[(index, number)], data.resolution, item['srgb'], file_format == 'OPEN_EXR', present, project.normal_format)
+        mesh = mesh_pixels(data, number, item, meshes)
+        planes = [plane(key, baked.get((index, number), {}), ao[(index, number)], data.resolution, item['srgb'], file_format == 'OPEN_EXR', present, project.normal_format, mesh)
                   for key in item['sources']]
         write(path, planes, file_format, effective_depth(file_format, deepest(data, item, present), override), size)
     return [path for path, *_ in planned]

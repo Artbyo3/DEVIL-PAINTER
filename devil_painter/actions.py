@@ -1053,7 +1053,9 @@ def export_files(context, obj, project, directory):
     painting.enter_paint_mode(context, obj)
     sets.mask_faces(obj, project)
     painting.update_canvas(context, project.sets[project.active_set])
-    return written, f'Exported {len(written)} textures to {directory}.'
+    skipped = exporting.skipped_outputs(project, template, wanted)
+    message = f'Exported {len(written)} textures to {directory}.'
+    return written, message + (' Skipped: ' + '; '.join(skipped) + '.' if skipped else '')
 
 
 def export(context, obj, project, directory):

@@ -224,6 +224,11 @@ rebaking. Baked maps show as thumbnails and can be viewed on the model.
   math as the height to normal effect at the texture set's height strength and
   in the project's normal format. The Height output is still written on its
   own.
+- Every baked mesh map (ambient occlusion, curvature, thickness, position,
+  world normal, ID, normal, height, UV border distance) can be picked as an
+  export source like any channel, with one entry per color component for the
+  three-channel maps. An output that uses a mesh map that is not baked yet is
+  skipped, and the export message names it and the map to bake.
 
 ### Shelf, library, and packs
 
