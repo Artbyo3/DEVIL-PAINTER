@@ -45,8 +45,34 @@
 | **Emission** | `Emission` | sRGB | No |
 | **Opacity** | `Opacity` | Non-Color | No |
 | **Ambient Occlusion** | `AmbientOcclusion` | Non-Color | No |
+| **Diffuse** | `Diffuse` | sRGB | No |
+| **Specular** | `Specular` | sRGB | No |
+| **Glossiness** | `Glossiness` | Non-Color | No |
+| **Displacement** | `Displacement` | Non-Color | No |
+| **Anisotropy level** | `AnisotropyLevel` | Non-Color | No |
+| **Anisotropy angle** | `AnisotropyAngle` | Non-Color | No |
+| **Transmission** | `Transmission` | Non-Color | No |
+| **Scattering** | `Scattering` | Non-Color | No |
+| **Sheen** | `Sheen` | Non-Color | No |
+| **Coat** | `Coat` | Non-Color | No |
+| **IOR** | `IOR` | Non-Color | No |
 | **Flow map** | `FlowMap` | Non-Color | No (export only) |
 | **User 1** – **User 8** | `User1` – `User8` | Non-Color | No (export only) |
+
+Each texture set's **Shader** decides which channels drive the viewport material:
+
+| Channel | Principled PBR / Unlit | Spec / gloss |
+| :--- | :--- | :--- |
+| **Base Color**, **Roughness**, **Metallic** | Base Color, Roughness, Metallic | Not used |
+| **Diffuse** | Not used | Base Color |
+| **Specular** | Not used | Specular color at normal incidence (Specular Tint = value ÷ 0.04) |
+| **Glossiness** | Not used | Roughness = 1 − glossiness |
+| **IOR** | IOR = 1 + 2 × value (0.25 is 1.5) | Not used |
+| **Anisotropy level**, **Anisotropy angle** | Anisotropic, Anisotropic Rotation (1 is a full turn) | Same |
+| **Transmission**, **Scattering**, **Sheen**, **Coat** | Transmission, Subsurface, Sheen, and Coat weights | Same |
+| **Displacement** | Material displacement around a 0.5 midlevel | Same |
+
+Every channel exports its own painted values whichever shader is chosen.
 
 Built-in export templates are **Standard PBR**, **glTF**, **Unreal Engine**, **Unity HDRP**, **Unity URP**, **USD Preview Surface**, and **Linear EXR** (or copy any template to customize packed outputs). Supported formats are **PNG** (`8`/`16`-bit), **TGA** (`8`-bit), **TIFF** (`8`/`16`-bit), and **EXR** (`16`/`32`-bit). Filename tokens: `{mesh}`, `{set}`, `{output}`, `{udim}`, `{material}`, `{resolution}`.
 

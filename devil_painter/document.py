@@ -23,7 +23,7 @@ SIZE_SPACES = (('SCREEN', 'Screen', ''), ('WORLD', 'World', ''))
 STROKE_METHODS = (('SPACE', 'Space', ''), ('LINE', 'Line', ''), ('DOTS', 'Dots', ''), ('AIRBRUSH', 'Airbrush', ''), ('ANCHORED', 'Anchored', ''))
 NORMAL_FORMATS = (('OPENGL', 'OpenGL', ''), ('DIRECTX', 'DirectX', ''))
 NORMAL_SPACES = (('TANGENT', 'Tangent', ''), ('OBJECT', 'Object', ''))
-SHADERS = (('PRINCIPLED', 'Principled PBR', ''), ('UNLIT', 'Unlit', ''))
+SHADERS = (('PRINCIPLED', 'Principled PBR', ''), ('UNLIT', 'Unlit', ''), ('SPECULAR_GLOSSINESS', 'Spec / gloss', ''))
 
 
 class DEVIL_PAINTER_PG_slot(bpy.types.PropertyGroup):

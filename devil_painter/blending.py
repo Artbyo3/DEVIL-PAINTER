@@ -42,6 +42,17 @@ CHANNELS = (Channel('base_color', 'Base Color', (0.8, 0.8, 0.8), True, 'BaseColo
             Channel('emission', 'Emission', (0.0, 0.0, 0.0), True, 'Emission', False, False),
             Channel('opacity', 'Opacity', (1.0,), False, 'Opacity', False, False),
             Channel('ambient_occlusion', 'Ambient Occlusion', (1.0,), False, 'AmbientOcclusion', False, False),
+            Channel('diffuse', 'Diffuse', (0.8, 0.8, 0.8), True, 'Diffuse', False, False),
+            Channel('specular', 'Specular', (0.04, 0.04, 0.04), True, 'Specular', False, False),
+            Channel('glossiness', 'Glossiness', (0.5,), False, 'Glossiness', False, False),
+            Channel('displacement', 'Displacement', (0.5,), False, 'Displacement', False, False),
+            Channel('anisotropy_level', 'Anisotropy level', (0.0,), False, 'AnisotropyLevel', False, False),
+            Channel('anisotropy_angle', 'Anisotropy angle', (0.0,), False, 'AnisotropyAngle', False, False),
+            Channel('transmission', 'Transmission', (0.0,), False, 'Transmission', False, False),
+            Channel('scattering', 'Scattering', (0.0,), False, 'Scattering', False, False),
+            Channel('sheen', 'Sheen', (0.0,), False, 'Sheen', False, False),
+            Channel('coat', 'Coat', (0.0,), False, 'Coat', False, False),
+            Channel('ior', 'IOR', (0.25,), False, 'IOR', False, False),
             Channel('flow', 'Flow map', (0.5, 0.5, 0.0), False, 'FlowMap', False, False, False),
             *(Channel(f'user{number}', f'User {number}', (0.0,), False, f'User{number}', False, False, False) for number in range(1, USER_CHANNELS + 1)))
 CHANNEL = {channel.key: channel for channel in CHANNELS}

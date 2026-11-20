@@ -34,6 +34,7 @@ ROW_HEIGHT = 42
 LINE_HEIGHT = 28
 MENU_ROW = 26
 MENU_WIDTH = 196
+CHANNEL_COLUMN = 280
 MENU_HEADING = 'HEADING.'
 STROKE_LABELS = {key: label for key, label, _ in STROKE_METHODS}
 DYNAMIC_LABELS = {key: label for key, label, _ in DYNAMICS}
@@ -267,7 +268,9 @@ BRUSH_TOGGLES = (('BRUSH_PRESSURE_SIZE', 'Pressure size', 'brush_pressure_size')
                  ('BRUSH_FOLLOW_PATH', 'Follow path', 'brush_follow_path'))
 SIZE_SPACE_CHOICES = (('SCREEN', 'Screen size', 'Size the brush in screen pixels; it covers more of the model as you zoom out'),
                       ('WORLD', 'World size', 'Size the brush in scene units; each dab covers the same area of the model at any zoom'))
-SHORT_NAMES = {'roughness': 'Rough', 'metallic': 'Metal', 'normal': 'Normal', 'height': 'Height', 'emission': 'Emit', 'opacity': 'Alpha'}
+SHORT_NAMES = {'roughness': 'Rough', 'metallic': 'Metal', 'normal': 'Normal', 'height': 'Height', 'emission': 'Emit', 'opacity': 'Alpha',
+               'glossiness': 'Gloss', 'displacement': 'Disp', 'anisotropy_level': 'Aniso', 'anisotropy_angle': 'Aniso°', 'transmission': 'Trans',
+               'scattering': 'Scatter', 'sheen': 'Sheen', 'coat': 'Coat', 'ior': 'IOR'}
 
 
 def brush_value_control(layout, channel, slot, rect):
@@ -1621,15 +1624,19 @@ def viewport_popover(layout, state, bounds, shading, lens, ortho, view, project,
 def channels_popover(layout, state, bounds, data):
     s = layout.scale
     choices = [channel for channel in CHANNELS if channel.key != 'base_color']
-    card = place_popover(bounds, state.popover.anchor, 300 * s, ((len(choices) + 2) * LINE_HEIGHT + 30) * s, s)
+    rows = max(1, min(len(choices), int((bounds.h - 16 * s) // (LINE_HEIGHT * s)) - 3))
+    columns = math.ceil(len(choices) / rows)
+    column_w = CHANNEL_COLUMN * s
+    card = place_popover(bounds, state.popover.anchor, columns * column_w + 20 * s, ((rows + 2) * LINE_HEIGHT + 30) * s, s)
     x, w = card.x + 14 * s, card.w - 28 * s
-    y = card.top - 34 * s
-    layout.add('CHANNELS_TITLE', Rect(x, y, w, 22 * s), 'NOTE', label='Channels · ' + data.name)
-    for channel in choices:
-        y -= LINE_HEIGHT * s
-        layout.add('CHANSET.' + channel.key, Rect(x, y, w, 24 * s), 'TOGGLE', label=channel.label + ('' if channel.in_shader else '  (export only)'),
+    top = card.top - 34 * s
+    layout.add('CHANNELS_TITLE', Rect(x, top, w, 22 * s), 'NOTE', label='Channels · ' + data.name)
+    for index, channel in enumerate(choices):
+        column, row = divmod(index, rows)
+        rect = Rect(x + column * column_w, top - (row + 1) * LINE_HEIGHT * s, column_w - 8 * s, 24 * s)
+        layout.add('CHANSET.' + channel.key, rect, 'TOGGLE', label=channel.label + ('' if channel.in_shader else '  (export only)'),
                    active=channel.key in data.channels and data.channels[channel.key].enabled)
-    y -= LINE_HEIGHT * s
+    y = top - (rows + 1) * LINE_HEIGHT * s
     layout.add('CHANNELS_ALL', Rect(x, y, w, 24 * s), 'TOGGLE', label='Apply to every texture set', active=state.channels_all,
                tip='Add or remove channels in all texture sets at once')
     return card

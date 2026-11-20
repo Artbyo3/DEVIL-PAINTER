@@ -17,8 +17,15 @@ PREVIEW_TOOLS = {'PAINT', 'FILL', ''}
 BUMP_DISTANCE = .05
 DISPLAY_GAMMA = 2.2
 MASK_MIXES = {'MINIMUM': 'DARKEN', 'MAXIMUM': 'LIGHTEN'}
-SHADER_INPUTS = {'base_color': 'Base Color', 'roughness': 'Roughness', 'metallic': 'Metallic', 'emission': 'Emission Color',
-                 'opacity': 'Alpha'}
+SHARED_INPUTS = {'emission': 'Emission Color', 'opacity': 'Alpha', 'anisotropy_level': 'Anisotropic', 'anisotropy_angle': 'Anisotropic Rotation',
+                 'transmission': 'Transmission Weight', 'scattering': 'Subsurface Weight', 'sheen': 'Sheen Weight', 'coat': 'Coat Weight'}
+METAL_ROUGH_INPUTS = {'base_color': 'Base Color', 'roughness': 'Roughness', 'metallic': 'Metallic', 'ior': 'IOR', **SHARED_INPUTS}
+SHADER_INPUTS = {'PRINCIPLED': METAL_ROUGH_INPUTS, 'UNLIT': METAL_ROUGH_INPUTS,
+                 'SPECULAR_GLOSSINESS': {'diffuse': 'Base Color', 'specular': 'Specular Tint', 'glossiness': 'Roughness', **SHARED_INPUTS}}
+ALBEDO = {'PRINCIPLED': 'base_color', 'UNLIT': 'base_color', 'SPECULAR_GLOSSINESS': 'diffuse'}
+DIELECTRIC_F0 = .04
+IOR_RANGE = (1.0, 3.0)
+DISPLACEMENT_MIDLEVEL = .5
 
 
 def rgba(value):
@@ -700,12 +707,13 @@ def combine_baked(build, results):
             links.new(occlusion, socket(mix.inputs, 'A', 'RGBA'))
             links.new(build.sampler.sample(ambient, None, (-800, -1700))[0], socket(mix.inputs, 'B', 'RGBA'))
             occlusion = results['ambient_occlusion'] = socket(mix.outputs, 'Result', 'RGBA')
-        if 'base_color' in results:
+        albedo = ALBEDO[build.shading['shader']]
+        if albedo in results:
             shade = nodes.new('ShaderNodeMix')
             shade.data_type = 'RGBA'
             shade.blend_type = 'MULTIPLY'
             socket(shade.inputs, 'Factor', 'VALUE').default_value = 1.0
-            links.new(results['base_color'], socket(shade.inputs, 'A', 'RGBA'))
+            links.new(results[albedo], socket(shade.inputs, 'A', 'RGBA'))
             links.new(occlusion, socket(shade.inputs, 'B', 'RGBA'))
             build.shaded = socket(shade.outputs, 'Result', 'RGBA')
 
@@ -734,6 +742,28 @@ def surface_normal(build, results, x):
             links.new(normal, bump.inputs['Normal'])
         normal = bump.outputs['Normal']
     return normal
+
+
+def shader_value(build, key, result, x):
+    nodes, links = build.nodes, build.links
+    if key == 'glossiness':
+        return math_node(nodes, links, 'SUBTRACT', 1.0, result, x, -1000)
+    if key == 'ior':
+        low, high = IOR_RANGE
+        return math_node(nodes, links, 'ADD', math_node(nodes, links, 'MULTIPLY', result, high - low, x - 150, -1000), low, x, -1000)
+    if key == 'specular':
+        return vector_math(nodes, links, 'MULTIPLY', result, (1 / DIELECTRIC_F0,) * 3)
+    return result
+
+
+def displacement(build, result, x):
+    node = build.nodes.new('ShaderNodeDisplacement')
+    node.name = 'shader.displacement'
+    node.location = (x, -1000)
+    node.inputs['Midlevel'].default_value = DISPLACEMENT_MIDLEVEL
+    node.inputs['Scale'].default_value = BUMP_DISTANCE
+    build.links.new(result, node.inputs['Height'])
+    return node.outputs['Displacement']
 
 
 def solo_shader(nodes, links, channel, result, x, raw):
@@ -986,14 +1016,16 @@ def build_tree(build, channels, layers, solo=None, raw=False):
     results = compose(build, channels, layers, '', results, column)
     build.shaded = None
     combine_baked(build, results)
-    if not raw and not solo and build.data is not None and build.data.quick_mask is not None and 'base_color' in results:
+    albedo = ALBEDO[build.shading['shader']]
+    if not raw and not solo and build.data is not None and build.data.quick_mask is not None and albedo in results:
         stencil = build.sampler.sample(build.data.quick_mask)[1]
-        results['base_color'] = mix_color(build, results['base_color'], QUICK_TINT, math_node(nodes, links, 'MULTIPLY', stencil, QUICK_SHOW))
+        results[albedo] = mix_color(build, results[albedo], QUICK_TINT, math_node(nodes, links, 'MULTIPLY', stencil, QUICK_SHOW))
     end = 300 * column[0]
     output.location, shader.location = (end + 600, 0), (end + 300, 0)
-    for key, name in SHADER_INPUTS.items():
+    for key, name in SHADER_INPUTS[build.shading['shader']].items():
         if key in results:
-            links.new(build.shaded if key == 'base_color' and build.shaded is not None else results[key], shader.inputs[name])
+            value = build.shaded if key == albedo and build.shaded is not None else results[key]
+            links.new(shader_value(build, key, value, end + 150), shader.inputs[name])
     normal = surface_normal(build, results, end)
     if normal is not None:
         links.new(normal, shader.inputs['Normal'])
@@ -1006,6 +1038,8 @@ def build_tree(build, channels, layers, solo=None, raw=False):
         links.new(build.shaded if build.shaded is not None else results['base_color'], unlit.inputs['Color'])
         surface = unlit.outputs[0]
     links.new(surface, output.inputs['Surface'])
+    if not solo and 'displacement' in results:
+        links.new(displacement(build, results['displacement'], end + 300), output.inputs['Displacement'])
     return output
 
 
