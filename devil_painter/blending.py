@@ -15,6 +15,7 @@ STORED_BLENDS = ('MIX', 'DARKEN', 'MULTIPLY', 'BURN', 'LIGHTEN', 'SCREEN', 'DODG
 MIX_NODE_BLENDS = frozenset(STORED_BLENDS[:19])
 NORMAL_DETAIL = 'NORMAL_DETAIL'
 FOLDER_BLENDS = (('PASSTHROUGH', 'Passthrough'),) + tuple((key, dict(BLEND_MODES)[key]) for key in STORED_BLENDS[:19])
+USER_CHANNELS = 8
 
 
 @dataclass(frozen=True)
@@ -42,10 +43,7 @@ CHANNELS = (Channel('base_color', 'Base Color', (0.8, 0.8, 0.8), True, 'BaseColo
             Channel('opacity', 'Opacity', (1.0,), False, 'Opacity', False, False),
             Channel('ambient_occlusion', 'Ambient Occlusion', (1.0,), False, 'AmbientOcclusion', False, False),
             Channel('flow', 'Flow map', (0.5, 0.5, 0.0), False, 'FlowMap', False, False, False),
-            Channel('user1', 'User 1', (0.0,), False, 'User1', False, False, False),
-            Channel('user2', 'User 2', (0.0,), False, 'User2', False, False, False),
-            Channel('user3', 'User 3', (0.0,), False, 'User3', False, False, False),
-            Channel('user4', 'User 4', (0.0,), False, 'User4', False, False, False))
+            *(Channel(f'user{number}', f'User {number}', (0.0,), False, f'User{number}', False, False, False) for number in range(1, USER_CHANNELS + 1)))
 CHANNEL = {channel.key: channel for channel in CHANNELS}
 
 
