@@ -26,7 +26,7 @@ from .painting import TOOLS
 from .polyfill import POLY_MODES
 from .privacy import masked, masked_path
 from .shell import COLUMNS, HEADER, SECTIONS, arrange, flexible
-from .ui_system import ACCENT, CHIP_ICON_SIZE, MinimalMetrics
+from .ui_system import ACCENT, CHIP_ICON_WIDTH, MinimalMetrics
 
 MAX_BRUSH_SIZE = 500
 MAX_WORLD_SIZE = 1.0
@@ -1091,7 +1091,7 @@ def shelf_header(layout, state, zone, header):
         if column == 0:
             x = zone.x + 8 * s
         icon = shelf.TAB_ICONS.get(tab, '')
-        width = (CHIP_ICON_SIZE + 8) * s if icon else tab_w
+        width = CHIP_ICON_WIDTH * s if icon else tab_w
         layout.add('SHELF_TAB.' + tab, Rect(x, header.y - row * 26 * s, width, header.h), 'CHIP', label=label, icon=icon,
                    active=state.shelf_open and tab == state.shelf_tab, tip=f'Browse {label.lower()}')
         x += width + 4 * s
