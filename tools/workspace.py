@@ -5,7 +5,8 @@ import tomllib
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRATCH = ROOT / 'scratch'
+JOURNEY_SCRATCH = 'DEVIL_PAINTER_SCRATCH'
+SCRATCH = Path(os.environ[JOURNEY_SCRATCH]) if JOURNEY_SCRATCH in os.environ else ROOT / 'scratch'
 DIST = ROOT / 'dist'
 
 
@@ -20,15 +21,18 @@ def is_link(path):
 
 def checked_scratch():
     expected = ROOT.resolve() / 'scratch'
-    if SCRATCH.absolute() != expected:
-        raise ValueError('Scratch must be the real scratch directory directly inside the repository.')
-    try:
-        linked = is_link(SCRATCH)
-    except FileNotFoundError:
-        return expected
-    if linked or not SCRATCH.is_dir():
-        raise ValueError('Scratch cannot be a linked directory or a file.')
-    return expected
+    chosen = SCRATCH.absolute()
+    journey = '..' not in chosen.parts and chosen.is_relative_to(expected / 'j') and chosen != expected / 'j'
+    if chosen != expected and not journey:
+        raise ValueError('Scratch must be the real scratch directory directly inside the repository, or a journey folder inside scratch/j.')
+    for directory in [chosen, *chosen.parents][:len(chosen.relative_to(expected).parts) + 1]:
+        try:
+            linked = is_link(directory)
+        except FileNotFoundError:
+            continue
+        if linked or not directory.is_dir():
+            raise ValueError('Scratch cannot be a linked directory or a file.')
+    return chosen
 
 
 def prepare_scratch():
@@ -37,13 +41,15 @@ def prepare_scratch():
     return directory
 
 
-def child_environment():
-    temporary = prepare_scratch() / 'blender-temp'
+def child_environment(journey=None):
+    directory = journey or prepare_scratch()
+    temporary = directory / 'blender-temp'
     temporary.mkdir(exist_ok=True)
-    config = prepare_scratch() / 'blender-config'
+    config = directory / 'blender-config'
     config.mkdir(exist_ok=True)
+    own = {JOURNEY_SCRATCH: str(directory)} if journey else {}
     return dict(os.environ, PYTHONDONTWRITEBYTECODE='1', TEMP=str(temporary), TMP=str(temporary), TMPDIR=str(temporary),
-                BLENDER_USER_CONFIG=str(config))
+                BLENDER_USER_CONFIG=str(config), **own)
 
 
 def clean_scratch():

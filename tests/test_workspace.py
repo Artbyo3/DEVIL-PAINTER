@@ -87,6 +87,31 @@ class ScratchWorkspaceTests(unittest.TestCase):
                 workspace.clean_scratch()
         self.assertTrue(protected.exists())
 
+    def test_journey_scratch_is_a_numbered_folder_inside_scratch_j(self):
+        journey = self.scratch / 'j' / '0' / '01'
+        journey.mkdir(parents=True)
+        with patch.object(workspace, 'SCRATCH', journey):
+            self.assertEqual(workspace.prepare_scratch(), journey)
+            environment = workspace.child_environment(journey)
+        self.assertEqual(Path(environment[workspace.JOURNEY_SCRATCH]), journey)
+        self.assertEqual(Path(environment['BLENDER_USER_CONFIG']), journey / 'blender-config')
+        self.assertEqual(Path(environment['TEMP']), journey / 'blender-temp')
+        self.assertNotIn(workspace.JOURNEY_SCRATCH, workspace.child_environment())
+
+    def test_journey_scratch_refuses_escapes_and_links(self):
+        (self.scratch / 'j').mkdir(parents=True)
+        outside = self.root / 'source'
+        outside.mkdir()
+        for escape in (self.scratch / 'j', self.scratch / 'j' / '..' / '..' / 'source', outside / 'journeys' / 'run'):
+            with patch.object(workspace, 'SCRATCH', escape):
+                with self.assertRaises(ValueError):
+                    workspace.prepare_scratch()
+        with self.linked_directory(self.scratch / 'j' / 'linked', outside):
+            with patch.object(workspace, 'SCRATCH', self.scratch / 'j' / 'linked' / '01'):
+                with self.assertRaises(ValueError):
+                    workspace.prepare_scratch()
+        self.assertEqual(list(outside.iterdir()), [])
+
     def test_windows_reparse_attribute_is_detected_without_symlink_privileges(self):
         with patch.object(Path, 'is_symlink', return_value=False), patch.object(Path, 'lstat', return_value=SimpleNamespace(st_file_attributes=0x400)):
             self.assertTrue(workspace.is_link(self.root / 'junction'))
@@ -145,6 +170,22 @@ class ScratchWorkspaceTests(unittest.TestCase):
         with patch.object(dev, 'do_quick_tests', return_value=True), patch.object(dev, 'clean_scratch', side_effect=PermissionError('locked')), patch('builtins.print'):
             self.assertEqual(dev.main(['--quick']), 1)
         self.assertTrue(self.scratch.exists())
+
+    def test_journeys_stop_after_a_failure_and_keep_going_runs_every_journey(self):
+        started = []
+
+        def journey(name, run):
+            started.append(name)
+            return SimpleNamespace(stdout='', stderr=''), 0.0, name != 'gui_project.py', run / 'missing.jsonl'
+
+        for keep_going, expected in ((False, len(dev.SLOWEST_JOURNEYS)), (True, len(dev.JOURNEYS))):
+            started.clear()
+            with patch.object(dev, 'run_journey', side_effect=journey), patch.object(dev, 'journey_limits', return_value=dict(journeys=1)), patch('builtins.print'):
+                hashes, failed = dev.run_journeys(keep_going)
+            self.assertEqual(failed, ['gui_project.py'])
+            self.assertLessEqual(len(started), expected)
+            self.assertEqual(list(hashes), [name for name in dev.JOURNEYS if name in started])
+        self.assertEqual(sorted(started), sorted(dev.JOURNEYS))
 
     def test_combined_run_cleans_only_after_build_finishes(self):
         report = self.scratch / 'test-report.json'
