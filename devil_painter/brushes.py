@@ -181,6 +181,11 @@ def world_sizes(context, data, region, view, obj, points):
     return sizes
 
 
+def screen_sizes(context, data, size, points):
+    curve = context.tool_settings.image_paint.brush.curve_size
+    return [size / 2 * pressure_response(curve, pressure, data.brush_pressure_size) for _, pressure in points]
+
+
 def world_size_text(value):
     units = bpy.context.scene.unit_settings
     return bpy.utils.units.to_string(units.system, 'LENGTH', value * units.scale_length, precision=3)

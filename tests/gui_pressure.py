@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(ROOT))
 import devil_painter
-from devil_painter import editor, library, painting, shelf
+from devil_painter import brushes, editor, library, painting, shelf
 from devil_painter.document import active_layer, find_layer
 from tools.workspace import prepare_scratch
 from tests.gui_harness import settle
@@ -130,6 +130,14 @@ def dab(window, area, region, points):
         editor._active.run_gesture(bpy.context, points)
 
 
+def native_dab(window, region, point):
+    x, y = round(region.x + point[0]), round(region.y + point[1])
+    move(window, x, y)
+    window.event_simulate(type='LEFTMOUSE', value='PRESS', x=x, y=y)
+    window.event_simulate(type='LEFTMOUSE', value='RELEASE', x=x, y=y)
+    return x - region.x, y - region.y
+
+
 def center_of(obj, data, point):
     _, u, v = editor._active.texture_point(obj, data, point)
     return int(u), int(v)
@@ -201,7 +209,7 @@ def journey():
     yield from close_cards(window, middle)
     edge_left, edge_right = screen_point(area, region, -1.0), screen_point(area, region, 1.0)
     pixels_per_unit = (edge_right[0] - edge_left[0]) / 2
-    click(window, region, 'BRUSH_SIZE', fx=.05)
+    click(window, region, 'BRUSH_SIZE', fx=.1)
     yield from settle()
     size = painting.brush_value(bpy.context.scene, 'size')
     check(0 < size < pixels_per_unit * .15, f'the brush is small enough for separate dabs ({size} px, {pixels_per_unit:.0f} px per unit)')
@@ -228,8 +236,12 @@ def journey():
     yield from settle()
     hardness_uid = active_layer(data).uid
     yield from card_click(window, region, 'BRUSH_PRESSURE_FLOW')
-    yield from card_click(window, region, 'BRUSH_PRESSURE_HARDNESS')
     yield from card_click(window, region, 'BRUSH_HARDNESS', fx=.8)
+    yield from close_cards(window, middle)
+    check(not editor._active.wants_gesture(bpy.context), 'with every pressure mapping off the reference dab is a native Blender stroke')
+    native_spot = native_dab(window, region, points[2])
+    yield from settle()
+    yield from card_click(window, region, 'BRUSH_PRESSURE_HARDNESS')
     hardness = data.brush_hardness
     check(data.brush_pressure_hardness and not data.brush_pressure_flow and .7 < hardness < .9, f'Pressure hardness is on at hardness {hardness:.3f}')
     yield from close_cards(window, middle)
@@ -240,9 +252,29 @@ def journey():
     low_peak, low_core, low_edge = profile(alpha, center_of(cube, data, points[0]))
     high_peak, high_core, high_edge = profile(alpha, center_of(cube, data, points[1]))
     check(abs(low_edge - high_edge) <= 2 and low_peak > .97 and high_peak > .97, f'both dabs keep the same size ({low_edge:.1f} and {high_edge:.1f} px)')
+    _, _, native_edge = profile(alpha, center_of(cube, data, native_spot))
+    check(abs(high_edge - native_edge) <= 2, f'a replayed dab paints at the brush size: {high_edge:.1f} px against {native_edge:.1f} px for a native dab')
     check(abs(high_core - hardness) < .12 and abs(low_core - hardness * LOW) < .12 and high_core / max(low_core, 1e-3) > 2.5,
           f'hardness tracks pressure: solid core {low_core:.3f} of the radius at {LOW} (expected {hardness * LOW:.3f}) and {high_core:.3f} at {HIGH} (expected {hardness:.3f})')
     check(abs(bpy.context.tool_settings.image_paint.brush.get('dp_hardness') - hardness) < 1e-4, 'the stroke restores the set hardness')
+
+    yield from card_click(window, region, 'BRUSH_PRESSURE_HARDNESS')
+    yield from card_click(window, region, 'BRUSH_PRESSURE_ANGLE')
+    yield from card_click(window, region, 'BRUSH_PRESSURE_SIZE')
+    check(data.brush_pressure_size and data.brush_pressure_angle and not data.brush_pressure_hardness and editor._active.wants_gesture(bpy.context),
+          'Pressure size is on while Pressure angle keeps the round brush in the pressure replay')
+    yield from close_cards(window, middle)
+    dab(window, area, region, [(points[3], LOW)])
+    yield from settle()
+    _, _, sized_edge = profile(layer_pixels(find_layer(data, hardness_uid))[..., 3], center_of(cube, data, points[3]))
+    size_response = brushes.pressure_response(bpy.context.tool_settings.image_paint.brush.curve_size, LOW, True)
+    check(abs(sized_edge / high_edge - size_response) < .05,
+          f'size tracks pressure in the replay: the dab at {LOW} is {sized_edge / high_edge:.4f} of full size (curve {size_response:.4f})')
+    yield from card_click(window, region, 'BRUSH_PRESSURE_SIZE')
+    yield from card_click(window, region, 'BRUSH_PRESSURE_ANGLE')
+    yield from card_click(window, region, 'BRUSH_PRESSURE_HARDNESS')
+    check(data.brush_pressure_hardness and not data.brush_pressure_size and not data.brush_pressure_angle, 'the pressure toggles go back to Pressure hardness only')
+    yield from close_cards(window, middle)
 
     click(window, region, 'SHELF_TAB.BRUSHES')
     yield from settle()
@@ -329,7 +361,9 @@ def journey():
     yield from close_cards(window, middle)
     print('PRESSURE EVIDENCE', dict(flow=dict(low=round(low_flow, 4), high=round(high_flow, 4), ratio=round(low_flow / high_flow, 4), expected=LOW),
                                     hardness=dict(set=round(hardness, 4), low_core=round(low_core, 4), high_core=round(high_core, 4),
-                                                  expected_low=round(hardness * LOW, 4), expected_high=round(hardness, 4), radius_px=round(high_edge, 1)),
+                                                  expected_low=round(hardness * LOW, 4), expected_high=round(hardness, 4), radius_px=round(high_edge, 1),
+                                                  native_radius_px=round(native_edge, 1)),
+                                    size=dict(pressure=LOW, ratio=round(sized_edge / high_edge, 4), expected=round(size_response, 4)),
                                     angle=dict(set=round(angle, 3), orientations=[round(value, 3) for value in turns], low_to_middle=round(low_to_middle, 3),
                                                low_to_high=round(low_to_high, 3), expected_low_to_middle=round(angle * (MIDDLE - LOW), 3),
                                                expected_low_to_high=round(angle * (HIGH - LOW), 3)),

@@ -138,6 +138,20 @@ def stroke(window, area, region, points):
         editor._active.run_gesture(bpy.context, points)
 
 
+def native_dab(window, region, point):
+    x, y = round(region.x + point[0]), round(region.y + point[1])
+    move(window, x, y)
+    window.event_simulate(type='LEFTMOUSE', value='PRESS', x=x, y=y)
+    window.event_simulate(type='LEFTMOUSE', value='RELEASE', x=x, y=y)
+    return x - region.x, y - region.y
+
+
+def footprint(alpha, center):
+    rows, columns = numpy.indices(alpha.shape)
+    near = numpy.hypot(columns - center[0], rows - center[1]) < DAB_REACH * alpha.shape[0]
+    return int((near & (alpha > EDGE_LEVEL)).sum())
+
+
 def center_of(obj, data, point):
     _, u, v = editor._active.texture_point(obj, data, point)
     return u - .5, v - .5
@@ -260,6 +274,24 @@ def journey():
     click(window, region, 'BRUSH_SIZE', fx=.08)
     yield from settle()
     evidence = {}
+
+    size_uid = yield from new_layer(window, region, data)
+    native_spot, replay_spot = screen_point(area, region, -.5, .0), screen_point(area, region, .5, .0)
+    check(not editor._active.wants_gesture(bpy.context), 'the reference dab is a native Blender stroke')
+    native_spot = native_dab(window, region, native_spot)
+    yield from settle()
+    yield from card_click(window, region, 'BRUSH_FOLLOW_PATH')
+    yield from close_cards(window, middle)
+    check(data.brush_follow_path and editor._active.wants_gesture(bpy.context), 'Follow path routes the measured dab through the per-dab replay')
+    stroke(window, area, region, [(replay_spot, 1.0)])
+    yield from settle()
+    alpha = layer_alpha(data, size_uid)
+    native_area, replay_area = (footprint(alpha, center_of(cube, data, spot)) for spot in (native_spot, replay_spot))
+    check(abs(replay_area / native_area - 1) < .05, f'a Follow path dab covers {replay_area} texels against {native_area} for a native dab of the same size')
+    evidence['size'] = dict(native_texels=native_area, replay_texels=replay_area, ratio=round(replay_area / native_area, 4))
+    yield from card_click(window, region, 'BRUSH_FOLLOW_PATH')
+    yield from close_cards(window, middle)
+    check(not data.brush_follow_path, 'Follow path goes back off for the plain reference stroke')
 
     probe = straight_path(area, region, (-.6, -.6), (1.0, .0), 5)
     plain = yield from paint_stroke(window, area, region, cube, data, [(point, 1.0) for point in probe])

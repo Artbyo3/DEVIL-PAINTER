@@ -867,17 +867,16 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         return points
 
     def replay(self, context, obj, data, points):
-        size = painting.brush_value(self.scene, 'size')
-        elements = [dict(name='', location=(0.0, 0.0, 0.0), mouse=point, mouse_event=point, is_start=index == 0, pressure=pressure, size=size,
-                         time=index * .01, x_tilt=0.0, y_tilt=0.0) for index, (point, pressure) in enumerate(points)]
+        radii = (brushes.world_sized(data) and brushes.world_sizes(context, data, self._region, self._area.spaces.active.region_3d, obj, points)
+                 or brushes.screen_sizes(context, data, painting.brush_value(self.scene, 'size'), points))
+        elements = [dict(name='', location=(0.0, 0.0, 0.0), mouse=point, mouse_event=point, is_start=index == 0, pressure=pressure, size=radius,
+                         time=index * .01, x_tilt=0.0, y_tilt=0.0) for index, ((point, pressure), radius) in enumerate(zip(points, radii))]
         mapped = brushes.per_dab(data)
         if brushes.per_point(data):
             jitter = brushes.dab_jitter(data, len(points), brushes.jitter_seed(points)) if brushes.jittered(data) else [(1.0, 1.0, 0.0)] * len(points)
             headings = brushes.path_angles(points) if data.brush_follow_path else [0.0] * len(points)
-            bases = (brushes.world_sized(data) and brushes.world_sizes(context, data, self._region, self._area.spaces.active.region_3d, obj, points)
-                     or [size] * len(points))
-            for element, base, (size_scale, _, _) in zip(elements, bases, jitter):
-                element['size'] = base * size_scale
+            for element, (size_scale, _, _) in zip(elements, jitter):
+                element['size'] *= size_scale
             dabs = [([element], flow_scale, heading + angle_offset) for element, (_, flow_scale, angle_offset), heading in zip(elements, jitter, headings)]
         elif mapped:
             dabs = [(list(group), 1.0, 0.0) for _, group in itertools.groupby(elements, key=lambda element: element['pressure'])]

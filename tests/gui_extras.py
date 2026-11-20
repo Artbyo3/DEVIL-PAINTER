@@ -299,7 +299,10 @@ def journey():
     splat_uid = active_layer(data).uid
     drag(window, x, y, 0, 8, 4)
     yield from settle()
-    check(covered(find_layer(data, splat_uid)) > plain * 1.3, 'splatter scatters dabs around the stroke')
+    splat_alpha = image_pixels(find_layer(data, splat_uid).image)[..., 3]
+    stroke_alpha = image_pixels(find_layer(data, plain_uid).image)[..., 3]
+    scattered, stroke_area = int(((splat_alpha > 0) & (stroke_alpha == 0)).sum()), int((stroke_alpha > 0).sum())
+    check(scattered > stroke_area * 1.3, f'splatter scatters dabs around the stroke ({scattered} texels outside a plain stroke that covers {stroke_area})')
     yield from card_click(window, region, 'BRUSH_CARD', 'BRUSH_DYNAMICS', 'BRUSH')
     click(window, region, 'SET_DYNAMICS.NONE')
     yield from settle()

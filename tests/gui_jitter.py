@@ -182,13 +182,21 @@ def new_layer(window, region, data):
     return active_layer(data).uid
 
 
-def paint_plain(window, area, region, cube, data, points, pressure, metric):
+def native_dab(window, region, point):
+    x, y = round(region.x + point[0]), round(region.y + point[1])
+    move(window, x, y)
+    window.event_simulate(type='LEFTMOUSE', value='PRESS', x=x, y=y)
+    window.event_simulate(type='LEFTMOUSE', value='RELEASE', x=x, y=y)
+    return x - region.x, y - region.y
+
+
+def paint_plain(window, region, cube, data, points, metric):
+    check(not editor._active.wants_gesture(bpy.context), 'the reference dabs are native Blender strokes')
     uid = yield from new_layer(window, region, data)
-    for point in points:
-        stroke(window, area, region, [(point, pressure)])
+    spots = [native_dab(window, region, point) for point in points]
     yield from settle()
     alpha = layer_alpha(data, uid)
-    return [metric(alpha, center_of(cube, data, point)) for point in points]
+    return [metric(alpha, center_of(cube, data, spot)) for spot in spots]
 
 
 def paint_jittered(window, area, region, cube, data, points, pressure, metric):
@@ -232,12 +240,12 @@ def journey():
     check([control(key).text for key in ('BRUSH_JITTER_SIZE', 'BRUSH_JITTER_FLOW', 'BRUSH_JITTER_ANGLE')] == ['0%', '0%', '0%'],
           'the new jitter sliders read 0%')
     yield from close_cards(window, middle)
-    click(window, region, 'BRUSH_SIZE', fx=.05)
+    click(window, region, 'BRUSH_SIZE', fx=.1)
     yield from settle()
     points = [screen_point(area, region, x, y) for x, y in GRID]
     evidence = {}
 
-    plain = yield from paint_plain(window, area, region, cube, data, points, 1.0, radius)
+    plain = yield from paint_plain(window, region, cube, data, points, radius)
     yield from card_click(window, region, 'BRUSH_JITTER_SIZE', fx=AMOUNT)
     amount = data.brush_jitter_size
     check(abs(amount - AMOUNT) < .03 and editor._active.wants_gesture(bpy.context), f'Size jitter is set to {amount:.3f} and routes Paint through the per-dab replay')
@@ -246,8 +254,8 @@ def journey():
     reference = sum(plain) / len(plain)
     ratios = [value / reference for value in varied]
     errors = [abs(ratio - scale) for ratio, (scale, _, _) in zip(ratios, predicted)]
-    check(max(plain) - min(plain) <= 1.0, f'without jitter every dab has the same radius ({spread(plain)})')
-    check(all(1 - amount - .05 <= ratio <= 1.03 for ratio in ratios), f'jittered dab radii stay inside 1 - amount to 1 of the brush size ({spread(ratios)})')
+    check(max(plain) - min(plain) <= 1.0, f'without jitter every native dab has the same radius ({spread(plain)})')
+    check(all(1 - amount - .05 <= ratio <= 1.03 for ratio in ratios), f'replayed dab radii stay inside 1 - amount to 1 of the native dab radius ({spread(ratios)})')
     check(max(ratios) - min(ratios) > amount * .4 and max(errors) < .06, f'each dab gets its own size, matching the seeded draw within {max(errors):.4f}')
     evidence['size'] = dict(amount=round(amount, 4), plain_radius_px=spread(plain), jittered_ratio=spread(ratios),
                             predicted_ratio=spread([scale for scale, _, _ in predicted]), max_error=round(max(errors), 4))
@@ -255,7 +263,7 @@ def journey():
     check(data.brush_jitter_size == 0, 'Size jitter goes back to 0')
 
     yield from close_cards(window, middle)
-    plain = yield from paint_plain(window, area, region, cube, data, points, 1.0, coverage)
+    plain = yield from paint_plain(window, region, cube, data, points, coverage)
     yield from card_click(window, region, 'BRUSH_JITTER_FLOW', fx=AMOUNT)
     amount = data.brush_jitter_flow
     yield from close_cards(window, middle)
@@ -313,7 +321,7 @@ def journey():
     yield from card_click(window, region, 'BRUSH_SMOOTHING', fx=0.0)
     check(data.brush_smoothing == 0, 'lazy mouse goes to 0 so the dabs land where they are measured')
     yield from close_cards(window, middle)
-    plain = yield from paint_plain(window, area, region, cube, data, points, 1.0, orientation)
+    plain = yield from paint_plain(window, region, cube, data, points, orientation)
     yield from card_click(window, region, 'BRUSH_JITTER_ANGLE', fx=AMOUNT)
     amount = data.brush_jitter_angle
     yield from close_cards(window, middle)
