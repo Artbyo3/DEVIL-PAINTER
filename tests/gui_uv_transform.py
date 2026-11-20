@@ -193,7 +193,7 @@ def journey():
         return find_layer(data, layer_uid)
 
     def transform():
-        return data.material.node_tree.nodes[layer_uid + '.uv_transform']
+        return data.material.node_tree.nodes[layer_uid + ':uv_transform']
 
     yield from reveal(window, region, 'SOURCE.roughness')
     click(window, region, 'SOURCE.roughness')

@@ -10,6 +10,7 @@ from .procedural import contrast_range, pattern_node, set_pattern_values
 from .tiles import numbers
 
 SIGNATURE_KEY = 'devil_painter_signature'
+NODE_NAMING = 'own-colon'
 QUICK_TINT = (1.0, .08, .15, 1.0)
 QUICK_SHOW = .6
 PIN_CORNERS = ((0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0))
@@ -154,6 +155,10 @@ def resolved(layers):
     return result
 
 
+def own_node(layer, part):
+    return f'{layer.uid}:{part}'
+
+
 def slot_signature(slot):
     source = slot.source
     if source == 'IMAGE':
@@ -189,7 +194,7 @@ def signature(data):
     project = data.id_data.devil_painter
     shading = f'{data.visible}{data.shader}{project.normal_format}{project.normal_space}'
     quick = data.quick_mask.name if data.quick_mask is not None else ''
-    return f'{channels};{data.solo};{data.isolate};{layers};{owner};{maps};{tiles};{project.uv_map};{shading};{quick};{data.bake_paint}'
+    return f'{NODE_NAMING};{channels};{data.solo};{data.isolate};{layers};{owner};{maps};{tiles};{project.uv_map};{shading};{quick};{data.bake_paint}'
 
 
 def stroke_over(build, image, alpha, color, x):
@@ -503,7 +508,7 @@ def mask_value(build, layer):
 def layer_coverage(build, layer, x, stroke=None):
     nodes, links = build.nodes, build.links
     factor = nodes.new('ShaderNodeMath')
-    factor.name = layer.uid + '.opacity'
+    factor.name = own_node(layer, 'opacity')
     factor.operation = 'MULTIPLY'
     factor.location = (x - 150, -900)
     factor.inputs[0].default_value = 1.0
@@ -521,7 +526,7 @@ def layer_coverage(build, layer, x, stroke=None):
 
 def projected(nodes, links, layer, coordinates, x):
     projector = nodes.new('ShaderNodeMapping')
-    projector.name = layer.uid + '.projector'
+    projector.name = own_node(layer, 'projector')
     projector.vector_type = 'TEXTURE'
     projector.location = (x - 750, -400)
     links.new(coordinates.outputs['Object'], projector.inputs['Vector'])
@@ -571,7 +576,7 @@ def per_tile(nodes, links, vector):
 
 def uv_transform(nodes, links, layer, source, x):
     transform = nodes.new('ShaderNodeMapping')
-    transform.name = layer.uid + '.uv_transform'
+    transform.name = own_node(layer, 'uv_transform')
     transform.vector_type = 'TEXTURE'
     transform.location = (x - 750, -400)
     links.new(source, transform.inputs['Vector'])
@@ -587,7 +592,7 @@ def layer_coordinates(nodes, links, layer, x):
     coordinates = nodes.new('ShaderNodeTexCoord')
     coordinates.location = (x - 900, -400)
     mapping = nodes.new('ShaderNodeMapping')
-    mapping.name = layer.uid + '.mapping'
+    mapping.name = own_node(layer, 'mapping')
     mapping.location = (x - 450, -400)
     if layer.projection in PROJECTORS:
         source = projected(nodes, links, layer, coordinates, x)
@@ -1047,18 +1052,18 @@ def write_values(nodes, channels, layers, brush=None):
     if brush is not None and 'stroke.opacity' in nodes:
         nodes['stroke.opacity'].inputs[1].default_value = brush[0]
     for layer in shown_layers(layers):
-        nodes[layer.uid + '.opacity'].inputs[1].default_value = layer.opacity
+        nodes[own_node(layer, 'opacity')].inputs[1].default_value = layer.opacity
         write_generators(nodes, layer)
         if layer.kind == 'FOLDER':
             continue
         if uses_coordinates(layer):
-            nodes[layer.uid + '.mapping'].inputs['Scale'].default_value = (layer.tiling,) * 3
-            projector = nodes.get(layer.uid + '.projector')
+            nodes[own_node(layer, 'mapping')].inputs['Scale'].default_value = (layer.tiling,) * 3
+            projector = nodes.get(own_node(layer, 'projector'))
             if projector is not None:
                 projector.inputs['Location'].default_value = tuple(layer.proj_offset)
                 projector.inputs['Rotation'].default_value = tuple(layer.proj_rotation)
                 projector.inputs['Scale'].default_value = (layer.proj_size,) * 3
-            transform = nodes.get(layer.uid + '.uv_transform')
+            transform = nodes.get(own_node(layer, 'uv_transform'))
             if transform is not None:
                 transform.inputs['Location'].default_value = uv_location(layer)
                 transform.inputs['Rotation'].default_value = (0.0, 0.0, layer.uv_rotation)
@@ -1220,7 +1225,7 @@ def update_values(data, raw=False):
     obj = data.id_data
     project = obj.devil_painter
     for layer in shown_layers(stack_layers(data, raw)):
-        mapping = nodes.get(layer.uid + '.mapping')
+        mapping = nodes.get(own_node(layer, 'mapping'))
         if mapping is not None and layer.projection == 'TRIPLANAR' and project.use_physical:
             mapping.inputs['Scale'].default_value = tuple(layer.tiling * axis / project.physical_size for axis in obj.scale)
 

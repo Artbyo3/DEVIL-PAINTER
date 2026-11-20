@@ -753,7 +753,7 @@ def journey():
           'a texture fill effect shows its projection, starting on Automatic')
     yield from slide(window, region, 'FX_tiling', .25)
     yield from slide(window, region, 'FX_offset_u', .25)
-    mapping = nodes(body)[ramp.uid + '.mapping']
+    mapping = nodes(body)[ramp.uid + ':mapping']
     check(abs(ramp.tiling - 2.0) < .15 and abs(ramp.offset_u - .25) < .05 and tuple(mapping.inputs['Scale'].default_value)[0] == ramp.tiling
           and abs(mapping.inputs['Location'].default_value[0] - ramp.offset_u) < 1e-6,
           f'the tiling and offset sliders drive the fill effect mapping (tiling {ramp.tiling:.2f}, offset {ramp.offset_u:.2f})')
