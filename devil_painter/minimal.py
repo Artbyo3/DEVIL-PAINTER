@@ -252,6 +252,9 @@ BRUSH_SLIDERS = (('BRUSH_FLOW', 'Flow', 'brush_flow', 1.0, 'How much paint each 
                  ('BRUSH_HARDNESS', 'Hardness', 'brush_hardness', 1.0, 'Soft or hard brush edge'),
                  ('BRUSH_SMOOTHING', 'Lazy mouse', 'brush_smoothing', 1.0, 'Stabilize the stroke so it trails the pointer smoothly'),
                  ('BRUSH_JITTER', 'Jitter', 'brush_jitter', 1.0, 'Scatter dabs around the stroke'),
+                 ('BRUSH_JITTER_SIZE', 'Size jitter', 'brush_jitter_size', 1.0, 'Shrink each dab by a random amount, up to this share of the brush size'),
+                 ('BRUSH_JITTER_FLOW', 'Flow jitter', 'brush_jitter_flow', 1.0, 'Lower the flow of each dab by a random amount, up to this share'),
+                 ('BRUSH_JITTER_ANGLE', 'Angle jitter', 'brush_jitter_angle', 1.0, 'Turn the tip of each dab by a random angle, up to half a turn either way at 100%'),
                  ('BRUSH_ANGLE', 'Angle', 'brush_angle', 360.0, 'Rotate the brush tip and its alpha'))
 NORMAL_SLIDERS = (('BRUSH_NORMAL_TILT', 'Normal tilt', 'brush_normal_tilt', 89.0), ('BRUSH_NORMAL_ANGLE', 'Normal direction', 'brush_normal_angle', 360.0))
 STENCIL_SLIDERS = (('STENCIL_SCALE', 'Scale', 'stencil_scale', 4.0), ('STENCIL_ANGLE', 'Rotation', 'stencil_angle', 360.0),
