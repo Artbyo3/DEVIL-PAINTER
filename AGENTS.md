@@ -105,6 +105,15 @@ Run the unified developer runner from the repository root:
 
 All test suites must pass 100% with no regressions on every change.
 
+## GATE TIERS AND GOLDEN JOURNEY HASHES
+- The gate's weight follows the change's risk. `.\dev.cmd --tier auto` reads the branch's diff against `origin/main` (from the merge base, untracked files included) and picks a tier. `--tier light|standard|full` forces one. `--test --build` and `--all` without a tier stay FULL. Every run prints `GATE TIER: <TIER> (<reason>)` first; quote that line in the PR. Add `--plan` to print it without running anything.
+- **FULL**: the diff touches a core engine file in `tools/gate.py` `CORE_FILES` (compositing, blending, the document model and its migration, the mask and effect stack, filters, procedurals, shader nodes, projection, baking, mesh maps, tiles, texture sets, caches, strokes, polygon fill, exporting), or the diff is empty. Unknown add-on files never drop below STANDARD; add a new engine module to `CORE_FILES` when it lands.
+- **LIGHT**: every changed path matches `LIGHT_PATTERNS`: Markdown anywhere, `docs-site/`, `.github/`, `blender_manifest.toml`, and asset license or provenance text (`assets/*.txt`, `assets/icons/sources.json`). Any other file makes it STANDARD.
+- **STANDARD**: everything else (UI, brush settings, actions, panels, tests, tools).
+- Every tier runs the dead-code and import checks, `git diff --check` against main, the unit tests, packaging, Blender package validation, the zip load gate, and `check_public.py`. STANDARD and FULL add the real-Blender smoke suite and every journey (`blender_api.py` and all GUI suites) with the golden compare. FULL runs the same steps as STANDARD today, because STANDARD already covers the whole former gate; the tier records that a core file changed.
+- **Golden journey hashes.** `tools/golden_journey_hashes.json` maps each journey to the SHA-256 of every file it exports, in export order. `tools/journey_probe.py` records them as the journey writes them, so the gate's own journey run is the compare and main is never run a second time. `.\dev.cmd --golden compare` runs only the journeys, finishes every journey even after a failure, names each differing export, and exits non-zero on any difference.
+- **An intentional output change regenerates the manifest in the same PR**: run `.\dev.cmd --tier full --golden update` (or `--golden update` alone), commit the new manifest, and use its diff as the evidence of which exports changed. A PR that leaves outputs unchanged must pass the compare against the manifest on main.
+
 ## DISPOSABLE ARTIFACT CONTRACT
 - Keep installable deliverables in `dist/`; never auto-delete that directory.
 - Put every disposable development artifact in ignored `scratch/`: screenshots, crops, test scenes/backups, reports, generated scripts, preview logs, downloads, temporary dependencies, and test libraries. Never use the repository root, source folders, or `dist/` as a dumping ground.
