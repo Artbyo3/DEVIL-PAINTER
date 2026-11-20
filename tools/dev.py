@@ -1,8 +1,11 @@
 import os
 import sys
 import time
+import ctypes
 import argparse
+import threading
 import subprocess
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,23 +25,35 @@ if not os.path.exists(BLENDER_PATH):
 
 GUI_SUITES = ("gui_editor.py", "gui_project.py", "gui_layers.py", "gui_baking.py", "gui_masks.py", "gui_content.py", "gui_anchors.py", "gui_positional.py", "gui_slope_normal.py", "gui_uv_transform.py", "gui_triplanar_hardness.py", "gui_pressure.py", "gui_jitter.py", "gui_follow_path.py", "gui_texture_sampling.py", "gui_painting.py", "gui_shelf.py", "gui_extras.py", "gui_packs.py", "gui_udim.py", "gui_library.py", "gui_layout.py", "gui_reopen.py", "gui_layer_delete.py")
 JOURNEYS = ("blender_api.py",) + GUI_SUITES
+SLOWEST_JOURNEYS = ("gui_layers.py", "gui_project.py", "gui_positional.py", "gui_slope_normal.py", "gui_extras.py", "gui_masks.py", "gui_anchors.py", "gui_editor.py")
+EXCLUSIVE_JOURNEYS = ("blender_api.py", "gui_library.py", "gui_packs.py")
+JOURNEY_THREADS = 4
+JOURNEY_MEMORY = 4 * 2 ** 30
+JOURNEY_VIDEO_MEMORY = 2 * 2 ** 30
 SMOKE_COMMAND = [BLENDER_PATH, "--background", "--factory-startup", "--python-exit-code", "1", "--python", "tests/blender_smoke.py"]
 
 
-def run_cmd(cmd, cwd=str(ROOT), desc="", env=None):
-    if desc:
-        print(f"--> {desc}...")
+def execute(cmd, environment):
     t0 = time.time()
-    res = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, env=dict(child_environment(), **(env or {})))
-    dt = time.time() - t0
+    res = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True, env=environment)
     gui_test = any(Path(argument).name.startswith('gui_') for argument in cmd)
-    if res.returncode != 0 or (gui_test and 'Traceback' in res.stdout + res.stderr):
+    return res, time.time() - t0, res.returncode == 0 and not (gui_test and 'Traceback' in res.stdout + res.stderr)
+
+
+def report(res, dt, passed):
+    if not passed:
         print(f"FAILED in {dt:.2f}s:")
         print(res.stdout)
         print(res.stderr)
         return False
     print(f"    OK ({dt:.2f}s)")
     return True
+
+
+def run_cmd(cmd, desc="", env=None):
+    if desc:
+        print(f"--> {desc}...")
+    return report(*execute(cmd, dict(child_environment(), **(env or {}))))
 
 
 def do_quick_tests():
@@ -61,22 +76,100 @@ def journey_command(journey):
     return [BLENDER_PATH, *mode, "--factory-startup", "--python", "tools/journey_probe.py", "--python", f"tests/{journey}"]
 
 
+def available_memory():
+    if os.name != "nt":
+        return os.sysconf("SC_AVPHYS_PAGES") * os.sysconf("SC_PAGE_SIZE")
+
+    class MemoryStatus(ctypes.Structure):
+        _fields_ = [("length", ctypes.c_ulong), ("load", ctypes.c_ulong)] + [(name, ctypes.c_ulonglong) for name in (
+            "total", "available", "total_page", "available_page", "total_virtual", "available_virtual", "available_extended")]
+
+    status = MemoryStatus(length=ctypes.sizeof(MemoryStatus))
+    if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+        raise OSError("Cannot read the available memory")
+    return status.available
+
+
+def free_video_memory():
+    try:
+        query = subprocess.run(["nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits"], capture_output=True, text=True, check=True)
+        return min(int(line) for line in query.stdout.split()) * 2 ** 20
+    except (OSError, ValueError, subprocess.CalledProcessError):
+        return None
+
+
+def journey_limits(count):
+    limits = dict(journeys=count, processors=(os.cpu_count() or 1) // JOURNEY_THREADS, memory=available_memory() // JOURNEY_MEMORY)
+    video = free_video_memory()
+    if video is not None:
+        limits["video memory"] = video // JOURNEY_VIDEO_MEMORY
+    return limits
+
+
+def fresh_folder(parent):
+    number = 0
+    while True:
+        try:
+            (parent / str(number)).mkdir()
+            return parent / str(number)
+        except FileExistsError:
+            number += 1
+
+
+def run_journey(journey, run):
+    scratch = run / f"{JOURNEYS.index(journey):02d}"
+    scratch.mkdir()
+    log = run / f"{journey}.jsonl"
+    return execute(journey_command(journey), dict(child_environment(scratch), DEVIL_PAINTER_JOURNEY_LOG=str(log))) + (log,)
+
+
 def run_journeys(keep_going):
     print("\n=== RUNNING REAL-BLENDER JOURNEYS (EXPORTS HASHED) ===")
-    logs = prepare_scratch() / "journey-hashes"
-    logs.mkdir(exist_ok=True)
+    journeys = prepare_scratch() / "j"
+    journeys.mkdir(exist_ok=True)
+    run = fresh_folder(journeys)
+    shared = [journey for journey in sorted(JOURNEYS, key=slowest_first) if journey not in EXCLUSIVE_JOURNEYS]
+    limits = journey_limits(len(shared))
+    workers = max(1, min(limits.values()))
+    print(f"    {len(JOURNEYS)} journeys, each in its own scratch folder {run.relative_to(ROOT).as_posix()}/<journey number>: "
+          f"{', '.join(EXCLUSIVE_JOURNEYS)} alone, then {workers} at a time ({', '.join(f'{name} {limit}' for name, limit in limits.items())})")
     hashes = {}
     failed = []
-    for journey in JOURNEYS:
-        log = logs / f"{journey}.jsonl"
-        log.unlink(missing_ok=True)
-        passed = run_cmd(journey_command(journey), desc=f"Journey: {journey}", env={"DEVIL_PAINTER_JOURNEY_LOG": str(log)})
+
+    def finish(journey, res, dt, passed, log):
+        print(f"--> Journey: {journey} ({JOURNEYS.index(journey):02d})...")
         hashes[journey] = gate.read_log(log)
-        if not passed:
+        if not report(res, dt, passed):
             failed.append(journey)
-            if not keep_going:
-                break
-    return hashes, failed
+
+    for journey in EXCLUSIVE_JOURNEYS:
+        finish(journey, *run_journey(journey, run))
+        if failed and not keep_going:
+            return ordered(hashes), failed
+    stopped = threading.Event()
+
+    def unless_stopped(journey):
+        if stopped.is_set():
+            return None
+        outcome = run_journey(journey, run)
+        if not outcome[2] and not keep_going:
+            stopped.set()
+        return outcome
+
+    with ThreadPoolExecutor(workers) as pool:
+        running = {pool.submit(unless_stopped, journey): journey for journey in shared}
+        for done in as_completed(running):
+            if done.result() is not None:
+                finish(running[done], *done.result())
+    return ordered(hashes), [journey for journey in JOURNEYS if journey in failed]
+
+
+def slowest_first(journey):
+    return SLOWEST_JOURNEYS.index(journey) if journey in SLOWEST_JOURNEYS else len(SLOWEST_JOURNEYS)
+
+
+def ordered(hashes):
+    return {journey: hashes[journey] for journey in JOURNEYS if journey in hashes}
 
 
 def do_journeys(golden_mode, keep_going=False):
