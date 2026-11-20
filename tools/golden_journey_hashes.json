@@ -1985,6 +1985,28 @@
    "0bb6bef9d428fd3a5daae91ab62e2c015a487fdef69395ae111e938571f00621"
   ]
  ],
+ "gui_follow_path.py": [
+  [
+   "export_follow_path/Cube_Material_BaseColor.png",
+   "4cbcfb5a27dfbb32207b2d8a91e8d2ead585a2a44250c002a185d3d98ad4ecc7"
+  ],
+  [
+   "export_follow_path/Cube_Material_Roughness.png",
+   "930180c406c0d4a99d703ec8e61cee5456a40d979ef58512d460bae078c5c45f"
+  ],
+  [
+   "export_follow_path/Cube_Material_Metallic.png",
+   "f17af6dbbb62a595fbfcf68266cda9c3f1f426d72d79e9789318f71e9ef49c86"
+  ],
+  [
+   "export_follow_path/Cube_Material_Normal.png",
+   "0fa6dcb39a8ecbe28f6ae9a865f1399e261074391732eb0ae29cf95a4598d1a4"
+  ],
+  [
+   "export_follow_path/Cube_Material_Height.png",
+   "0bb6bef9d428fd3a5daae91ab62e2c015a487fdef69395ae111e938571f00621"
+  ]
+ ],
  "gui_texture_sampling.py": [
   [
    "sampling_export/Cube_Material_BaseColor.png",
