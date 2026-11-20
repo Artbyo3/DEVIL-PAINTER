@@ -10,7 +10,7 @@ from .brushes import world_size_text
 from pathlib import Path
 from .blending import BLEND_MODES, CHANNEL, CHANNELS, FOLDER_BLENDS, linear_to_srgb
 from .canvas import Layout, Rect
-from .document import (BAKE_ID_LABELS, DEPTH_LABELS, DYNAMICS, NORMAL_FORMATS, PROJECTORS, STROKE_METHODS, TEXTURE_SAMPLING, TRANSPARENCY, NORMAL_SPACES, PROJECTIONS, RESOLUTIONS, SHADERS, active_effect, active_layer, children, editing_mask, find_layer, isolated_uids,
+from .document import (BAKE_ANTIALIAS_LABELS, BAKE_ID_LABELS, DEPTH_LABELS, DYNAMICS, NORMAL_FORMATS, PROJECTORS, STROKE_METHODS, TEXTURE_SAMPLING, TRANSPARENCY, NORMAL_SPACES, PROJECTIONS, RESOLUTIONS, SHADERS, active_effect, active_layer, children, editing_mask, find_layer, isolated_uids,
                        linked_layer, set_channels, slot_value, uses_coordinates)
 from .effects import ANCHORED_KINDS, CONTENT_SOURCES, EFFECT_ICONS, EFFECT_KINDS, FILL_PROJECTIONS, LEVEL_COMPONENTS, MASK_BLEND_LABEL, LevelsView, effect_label
 from .filters import FILTER, FILTERS
@@ -1436,7 +1436,7 @@ def stencil_popover(layout, state, bounds, data):
 
 def bake_popover(layout, state, bounds, data):
     s, sources = layout.scale, state.bake_found
-    card = place_popover(bounds, state.popover.anchor, 340 * s, ((len(MESH_MAPS) + 10) * LINE_HEIGHT + 24) * s, s)
+    card = place_popover(bounds, state.popover.anchor, 340 * s, ((len(MESH_MAPS) + 11) * LINE_HEIGHT + 24) * s, s)
     x, w = card.x + 14 * s, card.w - 28 * s
     y = card.top - 34 * s
     layout.add('BAKE_TITLE', Rect(x, y, w, 22 * s), 'NOTE', label='Bake mesh maps')
@@ -1452,6 +1452,9 @@ def bake_popover(layout, state, bounds, data):
     y -= LINE_HEIGHT * s
     layout.add('BAKE_SAMPLES', Rect(x, y, w, 24 * s), 'SLIDER', label='Samples', value=data.bake_samples / 128, text=str(data.bake_samples),
                tip='More samples give smoother occlusion and thickness')
+    y -= LINE_HEIGHT * s
+    layout.add('BAKE_ANTIALIAS', Rect(x, y, w, 24 * s), 'DROPDOWN', label='Anti-aliasing', text=BAKE_ANTIALIAS_LABELS[data.bake_antialias],
+               tip='Bake at 2x or 4x the size and shrink it down for smooth edges on ID, curvature, and island borders. Slower')
     y -= LINE_HEIGHT * s
     layout.add('BAKE_MATCH', Rect(x, y, w, 24 * s), 'TOGGLE', label='Match high-poly and cage by name', active=data.bake_match,
                tip='Use meshes named like this one with _high and _cage, for example Crate_low, Crate_high, Crate_cage')

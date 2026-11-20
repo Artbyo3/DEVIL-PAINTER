@@ -17,6 +17,8 @@ SLOT_FIELDS = ('enabled', 'source', 'color', 'value', 'color_b', 'value_b', 'ble
 LAYER_KINDS = (('PAINT', 'Paint', ''), ('FILL', 'Fill', ''), ('FOLDER', 'Folder', ''), ('INSTANCE', 'Instance', ''))
 BAKE_IDS = (('ISLAND', 'UV islands', ''), ('MATERIAL', 'Materials', ''), ('OBJECT', 'Objects', ''), ('VERTEX', 'Vertex colors', ''))
 BAKE_ID_LABELS = {key: label for key, label, _ in BAKE_IDS}
+BAKE_ANTIALIAS = (('1', 'Off', ''), ('2', '2x', ''), ('4', '4x', ''))
+BAKE_ANTIALIAS_LABELS = {key: label for key, label, _ in BAKE_ANTIALIAS}
 TRANSPARENCY = (('AUTO', 'Automatic', ''), ('DITHERED', 'Order independent', ''), ('BLENDED', 'Blended', ''))
 DYNAMICS = (('NONE', 'None', ''), ('DRIPS', 'Drips', ''), ('SPLATTER', 'Splatter', ''), ('SPEED', 'Speed', ''))
 SIZE_SPACES = (('SCREEN', 'Screen', ''), ('WORLD', 'World', ''))
@@ -248,6 +250,7 @@ class DEVIL_PAINTER_PG_texture_set(bpy.types.PropertyGroup):
     bake_cage: bpy.props.PointerProperty(type=bpy.types.Object, poll=is_mesh)
     bake_extrusion: bpy.props.FloatProperty(default=.1, min=.005, max=.5)
     bake_id: bpy.props.EnumProperty(items=BAKE_IDS)
+    bake_antialias: bpy.props.EnumProperty(items=BAKE_ANTIALIAS)
     bake_auto: bpy.props.BoolProperty(default=False)
     bake_signature: bpy.props.StringProperty()
     cage_map: bpy.props.PointerProperty(type=bpy.types.Image)

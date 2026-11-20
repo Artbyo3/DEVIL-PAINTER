@@ -102,7 +102,12 @@ def uv_name(obj, project):
     return project.uv_map if project.uv_map in obj.data.uv_layers else obj.data.uv_layers.active.name
 
 
-def bake_tiles(obj, project, wanted, prepare, bake_type, margin, **options):
+def downsampled(pixels, scale):
+    height, width, depth = pixels.shape
+    return pixels.reshape(height // scale, scale, width // scale, scale, depth).mean(axis=(1, 3), dtype=numpy.float32)
+
+
+def bake_tiles(obj, project, wanted, prepare, bake_type, margin, scale=1, **options):
     mesh = obj.data
     name = uv_name(obj, project)
     face_tiles = tiles.face_tiles(mesh, name)
@@ -116,7 +121,7 @@ def bake_tiles(obj, project, wanted, prepare, bake_type, margin, **options):
                 tree = data.material.node_tree
                 if index in wanted and number in tiles.numbers(data):
                     prepare(data)
-                    image = target_image(f'DP Bake {data.name} {number}', data.resolution)
+                    image = target_image(f'DP Bake {data.name} {number}', data.resolution * scale)
                     targets[index] = image
                 else:
                     emission_tree(tree, (0.0, 0.0, 0.0, 1.0))
@@ -128,12 +133,12 @@ def bake_tiles(obj, project, wanted, prepare, bake_type, margin, **options):
                 tree.nodes.active = node
             layer = tiles.shifted_uv(mesh, name, face_tiles == number, number)
             try:
-                bpy.ops.object.bake(type=bake_type, margin=margin, use_clear=True, target='IMAGE_TEXTURES', uv_layer=layer, **options)
+                bpy.ops.object.bake(type=bake_type, margin=margin * scale, use_clear=True, target='IMAGE_TEXTURES', uv_layer=layer, **options)
             finally:
                 mesh.uv_layers.remove(mesh.uv_layers[layer])
                 mesh.uv_layers.active = mesh.uv_layers[name]
             for index, image in targets.items():
-                results[(index, number)] = read_pixels(image)
+                results[(index, number)] = downsampled(read_pixels(image), scale)
             for listener in TILE_BAKED:
                 listener(number)
         finally:
@@ -148,11 +153,11 @@ def resync(project):
         compositing.sync(data)
 
 
-def bake_pass(context, obj, project, wanted, prepare, bake_type='EMIT', samples=BAKE_SAMPLES, extra=(), margin=BAKE_MARGIN, **options):
+def bake_pass(context, obj, project, wanted, prepare, bake_type='EMIT', samples=BAKE_SAMPLES, extra=(), margin=BAKE_MARGIN, scale=1, **options):
     refresh_below(context, obj, project)
     with bake_scene(context, obj, samples, extra):
         try:
-            return bake_tiles(obj, project, wanted, prepare, bake_type, margin, **options)
+            return bake_tiles(obj, project, wanted, prepare, bake_type, margin, scale, **options)
         finally:
             resync(project)
 
