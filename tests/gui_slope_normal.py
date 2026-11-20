@@ -13,7 +13,7 @@ sys.path.insert(0, str(ROOT))
 import devil_painter
 from devil_painter import caches, compositing, editor, library, shelf
 from devil_painter.document import active_effect, active_layer, find_layer, set_channels
-from devil_painter.filters import SLOPE_REFERENCE
+from devil_painter.filters import NORMAL_DEPTH, SLOPE_REFERENCE
 from tools.workspace import prepare_scratch
 from tests.gui_harness import settle, wait_for
 
@@ -138,6 +138,21 @@ def slide(window, region, key, fx):
     yield from settle()
 
 
+def height_strength(window, region, middle, edge):
+    click(window, region, 'PROJECT')
+    yield from settle()
+    x, y = spot(region, 'BUMP_STRENGTH')
+    rect = control('BUMP_STRENGTH').rect
+    move(window, x, y)
+    window.event_simulate(type='LEFTMOUSE', value='PRESS', x=int(x), y=int(y))
+    target = x + (rect.w if edge else -rect.w)
+    move(window, target, y)
+    window.event_simulate(type='LEFTMOUSE', value='RELEASE', x=int(target), y=int(y))
+    yield from settle()
+    press(window, 'ESC', *middle)
+    yield from settle()
+
+
 def stroke(window, region, fx, fy):
     x, y = region.x + region.width * fx, region.y + region.height * fy
     move(window, x, y)
@@ -205,6 +220,13 @@ def gradient(height):
 def steepness(height):
     across, up = gradient(height)
     return numpy.hypot(across, up) * height.shape[0] / 2 / SLOPE_REFERENCE
+
+
+def height_tilted(height, strength):
+    across, up = gradient(height)
+    gain = -strength * NORMAL_DEPTH * height.shape[0] / 2
+    tilt = numpy.dstack((across * gain, up * gain, numpy.ones_like(height)))
+    return tilt / numpy.linalg.norm(tilt, axis=-1, keepdims=True) * .5 + .5
 
 
 def interior(obj, side, margin=FACE_MARGIN):
@@ -357,9 +379,10 @@ def journey():
     check(flat_change < .002 and steep_change > .03,
           f'Slope blur keeps flat areas sharp and blurs steep areas ({flat_change:.4f} flat, {steep_change:.4f} steep)')
     height_moved = change(sloped['Height'], cached['Height'])
-    normal_gap = float(change(sloped['Normal'], cached['Normal'])[inside].max())
+    normal_gap = float(change(sloped['Normal'], height_tilted(sloped['Height'][..., 0], data.bump_strength))[inside].max())
     check(normal_gap < .01 and float(height_moved[flat_zone].mean()) < .002,
-          f'Slope blur leaves the uniform normal untouched and keeps flat height as it was ({normal_gap:.4f} normal, {float(height_moved[flat_zone].mean()):.4f} flat height)')
+          f'Slope blur leaves the uniform painted normal untouched, so the exported normal is only the blurred height folded in, '
+          f'and keeps flat height as it was ({normal_gap:.4f} normal, {float(height_moved[flat_zone].mean()):.4f} flat height)')
     yield from slide(window, region, 'FX_in_low', .5)
     yield from refreshed()
     narrowed = yield from exported()
@@ -376,6 +399,8 @@ def journey():
     yield from menu(window, region, 'FX_FILTER', 'SET_FXFILTER.HEIGHT_NORMAL')
     check(has('FX_amount') and control('FX_amount').label == 'Strength', 'Height to normal shows a Strength slider')
     yield from slide(window, region, 'FX_amount', .5)
+    yield from height_strength(window, region, middle, False)
+    check(data.bump_strength == 0.0, 'the Height strength slider turns off the height folded into the exported normal')
     yield from refreshed()
     shaded = yield from exported()
     check(numpy.array_equal(shaded['Height'], sloped['Height']) and numpy.array_equal(shaded['BaseColor'], sloped['BaseColor']),
@@ -401,6 +426,10 @@ def journey():
     strong_normal = stronger['Normal'] * 2 - 1
     stronger_tilt = float(numpy.hypot(strong_normal[..., 0], strong_normal[..., 1])[tilted].mean())
     check(stronger_tilt > tilt + .05, f'raising Strength tilts the normal further ({stronger_tilt:.3f} against {tilt:.3f})')
+    yield from height_strength(window, region, middle, True)
+    check(data.bump_strength == 1.0, 'the Height strength slider goes back to full')
+    yield from refreshed()
+    stronger = yield from exported()
     click(window, region, 'PROJECT')
     yield from settle()
     click(window, region, 'PNF.DIRECTX')

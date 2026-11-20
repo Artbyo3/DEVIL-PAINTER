@@ -18,7 +18,7 @@ from devil_painter import editor, exporting, library, projects, tiles
 from devil_painter.actions import owned_images
 from devil_painter.document import texture_set
 from tools.workspace import prepare_scratch
-from tests.gui_harness import settle
+from tests.gui_harness import bake_landed, settle
 
 TIMEOUT = 300
 STARTED = time.time()
@@ -292,6 +292,7 @@ def journey():
     yield from settle()
     click(window, region, 'BAKE_RUN')
     yield from settle()
+    yield from bake_landed()
     ao = body.maps['ao'].image
     low_cover = (pixels(ao)[:, 3] > .5).mean()
     high_cover = (pixels(tiles.variant(body, ao, 1002))[:, 3] > .5).mean()
