@@ -74,7 +74,7 @@ Each texture set's **Shader** decides which channels drive the viewport material
 
 Every channel exports its own painted values whichever shader is chosen.
 
-Built-in export templates are **Standard PBR**, **glTF**, **Unreal Engine**, **Unity HDRP**, **Unity URP**, **USD Preview Surface**, and **Linear EXR** (or copy any template to customize packed outputs). Supported formats are **PNG** (`8`/`16`-bit), **TGA** (`8`-bit), **TIFF** (`8`/`16`-bit), and **EXR** (`16`/`32`-bit). Filename tokens: `{mesh}`, `{set}`, `{output}`, `{udim}`, `{material}`, `{resolution}`.
+Built-in export templates are **Standard PBR**, **glTF**, **Unreal Engine**, **Unity HDRP**, **Unity URP**, **USD Preview Surface**, **Linear EXR**, and **Spec-Gloss from Metal-Rough** (or copy any template to customize packed outputs). **Spec-Gloss from Metal-Rough** converts Base Color, Metallic, and Roughness at export time: Diffuse = Base Color × (1 − Metallic), Specular = 0.04 × (1 − Metallic) + Base Color × Metallic, Glossiness = 1 − Roughness. The same converted sources (**Converted Diffuse**, **Converted Specular**, **Converted Glossiness**) are available in custom templates; painted Diffuse, Specular, and Glossiness channels export unchanged. Supported formats are **PNG** (`8`/`16`-bit), **TGA** (`8`-bit), **TIFF** (`8`/`16`-bit), and **EXR** (`16`/`32`-bit). Filename tokens: `{mesh}`, `{set}`, `{output}`, `{udim}`, `{material}`, `{resolution}`.
 
 ## Blend Modes
 

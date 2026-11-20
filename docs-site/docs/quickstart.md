@@ -40,7 +40,7 @@ Click **2D view** in the top workspace bar to dock Blender's Image Editor in Pai
 ## Step 7: Export Textures
 
 1. Click **Export textures** in the top workspace bar.
-2. Pick an **Export template** (**Standard PBR**, **glTF**, **Unreal Engine**, **Unity HDRP**, **Unity URP**, **USD Preview Surface**, **Linear EXR**, or a custom copy), choose which texture sets to include, and adjust **Depth**, **Size**, **Padding**, and filename **Pattern** tokens.
+2. Pick an **Export template** (**Standard PBR**, **glTF**, **Unreal Engine**, **Unity HDRP**, **Unity URP**, **USD Preview Surface**, **Linear EXR**, **Spec-Gloss from Metal-Rough**, or a custom copy), choose which texture sets to include, and adjust **Depth**, **Size**, **Padding**, and filename **Pattern** tokens.
 3. Type an output folder or click **Browse**, then click **Export** (or **Export & send** to open the files in another app).
 
 ## Step 8: Save Your Work
