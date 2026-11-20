@@ -1,13 +1,16 @@
 from dataclasses import dataclass
+import math
 import bpy
 import numpy
+from mathutils.bvhtree import BVHTree
 from . import caches, compositing
 from .document import active_tile, find_layer, set_channels, slot_value
-from .tiles import blank, create, variant
+from .tiles import FIRST_TILE, blank, create, face_slots, variant
 
 HISTORY_LIMIT = 80
 SMEAR_STRENGTH = .85
 TRACE_STEP = .5
+BLEED_TEXELS = 2.0
 MERGE_TOOLS = {'PAINT', 'FILL', 'ERASE', 'BLUR', 'SMEAR', 'CLONE'}
 _history = []
 _future = []
@@ -185,6 +188,61 @@ def brush_values(slot, added, gesture):
     return numpy.broadcast_to(rgb(slot_value(slot)), added.shape + (3,))
 
 
+def barycentric(points, first, second, third):
+    edge, other, relative = second - first, third - first, points - first
+    d00, d01, d11 = (edge * edge).sum(-1), (edge * other).sum(-1), (other * other).sum(-1)
+    d20, d21 = (relative * edge).sum(-1), (relative * other).sum(-1)
+    denominator = d00 * d11 - d01 * d01
+    v = (d11 * d20 - d01 * d21) / denominator
+    w = (d00 * d21 - d01 * d20) / denominator
+    return numpy.stack((1 - v - w, v, w), axis=-1)
+
+
+def surface_triangles(obj, data):
+    mesh, project = obj.data, obj.devil_painter
+    mesh.calc_loop_triangles()
+    count = len(mesh.loop_triangles)
+    corners, loops, faces = numpy.empty(count * 3, dtype=numpy.int64), numpy.empty(count * 3, dtype=numpy.int64), numpy.empty(count, dtype=numpy.int64)
+    mesh.loop_triangles.foreach_get('vertices', corners)
+    mesh.loop_triangles.foreach_get('loops', loops)
+    mesh.loop_triangles.foreach_get('polygon_index', faces)
+    corners, loops = corners.reshape(-1, 3), loops.reshape(-1, 3)
+    if len(project.sets) > 1:
+        kept = face_slots(mesh)[faces] == data.slot
+        corners, loops = corners[kept], loops[kept]
+    coordinates = numpy.empty(len(mesh.vertices) * 3, dtype=numpy.float64)
+    mesh.vertices.foreach_get('co', coordinates)
+    layer = mesh.uv_layers.get(project.uv_map) or mesh.uv_layers.active
+    uvs = numpy.empty(len(layer.data) * 2, dtype=numpy.float64)
+    layer.data.foreach_get('uv', uvs)
+    tile = active_tile(data) - FIRST_TILE
+    texels = (uvs.reshape(-1, 2)[loops] - (tile % 10, tile // 10)) * data.resolution
+    return coordinates.reshape(-1, 3), corners, texels
+
+
+def nearest(tree, queries, triangles, reach):
+    found = [tree.find_nearest(query, reach) for query in queries.tolist()]
+    indices = numpy.array([-1 if index is None else index for _, _, index, _ in found], dtype=numpy.int64)
+    spots = numpy.array([(0.0, 0.0, 0.0) if index is None else tuple(spot) for spot, _, index, _ in found], dtype=numpy.float64).reshape(-1, 3)
+    weights = barycentric(spots, *triangles[indices].transpose(1, 0, 2))
+    return (indices >= 0) & numpy.isfinite(weights).all(1), indices, weights
+
+
+def clone_sources(obj, data, covered, offset):
+    vertices, corners, texels = surface_triangles(obj, data)
+    flat = numpy.pad(texels, ((0, 0), (0, 0), (0, 1)))
+    shapes, solids = flat.reshape(-1, 3).tolist(), numpy.arange(len(flat) * 3).reshape(-1, 3).tolist()
+    rows, columns = numpy.nonzero(covered)
+    centers = numpy.stack((columns + .5, rows + .5, numpy.zeros(len(rows))), axis=-1)
+    found, indices, weights = nearest(BVHTree.FromPolygons(shapes, solids), centers, flat, BLEED_TEXELS)
+    located = numpy.einsum('ij,ijk->ik', weights[found], vertices[corners[indices[found]]]) + offset
+    rows, columns = rows[found], columns[found]
+    found, indices, weights = nearest(BVHTree.FromPolygons(vertices.tolist(), corners.tolist()), located, vertices[corners], math.inf)
+    picked = numpy.floor(numpy.einsum('ij,ijk->ik', weights[found], texels[indices[found]])).astype(numpy.int64)
+    inside = ((picked >= 0) & (picked < data.resolution)).all(1)
+    return rows[found][inside], columns[found][inside], picked[inside, 1], picked[inside, 0]
+
+
 def merge_targets(data, layer, tile, tool):
     targets = []
     if tool != 'ERASE' or data.brush_slots['base_color'].enabled:
@@ -196,7 +254,7 @@ def merge_targets(data, layer, tile, tool):
     return targets
 
 
-def apply_tool(data, tool, key, pixels, stroke, added, gesture):
+def apply_tool(data, tool, key, pixels, stroke, added, gesture, sources=None):
     if tool in {'BLUR', 'SMEAR'} and gesture is None:
         return False
     if tool == 'ERASE':
@@ -206,11 +264,11 @@ def apply_tool(data, tool, key, pixels, stroke, added, gesture):
     elif tool == 'SMEAR':
         smear(pixels, gesture, added)
     elif tool == 'CLONE':
-        if gesture is None or gesture.source is None or not gesture.path:
+        if sources is None:
             return False
-        dx = int(round(gesture.path[0][0] - gesture.source[0]))
-        dy = int(round(gesture.path[0][1] - gesture.source[1]))
-        pixels += added[..., None] * (shifted(pixels, dx, dy) - pixels)
+        rows, columns, source_rows, source_columns = sources
+        copied = pixels[source_rows, source_columns]
+        pixels[rows, columns] += added[rows, columns, None] * (copied - pixels[rows, columns])
     else:
         alpha = pixels[..., 3:]
         total = alpha + added[..., None] * (1 - alpha) if key == 'base_color' else numpy.maximum(alpha, added[..., None])
@@ -245,13 +303,15 @@ def merge(obj, data, gesture=None, tool=None):
     reach = 0 if tool in {'PAINT', 'FILL', 'ERASE'} else int(gesture.radius * 2 + 2) if gesture is not None else 0
     height, width = coverage.shape
     region = (slice(max(rows[0] - reach, 0), min(rows[-1] + 1 + reach, height)), slice(max(columns[0] - reach, 0), min(columns[-1] + 1 + reach, width)))
+    cloning = tool == 'CLONE' and gesture is not None and gesture.source is not None and gesture.path
+    sources = clone_sources(obj, data, coverage > 0, gesture.source) if cloning else None
     before, after = [], []
     for key, image in merge_targets(data, layer, active_tile(data), tool):
         pixels = read(image)
         if pixels.shape != stroke.shape:
             continue
         crop = pixels[region].copy()
-        if not apply_tool(data, tool, key, pixels, stroke, coverage, gesture):
+        if not apply_tool(data, tool, key, pixels, stroke, coverage, gesture, sources):
             continue
         before.append((image.name, region, crop))
         after.append((image.name, region, pixels[region].copy()))
