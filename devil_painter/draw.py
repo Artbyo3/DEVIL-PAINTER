@@ -500,7 +500,7 @@ class Renderer:
 
 
 DRAWERS = {'TOOL': Renderer.tool, 'ICON': Renderer.icon_button, 'CHIP': Renderer.chip, 'PRIMARY': Renderer.primary,
-           'SLIDER': Renderer.slider, 'SWATCH': Renderer.swatch, 'TOGGLE': Renderer.toggle, 'ROW': Renderer.row, 'NOTE': Renderer.note,
+           'SLIDER': Renderer.slider, 'PROGRESS': Renderer.slider, 'SWATCH': Renderer.swatch, 'TOGGLE': Renderer.toggle, 'ROW': Renderer.row, 'NOTE': Renderer.note,
            'HEADER': Renderer.header, 'DROPDOWN': Renderer.dropdown, 'FIELD': Renderer.field, 'MENUITEM': Renderer.menu_item,
            'SV': Renderer.saturation_value, 'HUE': Renderer.hue, 'SCROLLBAR': Renderer.scrollbar, 'THUMB': Renderer.thumb,
            'GRIP': Renderer.grip, 'TILE': Renderer.tile, 'SOURCE': Renderer.source, 'GIZMO': Renderer.gizmo,

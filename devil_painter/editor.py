@@ -8,7 +8,7 @@ import numpy
 import math
 import gpu
 from gpu_extras.batch import batch_for_shader
-from . import actions, autosave, baking, bridge, brushes, caches, compositing, dynamics, packs, tiles, exporting, library, meshmaps, painting, polyfill, post, projection, vectors, projects, sets, shelf, shortcuts, smart, strokes, thumbnails
+from . import actions, autosave, bakejob, baking, bridge, brushes, caches, compositing, dynamics, packs, tiles, exporting, library, meshmaps, painting, polyfill, post, projection, vectors, projects, sets, shelf, shortcuts, smart, strokes, thumbnails
 from .blending import BLEND_MODES, CHANNEL, FOLDER_BLENDS, linear_to_srgb, srgb_to_linear
 from .ui_system import ACCENT
 from .canvas import Rect
@@ -242,12 +242,13 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         self.state.gizmo = self.gizmo_geometry(obj, data, space.region_3d)
         if data is not None and self.state.popover is not None and self.state.popover.kind == 'BAKE':
             self.state.bake_found = meshmaps.bake_sources(bpy.context, obj, data)
+        self.state.baking = bakejob.status()
         return painter_layout(self.bounds, scale, self.state, data, name, painting.active_tool(self.scene), brush, directory, self.setup(obj, data),
                               viewport)
 
     def auto_bake(self, context):
         obj, data = self.painted()
-        if data is None or not data.bake_auto or obj.mode != 'TEXTURE_PAINT' or self.stroke_pending:
+        if data is None or not data.bake_auto or obj.mode != 'TEXTURE_PAINT' or self.stroke_pending or bakejob.running():
             return
         current = meshmaps.signature(context, obj, data)
         if current == data.bake_signature:
@@ -260,6 +261,16 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             if message:
                 self.message = message
                 self._area.tag_redraw()
+
+    def poll_bake(self, context):
+        finished = bakejob.poll()
+        if finished is not None:
+            job, _ = finished
+            self.message = actions.land_bake(context, *finished)
+            if not job.rebake and self.state.popover is not None and self.state.popover.kind == 'BAKE':
+                self.state.popover = None
+        if finished is not None or bakejob.running():
+            self._area.tag_redraw()
 
     def refresh_below(self, context):
         obj, data = self.painted()
@@ -481,6 +492,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         if self.stencil_pending and not self.stencil_moving():
             self.finish_stencil(context)
         if event.type == 'TIMER':
+            self.poll_bake(context)
             self.auto_bake(context)
             self.refresh_below(context)
             for note in packs.poll() + [autosave.failure_notice()]:
@@ -1863,8 +1875,11 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.message = actions.set_bake(context, obj, data, 'bake_auto', not data.bake_auto,
                                             'Baked maps rebake when bake settings or meshes change.' if not data.bake_auto else 'Automatic rebaking is off.')
         elif key == 'BAKE_RUN':
-            self.state.popover = None
-            self.message = actions.bake_mesh_maps(context, obj, data, [item.key for item in MESH_MAPS if item.key in self.state.bake_keys])
+            self.message = actions.start_bake(context, obj, data, [item.key for item in MESH_MAPS if item.key in self.state.bake_keys])
+            if not bakejob.running():
+                self.state.popover = None
+        elif key == 'BAKE_CANCEL':
+            self.message = actions.cancel_bake()
         elif key.startswith('MAP.'):
             self.message = actions.set_solo(context, obj, data, 'map:' + key.removeprefix('MAP.'))
         elif key == 'BRUSH_STROKE':
@@ -2441,6 +2456,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         if self._closed:
             return
         self._closed = True
+        bakejob.cancel()
         window = found_window(self._window_address)
         space = None if window is None else found_space(window, self._space_address)
         if self.engine_before:

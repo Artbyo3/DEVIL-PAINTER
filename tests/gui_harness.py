@@ -1,6 +1,6 @@
 import time
 import bpy
-from devil_painter import editor
+from devil_painter import bakejob, editor
 
 SENTINEL = 'F19'
 POLL = 0.02
@@ -108,3 +108,7 @@ def settle(window=None):
 def until(condition, message, timeout=WAIT_TIMEOUT):
     yield from wait_for(condition, message, timeout)
     yield from settle()
+
+
+def bake_landed():
+    yield from until(lambda: not bakejob.running(), 'the background bake to land')

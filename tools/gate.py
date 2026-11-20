@@ -5,7 +5,7 @@ from tools.workspace import ROOT
 
 GOLDEN = ROOT / 'tools' / 'golden_journey_hashes.json'
 CORE_FILES = frozenset(f'devil_painter/{name}.py' for name in (
-    'baking', 'blending', 'caches', 'compositing', 'document', 'effects', 'exporting', 'filters', 'masks',
+    'bakejob', 'baking', 'blending', 'caches', 'compositing', 'document', 'effects', 'exporting', 'filters', 'masks',
     'meshmaps', 'nodes', 'polyfill', 'procedural', 'projection', 'sets', 'strokes', 'tiles',
 ))
 LIGHT_PATTERNS = (

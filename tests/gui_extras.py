@@ -16,7 +16,7 @@ import devil_painter
 from devil_painter import autosave, bridge, editor, library
 from devil_painter.document import active_layer, find_layer
 from tools.workspace import prepare_scratch
-from tests.gui_harness import settle, until
+from tests.gui_harness import bake_landed, settle, until
 
 TIMEOUT = 600
 STARTED = time.time()
@@ -433,6 +433,7 @@ def journey():
     yield from settle()
     click(window, region, 'BAKE_RUN')
     yield from settle()
+    yield from bake_landed()
     baseline = image_pixels(data.maps['normal'].image).copy()
     height_before = image_pixels(data.maps['height'].image).copy()
     check(abs(height_before[spot[front]][0] - .5) > .02, 'the height bake finds the high-poly in front of the face')
@@ -451,6 +452,7 @@ def journey():
     check(data.bake_paint == '', 'Paint cage turns off again')
     click(window, region, 'BAKE_RUN')
     yield from settle()
+    yield from bake_landed()
     height_after = image_pixels(data.maps['height'].image)
     check(abs(height_after[spot[front]][0] - .5) < .01 and abs(height_after[spot[right]][0] - height_before[spot[right]][0]) < .02,
           'the painted cage stops rays on that face and leaves the rest of the bake alone')
@@ -467,6 +469,7 @@ def journey():
     yield from card_click(window, region, 'BAKE', 'BAKE_PAINT.SKEW', 'BAKE')
     click(window, region, 'BAKE_RUN')
     yield from settle()
+    yield from bake_landed()
     skewed = image_pixels(data.maps['normal'].image)
     unpainted = skewed[..., 3] > .5
     front_mask = (image_pixels(data.skew_map)[..., 0] > .5) & unpainted & (baseline[..., 3] > .5)

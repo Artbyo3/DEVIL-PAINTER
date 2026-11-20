@@ -50,6 +50,7 @@ class WorkspaceState:
     geo_pick: str = ''
     bake_keys: set = field(default_factory=lambda: {'ao', 'curvature', 'thickness', 'position', 'world_normal', 'id'})
     bake_found: object = None
+    baking: tuple = None
     poly_mode: str = ''
     gesture: list = None
     gizmo: tuple = ()

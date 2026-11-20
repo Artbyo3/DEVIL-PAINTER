@@ -206,6 +206,10 @@ high-poly source or rounded edges from the mesh itself), height (from a
 high-poly source), and UV border distance with Cycles. It supports high-poly
 and cage objects, name matching, ray distance, samples, and automatic
 rebaking. Baked maps show as thumbnails and can be viewed on the model.
+Bakes run in a background Blender process from a snapshot of the file, so the
+workspace stays usable: the bake card and the Bake maps chip show which map is
+baking and how far the bake has come, and Cancel stops it and leaves the mesh
+maps as they were. The finished maps land together when the bake completes.
 
 ### Compositing, preview, and export
 

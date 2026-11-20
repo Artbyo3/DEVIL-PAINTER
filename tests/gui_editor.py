@@ -18,7 +18,7 @@ from devil_painter.compositing import SIGNATURE_KEY, socket
 from devil_painter.document import active_effect, texture_set
 from devil_painter.ui_system import SURFACE_FLOATING
 from tools.workspace import prepare_scratch
-from tests.gui_harness import settle, until
+from tests.gui_harness import bake_landed, settle, until
 
 TIMEOUT = 180
 STARTED = time.time()
@@ -806,6 +806,7 @@ def journey():
     check(data.bake_samples <= 6, 'the samples slider sets the bake quality')
     click(window, region, 'BAKE_RUN')
     yield from settle()
+    yield from bake_landed()
     check(all(key in data.maps and data.maps[key].image is not None for key in ('ao', 'curvature', 'thickness', 'position', 'world_normal', 'id'))
           and 'normal' not in data.maps, 'Bake writes the selected mesh maps')
     check(cube.mode == 'TEXTURE_PAINT' and bpy.context.scene.render.engine != 'CYCLES', 'baking returns to texture paint mode and the render engine')
@@ -853,6 +854,7 @@ def journey():
     yield from settle()
     click(window, region, 'BAKE_RUN')
     yield from settle()
+    yield from bake_landed()
     tangent = map_pixels('normal')
     covered = tangent[tangent[:, 3] > .5]
     check(data.bake_source == high and len(covered) and numpy.median(covered[:, 2]) > .8 and covered[:, 0].std() > .01,

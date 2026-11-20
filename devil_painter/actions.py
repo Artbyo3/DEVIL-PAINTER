@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 import bpy
 import numpy
-from . import baking, bridge, brushes, compositing, exporting, library, meshmaps, painting, projects, sets, smart, strokes, tiles
+from . import bakejob, baking, bridge, brushes, compositing, exporting, library, meshmaps, painting, projects, sets, smart, strokes, tiles
 from .blending import linear_to_srgb
 from .effects import EFFECT_LABEL, copy_effect, find_effect, level_target, mask_effects
 from .masks import GENERATOR, GENERATOR_FIELDS
@@ -921,21 +921,54 @@ def clear_bake_map(context, obj, data, kind):
     return refresh(context, obj, data, f'Removed the painted {kind.lower()} map.')
 
 
+def finish_bake(context, obj, data, baked, failure, signature):
+    painting.enter_paint_mode(context, obj)
+    sets.mask_faces(obj, obj.devil_painter)
+    data.bake_signature = signature
+    if failure:
+        return 'Bake failed. ' + failure
+    if not baked:
+        return 'Nothing to bake. Height needs a high-poly source.'
+    return refresh(context, obj, data, f'Baked {len(baked)} mesh maps.')
+
+
 def bake_mesh_maps(context, obj, data, keys):
     project = obj.devil_painter
     failure = ''
     try:
         baked = meshmaps.bake_maps(context, obj, project, list(range(len(project.sets))), keys, data)
     except RuntimeError as error:
-        baked, failure = [], 'Bake failed. ' + str(error).strip()
-    painting.enter_paint_mode(context, obj)
-    sets.mask_faces(obj, project)
-    data.bake_signature = meshmaps.signature(context, obj, data)
-    if failure:
-        return failure
-    if not baked:
-        return 'Nothing to bake. Height needs a high-poly source.'
-    return refresh(context, obj, data, f'Baked {len(baked)} mesh maps.')
+        baked, failure = [], str(error).strip()
+    return finish_bake(context, obj, data, baked, failure, meshmaps.signature(context, obj, data))
+
+
+def start_bake(context, obj, data, keys, rebake=False):
+    keys = meshmaps.bakeable(context, obj, data, keys)
+    if not keys:
+        return finish_bake(context, obj, data, [], '', meshmaps.signature(context, obj, data))
+    try:
+        bakejob.start(context, obj, data, keys, rebake)
+    except (OSError, RuntimeError) as error:
+        return finish_bake(context, obj, data, [], str(error).strip(), meshmaps.signature(context, obj, data))
+    return f'Baking {len(keys)} mesh maps in the background.'
+
+
+def land_bake(context, job, outcome):
+    try:
+        obj = bpy.data.objects.get(job.object_name)
+        if obj is None or obj.type != 'MESH' or bakejob.set_layout(obj.devil_painter) != job.layout:
+            return 'Bake discarded because the mesh or its texture sets changed while it ran. Bake again.'
+        project = obj.devil_painter
+        for key, entries in outcome['baked']:
+            meshmaps.store_maps(obj, project, key, bakejob.results(job, key, entries))
+        message = finish_bake(context, obj, project.sets[job.set_index], [key for key, _ in outcome['baked']], outcome['error'], job.signature)
+        return 'Rebaked: ' + message if job.rebake else message
+    finally:
+        bakejob.remove(job)
+
+
+def cancel_bake():
+    return 'Bake canceled. The mesh maps are unchanged.' if bakejob.cancel() else 'No bake is running.'
 
 
 def rebake(context, obj, data):
@@ -943,7 +976,7 @@ def rebake(context, obj, data):
     if not keys:
         data.bake_signature = meshmaps.signature(context, obj, data)
         return None
-    return 'Rebaked: ' + bake_mesh_maps(context, obj, data, keys)
+    return start_bake(context, obj, data, keys, rebake=True)
 
 
 def set_bake(context, obj, data, name, value, message):

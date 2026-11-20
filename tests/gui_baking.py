@@ -11,10 +11,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(ROOT))
 import devil_painter
-from devil_painter import editor
+from devil_painter import bakejob, editor
 from devil_painter.meshmaps import id_color
 from tools.workspace import prepare_scratch
-from tests.gui_harness import settle, until
+from tests.gui_harness import bake_landed, settle, until
 
 TIMEOUT = 600
 STARTED = time.time()
@@ -134,6 +134,7 @@ def bake(window, region):
     yield from open_card(window, region)
     click(window, region, 'BAKE_RUN')
     yield from settle()
+    yield from bake_landed()
 
 
 def journey():
@@ -167,6 +168,16 @@ def journey():
     press(window, 'LEFTMOUSE', region.x + rect.x + rect.w * .03, region.y + rect.y + rect.h / 2)
     yield from settle()
     check(data.bake_samples <= 6, 'the samples slider lowers the bake quality')
+
+    yield from open_card(window, region)
+    click(window, region, 'BAKE_RUN')
+    yield from settle()
+    check(bakejob.running() and has('BAKE_PROGRESS') and has('BAKE_CANCEL') and not has('BAKE_RUN') and control('BAKE').label.startswith('Baking'),
+          'the bake runs in the background with progress and Cancel in the bake card')
+    click(window, region, 'BAKE_CANCEL')
+    yield from settle()
+    check(not bakejob.running() and not any(item.image is not None for item in data.maps) and editor._active.message.startswith('Bake canceled')
+          and has('BAKE_RUN'), 'Cancel stops the bake and leaves no mesh maps behind')
 
     yield from toggle_maps(window, region, {'normal', 'height'})
     yield from bake(window, region)
