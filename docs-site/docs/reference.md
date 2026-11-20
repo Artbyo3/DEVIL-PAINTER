@@ -46,7 +46,7 @@
 | **Opacity** | `Opacity` | Non-Color | No |
 | **Ambient Occlusion** | `AmbientOcclusion` | Non-Color | No |
 | **Flow map** | `FlowMap` | Non-Color | No (export only) |
-| **User 1** – **User 4** | `User1` – `User4` | Non-Color | No (export only) |
+| **User 1** – **User 8** | `User1` – `User8` | Non-Color | No (export only) |
 
 Built-in export templates are **Standard PBR**, **glTF**, **Unreal Engine**, **Unity HDRP**, **Unity URP**, **USD Preview Surface**, and **Linear EXR** (or copy any template to customize packed outputs). Supported formats are **PNG** (`8`/`16`-bit), **TGA** (`8`-bit), **TIFF** (`8`/`16`-bit), and **EXR** (`16`/`32`-bit). Filename tokens: `{mesh}`, `{set}`, `{output}`, `{udim}`, `{material}`, `{resolution}`.
 

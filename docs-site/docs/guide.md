@@ -16,12 +16,12 @@ The workspace surrounds the 3D Viewport stage. Every section and panel can be dr
 
 A project creates one texture set per material slot on the mesh, each with its own layer stack, resolution (`1024`, `2048`, or `4096` px), visibility toggle, and optional **UDIM** tiles. Clicking faces in the 3D Viewport switches to that texture set. Use **Project** in the workspace bar to set **Normal map** format (**OpenGL** / **DirectX**), **Tangent mode**, **Real-world scale**, per-set **Shader** (**Principled PBR** / **Unlit**) and **Transparency**, **Autosave**, **Strokes cross UV tiles**, mesh **Reimport**, and **Shortcuts**.
 
-Use **Channels** in the workspace bar to enable or disable any of the **13** channels (with **Apply to every texture set** to update all sets at once):
+Use **Channels** in the workspace bar to enable or disable any of the **17** channels (with **Apply to every texture set** to update all sets at once):
 
 - **Base Color** (sRGB)
 - **Roughness**, **Metallic**, **Normal**, **Height**, **Opacity**, and **Ambient Occlusion** (Non-Color)
 - **Emission** (sRGB)
-- **Flow map** and **User 1–4** (Non-Color, export only)
+- **Flow map** and **User 1–8** (Non-Color, export only)
 
 Use the **View** menu to switch between the full shaded **Material**, any enabled solo channel, or any baked mesh map.
 
