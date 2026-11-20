@@ -8,7 +8,7 @@ Everything needed for painting, baking, and exporting works offline. If you want
 
 ## Install from GitHub Release ZIP
 
-1. Download `devil_painter-0.3.0.zip` (or the latest `devil_painter-*.zip`) from the [GitHub releases page](https://github.com/Artbyo3/DEVIL-PAINTER/releases).
+1. Download `devil_painter-0.3.0.zip` (or the latest `devil_painter-*.zip`) from the [GitHub releases page](https://github.com/Artbyo3/DEVIL-PAINTER/releases/download/v0.3.0/devil_painter-0.3.0.zip?repository=https%3A%2F%2Fartbyo3.github.io%2FDEVIL-PAINTER%2Frepo%2Findex.json&blender_version_min=5.2.0).
 2. Open Blender and choose **Edit > Preferences**.
 3. Open **Get Extensions** (or **Add-ons**).
 4. Open the top-right menu (`⌄`) and choose **Install from Disk...**.
