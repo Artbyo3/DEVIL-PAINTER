@@ -1088,7 +1088,7 @@ def shelf_header(layout, state, zone, header):
     for index, (tab, label) in enumerate(shelf.TABS):
         row, column = divmod(index, per_row)
         x = zone.x + 8 * s + column * (tab_w + 4 * s)
-        layout.add('SHELF_TAB.' + tab, Rect(x, header.y - row * 26 * s, tab_w, header.h), 'CHIP', label=label,
+        layout.add('SHELF_TAB.' + tab, Rect(x, header.y - row * 26 * s, tab_w, header.h), 'CHIP', label=label, icon=shelf.TAB_ICONS.get(tab, ''),
                    active=state.shelf_open and tab == state.shelf_tab, tip=f'Browse {label.lower()}')
     x = zone.x + 8 * s + len(shelf.TABS) * (tab_w + 4 * s) if rows == 1 else zone.x + zone.w
     toggle = Rect(zone.x + zone.w - 30 * s, header.y, 22 * s, header.h)

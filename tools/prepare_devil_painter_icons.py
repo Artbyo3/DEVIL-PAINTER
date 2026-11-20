@@ -5,7 +5,7 @@ from PIL import Image
 
 from tools.prepare_blender_icons import make_spans
 
-ADOPTED_ICONS = {'FOLDER': 'folder', 'GENERATOR': 'generator', 'HIDE_OFF': 'hide_on', 'HIDE_ON': 'hide_off'}
+ADOPTED_ICONS = {'FOLDER': 'folder', 'GENERATOR': 'generator', 'HIDE_OFF': 'hide_on', 'HIDE_ON': 'hide_off', 'MASK': 'mask'}
 
 
 def prepare():

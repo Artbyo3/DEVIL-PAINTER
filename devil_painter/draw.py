@@ -291,8 +291,11 @@ class Renderer:
         self.round_rect(rect, ACCENT_BG if control.active else BG_ELEVATED if hover else BG_WELL, radius=metrics.regular)
         if control.active:
             self.round_rect_outline(rect, ACCENT_BORDER, radius=metrics.regular)
-        self.text(rect.x + rect.w / 2, rect.y + (rect.h - 10 * self.s) / 2, control.label, 10,
-                  ACCENT if control.active else TEXT_PRIMARY if hover else TEXT_SECONDARY, True, max_width=rect.w - 8 * self.s)
+        color = ACCENT if control.active else TEXT_PRIMARY if hover else TEXT_SECONDARY
+        if control.icon:
+            self.draw_icon(control.icon, rect.x + rect.w / 2, rect.y + rect.h / 2, 16, color)
+        else:
+            self.text(rect.x + rect.w / 2, rect.y + (rect.h - 10 * self.s) / 2, control.label, 10, color, True, max_width=rect.w - 8 * self.s)
 
     def primary(self, control, hover, metrics):
         rect, s = control.rect, self.s
