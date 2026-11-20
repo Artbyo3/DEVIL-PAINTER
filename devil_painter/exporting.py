@@ -113,7 +113,7 @@ BUILTIN_TEMPLATES = (
                                      output('Metallic', ['metallic'], 'OPEN_EXR', '32'), output('Normal', NORMAL_GL, 'OPEN_EXR', '32'),
                                      output('Height', ['height'], 'OPEN_EXR', '32'), output('Emission', EMISSION, 'OPEN_EXR', '32')]),
     dict(name='Spec-Gloss from Metal-Rough', outputs=[output('Diffuse', CONVERTED_DIFFUSE, srgb=True), output('Specular', CONVERTED_SPECULAR, srgb=True),
-                                                      output('Glossiness', ['converted_glossiness']), output('Normal', NORMAL_GL, depth='16')]),
+                                                      output('Glossiness', ['converted_glossiness'])]),
 )
 
 
