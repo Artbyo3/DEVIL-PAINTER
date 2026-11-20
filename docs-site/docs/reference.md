@@ -10,6 +10,7 @@
 | Fill tool | <kbd>G</kbd> | Customizable in **Project > Shortcuts** |
 | Smaller / larger brush | <kbd>[</kbd> / <kbd>]</kbd> | Customizable in **Project > Shortcuts** |
 | Adjust brush size / opacity | <kbd>F</kbd> / <kbd>Shift</kbd> + <kbd>F</kbd> | Native Blender radial size and strength controls |
+| Straight line | <kbd>Shift</kbd> + click | Paint, Erase, Blur, Smear, and Clone paint a straight line from the last painted point; with no last point it paints one dab |
 | Undo / Redo | <kbd>Ctrl</kbd> + <kbd>Z</kbd> / <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Z</kbd> | Keeps the Devil Painter workspace open |
 | Copy / paste layer(s) | <kbd>Ctrl</kbd> + <kbd>C</kbd> / <kbd>Ctrl</kbd> + <kbd>V</kbd> | While hovering a layer row |
 | Apply / undo point (**Path** tool) | <kbd>Enter</kbd> / <kbd>Backspace</kbd> | Paints the ribbon or filled shape, or removes the last point |

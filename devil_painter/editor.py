@@ -33,6 +33,7 @@ from .state import Popover, TextEdit, WorkspaceState
 
 TIMER_INTERVAL = .3
 GESTURE_TOOLS = {'ERASE', 'BLUR', 'SMEAR', 'CLONE'}
+LINE_TOOLS = painting.BUFFER_TOOLS - {'FILL'}
 DRAG_START = 8
 AUTOSAVE_DEFAULT = 5
 POST_RANGES = {key: (field, top) for key, _, field, top in POST_SLIDERS}
@@ -160,6 +161,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         obj = context.view_layer.objects.active
         data = texture_set(obj)
         self.stroke_pending = False
+        self.line_anchor = None
         self.below_pending, self.below_since = (), 0.0
         self.drag_origin = (0.0, 0.0)
         self.engine_before = ''
@@ -491,14 +493,18 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
                 self._area.tag_redraw()
             return {'PASS_THROUGH'}
         self.sync_flat()
+        self.drop_stale_anchor()
         self.workspace = self.make_layout()
         self.pointer = (event.mouse_x - self._region.x, event.mouse_y - self._region.y)
         press = event.value == 'PRESS'
         pointer_event = any(token in event.type for token in POINTER_TOKENS)
         if self.state.gesture is not None:
             return self.gesture_event(context, event)
-        if press and event.type == 'LEFTMOUSE' and not event.alt and self.state.popover is None and self.wants_gesture(context)                 and not (self.workspace.covers(*self.pointer) or self.workspace.hit(*self.pointer)):
-            return self.start_gesture(context, event)
+        if press and event.type == 'LEFTMOUSE' and not event.alt and self.state.popover is None                 and not (self.workspace.covers(*self.pointer) or self.workspace.hit(*self.pointer)):
+            if event.shift and not event.ctrl and self.draws_lines():
+                return self.shift_line(context, event)
+            if self.wants_gesture(context):
+                return self.start_gesture(context, event)
         if press and event.ctrl and event.alt and event.type == 'P':
             self.cleanup()
             return {'FINISHED'}
@@ -529,7 +535,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
                 self._area.tag_redraw()
                 if not over:
                     if event.type == 'LEFTMOUSE':
-                        self.begin_stroke(context)
+                        self.native_stroke(context)
                     return {'PASS_THROUGH'}
                 if event.type == 'LEFTMOUSE':
                     return {'RUNNING_MODAL'}
@@ -579,7 +585,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             return {'RUNNING_MODAL'}
         if not over or not pointer_event:
             if press and event.type == 'LEFTMOUSE' and not event.alt:
-                self.begin_stroke(context)
+                self.native_stroke(context)
             return {'PASS_THROUGH'}
         if control is not None and press and event.type == 'RIGHTMOUSE' and control.key.startswith('ROW_'):
             obj, data = self.painted()
@@ -790,10 +796,17 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         shading.type = 'RENDERED'
         return 'Path-traced preview with Cycles.'
 
-    def wants_gesture(self, context):
+    def brushing(self):
         obj, data = self.painted()
-        if data is None or obj.mode != 'TEXTURE_PAINT' or self.state.poly_mode or self.state.path_mode or self.state.picking or self.state.geo_pick:
+        return not (data is None or obj.mode != 'TEXTURE_PAINT' or self.state.poly_mode or self.state.path_mode or self.state.picking or self.state.geo_pick)
+
+    def draws_lines(self):
+        return self.brushing() and painting.active_tool(self.scene) in LINE_TOOLS
+
+    def wants_gesture(self, context):
+        if not self.brushing():
             return False
+        obj, data = self.painted()
         tool = painting.active_tool(self.scene)
         if data.brush_radial > 1 and tool in painting.BUFFER_TOOLS - {'FILL'}:
             return True
@@ -816,6 +829,53 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         self.stroke_pending = False
         self.state.gesture = [(self.pointer, max(event.pressure, .01))]
         return {'RUNNING_MODAL'}
+
+    def shift_line(self, context, event):
+        self.begin_stroke(context)
+        self.stroke_pending = False
+        obj, data = self.painted()
+        pressure = max(event.pressure, .01)
+        start = self.anchor_point(obj)
+        points = [(self.pointer, pressure)] if start is None else self.segment(data, start, self.pointer, pressure)
+        return self.finish_message(self.run_gesture(context, points, shaped=False))
+
+    def segment(self, data, start, end, pressure):
+        step = max(1.0, painting.brush_value(self.scene, 'size') * data.brush_spacing / 100)
+        count = int(math.dist(start, end) / step) + 1
+        return [((start[0] + (end[0] - start[0]) * index / count, start[1] + (end[1] - start[1]) * index / count), pressure) for index in range(1, count + 1)]
+
+    def anchor_key(self, obj):
+        return obj.name, obj.devil_painter.active_set, painting.active_tool(self.scene)
+
+    def remember_anchor(self, pointer):
+        obj = self.painted()[0]
+        face, location = sets.hit_under(self._region, self._area.spaces.active.region_3d, obj, pointer)
+        self.line_anchor = (self.anchor_key(obj), location) if face >= 0 else None
+
+    def drop_stale_anchor(self):
+        obj, data = self.painted()
+        if self.line_anchor is not None and (data is None or self.line_anchor[0] != self.anchor_key(obj)):
+            self.line_anchor = None
+
+    def anchor_point(self, obj):
+        self.drop_stale_anchor()
+        if self.line_anchor is None:
+            return None
+        spot = view3d_utils.location_3d_to_region_2d(self._region, self._area.spaces.active.region_3d, obj.matrix_world @ self.line_anchor[1])
+        return None if spot is None else (spot.x, spot.y)
+
+    def native_stroke(self, context):
+        self.begin_stroke(context)
+        if not self.brushing():
+            return
+        self.remember_anchor(self.pointer)
+        if self.painted()[1].brush_stroke != 'ANCHORED':
+            bpy.app.timers.register(self.watch_stroke, first_interval=0.0)
+
+    def watch_stroke(self):
+        if not self._closed and any(operator.bl_idname.startswith('PAINT_OT') for operator in self._window.modal_operators):
+            with bpy.context.temp_override(window=self._window, area=self._area, region=self._region):
+                bpy.ops.devil_painter.stroke_end('INVOKE_DEFAULT')
 
     def finish_message(self, message):
         self.message = message
@@ -935,6 +995,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
                 painting.update_canvas(context, data)
         bpy.ops.ed.undo_push(message='Devil Painter: stroke')
         strokes.record(strokes.Fill(before, after) if before else None)
+        self.remember_anchor(points[-1][0])
         message = next((note for note in notes if note), '')
         if len(touched) > 1 and not message:
             message = f'The stroke crossed UV tiles {", ".join(str(tile) for tile in touched)}.'
@@ -2366,3 +2427,22 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
 
     def cancel(self, context):
         self.cleanup()
+
+
+class DEVIL_PAINTER_OT_stroke_end(bpy.types.Operator):
+    bl_idname = 'devil_painter.stroke_end'
+    bl_label = 'Devil Painter stroke end'
+    bl_options = {'INTERNAL'}
+
+    def invoke(self, context, event):
+        context.window_manager.modal_handler_add(self)
+        return {'RUNNING_MODAL'}
+
+    def modal(self, context, event):
+        painting_now = any(operator.bl_idname.startswith('PAINT_OT') for operator in context.window.modal_operators)
+        if _active is None or _active._closed or not painting_now:
+            return {'CANCELLED', 'PASS_THROUGH'}
+        if event.type == 'LEFTMOUSE' and event.value == 'RELEASE':
+            _active.remember_anchor((event.mouse_x - _active._region.x, event.mouse_y - _active._region.y))
+            return {'FINISHED', 'PASS_THROUGH'}
+        return {'PASS_THROUGH'}
