@@ -1062,6 +1062,18 @@ def export(context, obj, project, directory):
     return export_files(context, obj, project, directory)[1]
 
 
+def export_psd(context, obj, project, directory):
+    data = project.sets[project.active_set]
+    if 'base_color' not in {channel.key for channel in compositing.set_channels(data)}:
+        return f'{data.name} has no Base Color to export as a layered PSD.'
+    written = exporting.export_psd(context, obj, project, project.active_set, 'base_color', directory, project.export_pattern,
+                                   project.export_padding, project.export_padding_style)
+    painting.enter_paint_mode(context, obj)
+    sets.mask_faces(obj, project)
+    painting.update_canvas(context, data)
+    return f'Exported the Base Color of {data.name} as {len(written)} layered PSD {"file" if len(written) == 1 else "files"} to {directory}.'
+
+
 def send_to_app(context, obj, project, directory):
     written, message = export_files(context, obj, project, directory)
     if not written:

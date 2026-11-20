@@ -1674,7 +1674,7 @@ def export_popover(layout, state, bounds, data, directory):
     project = data.id_data.devil_painter
     template = find_template(project.export_template)
     editable = is_custom(template['name'])
-    lines = len(template['outputs']) + len(project.sets) + 8 + (1 if editable else 0)
+    lines = len(template['outputs']) + len(project.sets) + 9 + (1 if editable else 0)
     card = place_popover(bounds, state.popover.anchor, EXPORT_WIDTH * s, (lines * LINE_HEIGHT + 40) * s, s)
     x, w = card.x + 14 * s, card.w - 28 * s
     y = card.top - 34 * s
@@ -1725,6 +1725,9 @@ def export_popover(layout, state, bounds, data, directory):
                caret=state.text.cursor if editing else -1, tip='Command of another app; {files} becomes the exported files, {folder} the folder')
     layout.add('SEND', Rect(x + w - 190 * s, y, 92 * s, 24 * s), 'CHIP', label='Export & send', tip='Export, then open the textures in that app')
     layout.add('OPEN_FOLDER', Rect(x + w - 94 * s, y, 94 * s, 24 * s), 'CHIP', label='Open folder', tip='Show the export folder')
+    y -= LINE_HEIGHT * s
+    layout.add('EXPORT_PSD', Rect(x, y, w, 24 * s), 'CHIP', label='Base Color as layered PSD',
+               tip='Write the Base Color of the active texture set as a PSD with one layer per layer of the stack')
     layout.add('EXPORT_RUN', Rect(x, card.y + 12 * s, w, 28 * s), 'PRIMARY', icon='SAVE', label='Export', tip='Bake and write the textures now')
     return card
 

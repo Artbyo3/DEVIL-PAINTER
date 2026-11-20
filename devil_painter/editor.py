@@ -2074,11 +2074,11 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.state.popover = None
             Path(directory).mkdir(parents=True, exist_ok=True)
             self.message = actions.send_to_app(context, obj, project, directory) if key == 'SEND' else bridge.open_folder(directory)
-        elif key == 'EXPORT_RUN':
+        elif key in {'EXPORT_RUN', 'EXPORT_PSD'}:
             project = obj.devil_painter
             directory = bpy.path.abspath(project.export_directory or default_directory(obj))
             self.state.popover = None
-            self.message = actions.export(context, obj, project, directory)
+            self.message = actions.export(context, obj, project, directory) if key == 'EXPORT_RUN' else actions.export_psd(context, obj, project, directory)
         elif key.startswith('SET.'):
             self.message = actions.activate(context, obj, obj.devil_painter, int(key.removeprefix('SET.')), obj.devil_painter.active_tile)
         elif key.startswith('TILE.'):
