@@ -10,7 +10,7 @@ from .brushes import world_size_text
 from pathlib import Path
 from .blending import BLEND_MODES, CHANNEL, CHANNELS, FOLDER_BLENDS, linear_to_srgb
 from .canvas import Layout, Rect
-from .document import (BAKE_ID_LABELS, DYNAMICS, NORMAL_FORMATS, PROJECTORS, STROKE_METHODS, TEXTURE_SAMPLING, TRANSPARENCY, NORMAL_SPACES, PROJECTIONS, RESOLUTIONS, SHADERS, active_effect, active_layer, children, editing_mask, find_layer, isolated_uids,
+from .document import (BAKE_ID_LABELS, DEPTH_LABELS, DYNAMICS, NORMAL_FORMATS, PROJECTORS, STROKE_METHODS, TEXTURE_SAMPLING, TRANSPARENCY, NORMAL_SPACES, PROJECTIONS, RESOLUTIONS, SHADERS, active_effect, active_layer, children, editing_mask, find_layer, isolated_uids,
                        linked_layer, set_channels, slot_value, uses_coordinates)
 from .effects import ANCHORED_KINDS, CONTENT_SOURCES, EFFECT_ICONS, EFFECT_KINDS, FILL_PROJECTIONS, LEVEL_COMPONENTS, MASK_BLEND_LABEL, LevelsView, effect_label
 from .filters import FILTER, FILTERS
@@ -35,6 +35,7 @@ LINE_HEIGHT = 28
 MENU_ROW = 26
 MENU_WIDTH = 196
 CHANNEL_COLUMN = 280
+DEPTH_CHIP = 56
 MENU_HEADING = 'HEADING.'
 STROKE_LABELS = {key: label for key, label, _ in STROKE_METHODS}
 DYNAMIC_LABELS = {key: label for key, label, _ in DYNAMICS}
@@ -1633,9 +1634,14 @@ def channels_popover(layout, state, bounds, data):
     layout.add('CHANNELS_TITLE', Rect(x, top, w, 22 * s), 'NOTE', label='Channels · ' + data.name)
     for index, channel in enumerate(choices):
         column, row = divmod(index, rows)
+        enabled = channel.key in data.channels and data.channels[channel.key].enabled
         rect = Rect(x + column * column_w, top - (row + 1) * LINE_HEIGHT * s, column_w - 8 * s, 24 * s)
-        layout.add('CHANSET.' + channel.key, rect, 'TOGGLE', label=channel.label + ('' if channel.in_shader else '  (export only)'),
-                   active=channel.key in data.channels and data.channels[channel.key].enabled)
+        if enabled:
+            chip = Rect(rect.x + rect.w - DEPTH_CHIP * s, rect.y, DEPTH_CHIP * s, rect.h)
+            rect = Rect(rect.x, rect.y, rect.w - (DEPTH_CHIP + 4) * s, rect.h)
+            layout.add('CHANDEPTH.' + channel.key, chip, 'CHIP', label=DEPTH_LABELS[data.channels[channel.key].depth],
+                       tip='Bit depth this channel paints and exports at: 8-bit, 16-bit, or 32-bit float. Click to change')
+        layout.add('CHANSET.' + channel.key, rect, 'TOGGLE', label=channel.label + ('' if channel.in_shader else '  (export only)'), active=enabled)
     y = top - (rows + 1) * LINE_HEIGHT * s
     layout.add('CHANNELS_ALL', Rect(x, y, w, 24 * s), 'TOGGLE', label='Apply to every texture set', active=state.channels_all,
                tip='Add or remove channels in all texture sets at once')

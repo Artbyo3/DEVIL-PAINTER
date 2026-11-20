@@ -24,6 +24,8 @@ STROKE_METHODS = (('SPACE', 'Space', ''), ('LINE', 'Line', ''), ('DOTS', 'Dots',
 NORMAL_FORMATS = (('OPENGL', 'OpenGL', ''), ('DIRECTX', 'DirectX', ''))
 NORMAL_SPACES = (('TANGENT', 'Tangent', ''), ('OBJECT', 'Object', ''))
 SHADERS = (('PRINCIPLED', 'Principled PBR', ''), ('UNLIT', 'Unlit', ''), ('SPECULAR_GLOSSINESS', 'Spec / gloss', ''))
+CHANNEL_DEPTHS = (('8', '8-bit', ''), ('16', '16-bit', ''), ('32', '32-bit float', ''))
+DEPTH_LABELS = {'8': '8-bit', '16': '16-bit', '32': '32F'}
 
 
 class DEVIL_PAINTER_PG_slot(bpy.types.PropertyGroup):
@@ -46,6 +48,7 @@ class DEVIL_PAINTER_PG_slot(bpy.types.PropertyGroup):
 
 class DEVIL_PAINTER_PG_channel(bpy.types.PropertyGroup):
     enabled: bpy.props.BoolProperty(default=False)
+    depth: bpy.props.EnumProperty(items=CHANNEL_DEPTHS, default='8')
 
 
 class DEVIL_PAINTER_PG_map(bpy.types.PropertyGroup):
@@ -304,6 +307,10 @@ def active_tile(data):
 
 def set_channels(data):
     return [channel for channel in CHANNELS if channel.key in data.channels and data.channels[channel.key].enabled]
+
+
+def channel_depth(data, key):
+    return data.channels[key].depth if key in data.channels else '8'
 
 
 def add_set_channels(data):

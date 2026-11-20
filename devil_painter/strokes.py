@@ -4,8 +4,8 @@ import bpy
 import numpy
 from mathutils.bvhtree import BVHTree
 from . import caches, compositing
-from .document import active_tile, find_layer, set_channels, slot_value
-from .tiles import FIRST_TILE, blank, create, face_slots, variant
+from .document import active_tile, channel_depth, find_layer, set_channels, slot_value
+from .tiles import FIRST_TILE, blank, conform, create, face_slots, variant
 
 HISTORY_LIMIT = 80
 SMEAR_STRENGTH = .85
@@ -53,9 +53,13 @@ def ensure_canvases(obj, data):
             continue
         for channel in set_channels(data):
             slot = layer.slots[channel.key]
-            if channel.key == 'base_color' or not slot.enabled or (slot.source == 'IMAGE' and slot.image is not None):
+            if channel.key == 'base_color' or not slot.enabled:
                 continue
-            slot.source, slot.image = 'IMAGE', create(data, f'DP {obj.name} {data.name} {layer.uid} {slot.name}', (*rgb(slot_value(slot)), 1.0), True)
+            float_buffer = channel_depth(data, channel.key) != '8'
+            if slot.source == 'IMAGE' and slot.image is not None:
+                conform(data, slot.image, float_buffer)
+                continue
+            slot.source, slot.image = 'IMAGE', create(data, f'DP {obj.name} {data.name} {layer.uid} {slot.name}', (*rgb(slot_value(slot)), 1.0), True, float_buffer)
 
 
 @dataclass

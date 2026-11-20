@@ -12,7 +12,7 @@ from . import actions, autosave, baking, bridge, brushes, caches, compositing, d
 from .blending import BLEND_MODES, CHANNEL, FOLDER_BLENDS, linear_to_srgb, srgb_to_linear
 from .ui_system import ACCENT
 from .canvas import Rect
-from .document import (BAKE_ID_LABELS, DYNAMICS, PROJECTIONS, PROJECTORS, RESOLUTIONS, STROKE_METHODS, TEXTURE_SAMPLING, active_effect, active_layer, active_tile, find_layer,
+from .document import (BAKE_ID_LABELS, CHANNEL_DEPTHS, DYNAMICS, PROJECTIONS, PROJECTORS, RESOLUTIONS, STROKE_METHODS, TEXTURE_SAMPLING, active_effect, active_layer, active_tile, find_layer,
                        editing_mask, paint_target, set_channels, slot_value, texture_set, uses_coordinates)
 from .effects import FILL_PROJECTIONS, LEVEL_COMPONENTS, MASK_BLENDS, mask_effects
 from .filters import FILTER, FILTERS, GROUPS
@@ -2124,6 +2124,11 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         elif key.startswith('CHANSET.'):
             channel = key.removeprefix('CHANSET.')
             self.message = actions.set_channel_enabled(context, obj, obj.devil_painter, channel, not data.channels[channel].enabled, self.state.channels_all)
+        elif key.startswith('CHANDEPTH.'):
+            channel = key.removeprefix('CHANDEPTH.')
+            depths = [depth for depth, _, _ in CHANNEL_DEPTHS]
+            depth = depths[(depths.index(data.channels[channel].depth) + 1) % len(depths)]
+            self.message = actions.set_channel_depth(context, obj, obj.devil_painter, channel, depth, self.state.channels_all)
         elif key == 'CHANNELS_ALL':
             self.state.channels_all = not self.state.channels_all
         elif key.startswith(('PNF.', 'PNS.')):

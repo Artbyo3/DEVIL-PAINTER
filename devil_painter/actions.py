@@ -9,7 +9,7 @@ from .masks import GENERATOR, GENERATOR_FIELDS
 from .meshmaps import MESH_MAP
 from .blending import BLEND_MODES, CHANNEL, FOLDER_BLENDS, NORMAL_DETAIL
 from .procedural import PATTERN
-from .document import PROJECTIONS, PROJECTORS, SLOT_FIELDS, TEXTURE_SAMPLING,geometry_attribute, active_effect, active_layer, adopt_generator_breakups, adopt_layer_generator, add_set_channels, add_slots, children, descendants, fill_slots, find_layer, layer_index, set_slot_value
+from .document import DEPTH_LABELS, PROJECTIONS, PROJECTORS, SLOT_FIELDS, TEXTURE_SAMPLING,geometry_attribute, active_effect, active_layer, adopt_generator_breakups, adopt_layer_generator, add_set_channels, add_slots, children, descendants, fill_slots, find_layer, layer_index, set_slot_value
 
 KIND_NAMES = {'PAINT': 'Paint', 'FILL': 'Fill', 'FOLDER': 'Folder'}
 LAYER_FIELDS = ('kind', 'visible', 'opacity', 'projection', 'tiling', 'proj_offset', 'proj_rotation', 'proj_size', 'uv_offset', 'uv_rotation', 'triplanar_blend', 'tile_match', 'material', 'folder_blend', 'geo_mask', 'link_set', 'link_uid')
@@ -131,6 +131,16 @@ def set_channel_enabled(context, obj, project, key, enabled, every_set):
     data = project.sets[project.active_set]
     scope = 'every texture set' if every_set else data.name
     return refresh(context, obj, data, f'{CHANNEL[key].label} {"added to" if enabled else "removed from"} {scope}.')
+
+
+def set_channel_depth(context, obj, project, key, depth, every_set):
+    targets = list(project.sets) if every_set else [project.sets[project.active_set]]
+    for data in targets:
+        data.channels[key].depth = depth
+        strokes.ensure_canvases(obj, data)
+    data = project.sets[project.active_set]
+    scope = 'every texture set' if every_set else data.name
+    return refresh(context, obj, data, f'{CHANNEL[key].label} stores {DEPTH_LABELS[depth]} in {scope}.')
 
 
 def set_project_value(context, obj, project, field, value):
