@@ -680,10 +680,11 @@ def journey():
     yield from settle()
     click(window, region, 'EXPORT_RUN')
     yield from settle()
-    normal = png_pixels(export_dir / 'Cube_Material_Normal.png')
-    match = (numpy.abs(normal[:, 0] - .4) < .03) & (numpy.abs(normal[:, 1] - .6) < .03)
-    check(editor._active.message.startswith('Exported 6 textures') and match.mean() > .3,
-          'export bakes the texture set normal map into the normal channel')
+    normal = png_pixels(export_dir / 'Cube_Material_Normal.png')[:, :3]
+    covered = numpy.abs(normal - (.5, .5, 1.0)).max(axis=1) > .02
+    typical = numpy.median(normal[covered], axis=0)
+    check(editor._active.message.startswith('Exported 6 textures') and covered.mean() > .3 and numpy.abs(typical[:2] - (.4, .6)).max() < .02,
+          f'export bakes the texture set normal map into the normal channel, tilted by the Rust height below it (median {tuple(round(float(value), 3) for value in typical)})')
 
     def active():
         return next(layer for layer in data.layers if layer.uid == data.active_uid)
