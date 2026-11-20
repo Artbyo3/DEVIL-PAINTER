@@ -19,7 +19,7 @@ from devil_painter.effects import copy_effect
 from devil_painter.procedural import PATTERN
 from devil_painter.masks import BREAKUPS, GENERATOR_VALUES, LAYER_GENERATOR_FIELDS
 from tools.workspace import prepare_scratch
-from tests.gui_harness import settle, until
+from tests.gui_harness import bake_landed, settle, until
 
 TIMEOUT = 600
 STARTED = time.time()
@@ -308,6 +308,7 @@ def journey():
     yield from settle()
     click(window, region, 'BAKE_RUN')
     yield from settle()
+    yield from bake_landed()
     check(all(key in data.maps and data.maps[key].image is not None for key in ('ao', 'curvature', 'position', 'world_normal', 'id', 'uv_border')),
           'the bake card bakes the maps generators read, including UV border distance')
     border = image_pixels(data.maps['uv_border'].image)

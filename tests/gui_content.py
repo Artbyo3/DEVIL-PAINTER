@@ -14,7 +14,7 @@ import devil_painter
 from devil_painter import editor, library, shelf, smart
 from devil_painter.document import active_effect, active_layer, find_layer
 from tools.workspace import prepare_scratch
-from tests.gui_harness import settle
+from tests.gui_harness import bake_landed, settle
 
 TIMEOUT = 600
 STARTED = time.time()
@@ -220,6 +220,7 @@ def journey():
     yield from settle()
     click(window, region, 'BAKE_RUN')
     yield from settle()
+    yield from bake_landed()
     check('world_normal' in data.maps and data.maps['world_normal'].image is not None, 'the bake card bakes the world normal map')
 
     click(window, region, 'ADD_FILL')

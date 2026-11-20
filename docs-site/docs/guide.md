@@ -39,7 +39,7 @@ Use the **View** menu to switch between the full shaded **Material**, any enable
 
 Open **Bake maps** in the workspace bar to bake up to **9** mesh maps directly with Cycles: **Ambient occlusion**, **Curvature**, **Thickness**, **Position**, **World normal**, **ID** (from **UV islands**, **Materials**, **Objects**, or **Vertex colors**), **Normal** (from high-poly, or rounded edges from the mesh itself), **Height** (from high-poly), and **UV border distance**.
 
-Select **High-poly** and **Cage** objects manually or enable **Match high-poly and cage by name** (`_high`, `_cage`), adjust **Samples** and **Ray distance**, optionally **Paint cage** or **Paint skew**, and toggle **Rebake automatically**. Baked maps appear as thumbnails in the **Mesh maps** panel and drive **22** **Generators** (including **Mask builder**) that multiply with hand-painted masks.
+Select **High-poly** and **Cage** objects manually or enable **Match high-poly and cage by name** (`_high`, `_cage`), adjust **Samples** and **Ray distance**, optionally **Paint cage** or **Paint skew**, and toggle **Rebake automatically**. Bakes run in the background: keep painting while the bake card and the **Bake maps** chip show progress, or click **Cancel** to stop and keep the maps as they were. Baked maps appear as thumbnails in the **Mesh maps** panel and drive **22** **Generators** (including **Mask builder**) that multiply with hand-painted masks.
 
 ## Shelf & Custom Libraries
 

@@ -11,6 +11,7 @@ BAKE_SAMPLES = 1
 DUMMY_SIZE = 8
 GPU_BACKENDS = ('OPTIX', 'CUDA', 'HIP', 'ONEAPI', 'METAL')
 NEIGHBORS = ((-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1))
+TILE_BAKED = []
 
 
 def usable_gpu(preferences):
@@ -133,6 +134,8 @@ def bake_tiles(obj, project, wanted, prepare, bake_type, margin, **options):
                 mesh.uv_layers.active = mesh.uv_layers[name]
             for index, image in targets.items():
                 results[(index, number)] = read_pixels(image)
+            for listener in TILE_BAKED:
+                listener(number)
         finally:
             for image in created:
                 bpy.data.images.remove(image)

@@ -433,16 +433,28 @@ def bake_key(context, obj, project, wanted, key, data, sources, size):
     return bake_pass(context, obj, project, wanted, prepare, 'EMIT', samples if key in RAY_TRACED else BAKE_SAMPLES)
 
 
-def bake_maps(context, obj, project, wanted, keys, data):
+def bakeable(context, obj, data, keys):
+    sources = bake_sources(context, obj, data)
+    return [key for key in keys if sources.high or not MESH_MAP[key].needs_source]
+
+
+def baked_results(context, obj, project, wanted, keys, data):
     size = object_size(obj)
     sources = bake_sources(context, obj, data)
+    for key in bakeable(context, obj, data, keys):
+        yield key, bake_key(context, obj, project, wanted, key, data, sources, size)
+
+
+def store_maps(obj, project, key, results):
+    for (index, number), pixels in results.items():
+        item = project.sets[index]
+        store(item, map_key_image(obj, item, key), number, pixels)
+
+
+def bake_maps(context, obj, project, wanted, keys, data):
     baked = []
-    for key in keys:
-        if MESH_MAP[key].needs_source and not sources.high:
-            continue
-        for (index, number), pixels in bake_key(context, obj, project, wanted, key, data, sources, size).items():
-            item = project.sets[index]
-            store(item, map_key_image(obj, item, key), number, pixels)
+    for key, results in baked_results(context, obj, project, wanted, keys, data):
+        store_maps(obj, project, key, results)
         baked.append(key)
     return baked
 

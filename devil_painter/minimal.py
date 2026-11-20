@@ -221,7 +221,7 @@ def view_label(data):
     return CHANNEL[data.solo].label if data.solo else 'Material'
 
 
-def workspace_bar(layout, zone, data, obj_name, view_2d):
+def workspace_bar(layout, zone, data, obj_name, view_2d, baking):
     s = layout.scale
     layout.cards.append((zone, ''))
     h = min(zone.h - 12 * s, 24 * s)
@@ -235,7 +235,7 @@ def workspace_bar(layout, zone, data, obj_name, view_2d):
     layout.add('VIEW', view, 'DROPDOWN', label='View', text=view_label(data), tip='Show the full material, one channel, or a mesh map')
     channels = Rect(view.x - 6 * s - menu_w, y, menu_w, h)
     bake = Rect(channels.x - 6 * s - 110 * s, y, 110 * s, h)
-    layout.add('BAKE', bake, 'CHIP', label='Bake maps', tip='Bake ambient occlusion, curvature, thickness, position, world normal, and ID maps')
+    layout.add('BAKE', bake, 'CHIP', label='Bake maps' if baking is None else f'Baking {round(baking[0] * 100)}%', active=baking is not None, tip='Bake ambient occlusion, curvature, thickness, position, world normal, and ID maps')
     flat = Rect(bake.x - 6 * s - 80 * s, y, 80 * s, h)
     layout.add('VIEW2D', flat, 'CHIP', label='2D view', active=view_2d, tip='Show the selected canvas flat in UV space next to the model and paint on it')
     viewport = Rect(flat.x - 6 * s - 84 * s, y, 84 * s, h)
@@ -1482,7 +1482,13 @@ def bake_popover(layout, state, bounds, data):
     y -= LINE_HEIGHT * s
     layout.add('BAKE_AUTO', Rect(x, y, w, 24 * s), 'TOGGLE', label='Rebake automatically', active=data.bake_auto,
                tip='Rebake the baked maps when these settings, the high-poly, the cage, or this mesh change')
-    layout.add('BAKE_RUN', Rect(x, card.y + 12 * s, w, 28 * s), 'PRIMARY', icon='PLAY', label='Bake', tip='Bake the selected maps now')
+    if state.baking is None:
+        layout.add('BAKE_RUN', Rect(x, card.y + 12 * s, w, 28 * s), 'PRIMARY', icon='PLAY', label='Bake', tip='Bake the selected maps now')
+        return card
+    fraction, label = state.baking
+    layout.add('BAKE_PROGRESS', Rect(x, card.y + 12 * s, w - 88 * s, 28 * s), 'PROGRESS', label=label, value=fraction, text=f'{round(fraction * 100)}%',
+               tip='The bake runs in the background, so you can keep working')
+    layout.add('BAKE_CANCEL', Rect(x + w - 82 * s, card.y + 12 * s, 82 * s, 28 * s), 'CHIP', label='Cancel', tip='Stop the bake and keep the mesh maps as they were')
     return card
 
 
@@ -1780,7 +1786,7 @@ def sections_layout(layout, state, data, bounds, obj_name, tool, brush):
     builders = dict(SETS=sets_panel, LAYERS=layers_panel, PROPERTIES=properties_panel)
     for key, rect in found.rects.items():
         if key == 'BAR':
-            workspace_bar(layout, rect, data, obj_name, state.view_2d)
+            workspace_bar(layout, rect, data, obj_name, state.view_2d, state.baking)
         elif key == 'STRIP':
             tool_strip(layout, rect, tool, brush, data, state)
         elif key == 'DOCK':
