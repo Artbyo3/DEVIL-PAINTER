@@ -37,7 +37,19 @@ def refresh(context, obj, data, message):
     return message
 
 
+def ensure_material(obj, data):
+    if data.material is not None:
+        return False
+    data.material = bpy.data.materials.new(f'Devil Painter {obj.name} {data.name}')
+    data.material[compositing.SIGNATURE_KEY] = ''
+    while len(obj.material_slots) <= data.slot:
+        obj.data.materials.append(None)
+    obj.material_slots[data.slot].material = data.material
+    return True
+
+
 def prepare(obj, data):
+    repaired = ensure_material(obj, data)
     fill_slots(data.brush_slots)
     add_set_channels(data)
     adopted = False
@@ -47,7 +59,7 @@ def prepare(obj, data):
         adopted = adopt_layer_generator(data, layer) or adopted
         adopted = adopt_generator_breakups(layer) or adopted
     strokes.ensure_buffer(obj, data)
-    if adopted:
+    if adopted or repaired:
         compositing.sync(data)
 
 
@@ -90,10 +102,9 @@ def add_set(obj, project, index, name, found, resolution, template):
     data.name, data.slot, data.resolution = name, index, resolution
     for number in found:
         data.tiles.add().number = number
+    ensure_material(obj, data)
     prepare(obj, data)
     projects.apply_template(project, data, template)
-    data.material = bpy.data.materials.new(f'Devil Painter {obj.name} {name}')
-    obj.material_slots[index].material = data.material
 
 
 def activate(context, obj, project, index, tile):
