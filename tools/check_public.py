@@ -90,6 +90,24 @@ def inspect_text(name,data,errors):
         errors.append(name+': possible credential')
 
 
+def historical_blobs():
+    objects = subprocess.run(['git', 'rev-list', '--objects', *PUBLISHED_REFS], cwd=ROOT, capture_output=True, text=True, check=True)
+    named = [entry.partition(' ') for entry in objects.stdout.splitlines()]
+    named = [(object_id, name) for object_id, separator, name in named if separator]
+    request = ''.join(object_id + '\n' for object_id, name in named).encode()
+    output = subprocess.run(['git', 'cat-file', '--batch'], cwd=ROOT, input=request, capture_output=True, check=True).stdout
+    offset = 0
+    for object_id, name in named:
+        header_end = output.index(b'\n', offset)
+        reported_id, kind, size = output[offset:header_end].decode().split()
+        if reported_id != object_id:
+            raise RuntimeError(f'git cat-file answered {reported_id[:12]} for {object_id[:12]}')
+        start = header_end + 1
+        offset = start + int(size) + 1
+        if kind == 'blob':
+            yield name, output[start:start + int(size)]
+
+
 def main():
     result = subprocess.run(['git','ls-files','--cached','--others','--exclude-standard','-z'],
                             cwd=ROOT,capture_output=True,check=True)
@@ -117,16 +135,8 @@ def main():
     messages=subprocess.run(['git','log',*PUBLISHED_REFS,'--format=%B'],cwd=ROOT,capture_output=True,text=True)
     if messages.returncode==0:
         inspect_text('commit messages',messages.stdout,errors)
-    objects = subprocess.run(['git', 'rev-list', '--objects', *PUBLISHED_REFS], cwd=ROOT, capture_output=True, text=True, check=True)
     history_count = 0
-    for entry in objects.stdout.splitlines():
-        object_id, separator, name = entry.partition(' ')
-        if not separator:
-            continue
-        result = subprocess.run(['git', 'cat-file', '-t', object_id], cwd=ROOT, capture_output=True, text=True, check=True)
-        if result.stdout.strip() != 'blob':
-            continue
-        payload = subprocess.run(['git', 'cat-file', 'blob', object_id], cwd=ROOT, capture_output=True, check=True).stdout
+    for name, payload in historical_blobs():
         inspect_payload(name, payload, errors)
         history_count += 1
     if errors:

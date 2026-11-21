@@ -5,9 +5,10 @@ import tomllib
 
 
 ROOT = Path(__file__).resolve().parents[1]
-JOURNEY_SCRATCH = 'DEVIL_PAINTER_SCRATCH'
-SCRATCH = Path(os.environ[JOURNEY_SCRATCH]) if JOURNEY_SCRATCH in os.environ else ROOT / 'scratch'
+SCRATCH_VARIABLE = 'DEVIL_PAINTER_SCRATCH'
+SCRATCH = Path(os.environ[SCRATCH_VARIABLE]) if SCRATCH_VARIABLE in os.environ else ROOT / 'scratch'
 DIST = ROOT / 'dist'
+RUN_PREFIX = 'run-'
 
 
 def extension_archive():
@@ -15,16 +16,20 @@ def extension_archive():
     return DIST / f"{manifest['id']}-{manifest['version']}.zip"
 
 
+def scratch_root():
+    return ROOT.resolve() / 'scratch'
+
+
 def is_link(path):
     return path.is_symlink() or bool(getattr(path.lstat(), 'st_file_attributes', 0) & getattr(stat, 'FILE_ATTRIBUTE_REPARSE_POINT', 0x400))
 
 
-def checked_scratch():
-    expected = ROOT.resolve() / 'scratch'
-    chosen = SCRATCH.absolute()
-    journey = '..' not in chosen.parts and chosen.is_relative_to(expected / 'j') and chosen != expected / 'j'
-    if chosen != expected and not journey:
-        raise ValueError('Scratch must be the real scratch directory directly inside the repository, or a journey folder inside scratch/j.')
+def checked_scratch(target=None):
+    expected = scratch_root()
+    chosen = (target or SCRATCH).absolute()
+    inside_run = '..' not in chosen.parts and chosen.is_relative_to(expected) and chosen != expected and chosen.relative_to(expected).parts[0].startswith(RUN_PREFIX)
+    if chosen != expected and not inside_run:
+        raise ValueError('Scratch must be the real scratch directory directly inside the repository, or a gate run folder scratch/run-<id> or a folder inside one.')
     for directory in [chosen, *chosen.parents][:len(chosen.relative_to(expected).parts) + 1]:
         try:
             linked = is_link(directory)
@@ -35,25 +40,24 @@ def checked_scratch():
     return chosen
 
 
-def prepare_scratch():
-    directory = checked_scratch()
-    directory.mkdir(exist_ok=True)
+def prepare_scratch(target=None):
+    directory = checked_scratch(target)
+    directory.mkdir(parents=True, exist_ok=True)
     return directory
 
 
-def child_environment(journey=None):
-    directory = journey or prepare_scratch()
+def child_environment(directory):
+    directory = prepare_scratch(directory)
     temporary = directory / 'blender-temp'
     temporary.mkdir(exist_ok=True)
     config = directory / 'blender-config'
     config.mkdir(exist_ok=True)
-    own = {JOURNEY_SCRATCH: str(directory)} if journey else {}
-    return dict(os.environ, PYTHONDONTWRITEBYTECODE='1', TEMP=str(temporary), TMP=str(temporary), TMPDIR=str(temporary),
-                BLENDER_USER_CONFIG=str(config), **own)
+    return dict(os.environ, PYTHONDONTWRITEBYTECODE='1', PYTHONUNBUFFERED='1', TEMP=str(temporary), TMP=str(temporary), TMPDIR=str(temporary),
+                BLENDER_USER_CONFIG=str(config), **{SCRATCH_VARIABLE: str(directory)})
 
 
-def clean_scratch():
-    directory = checked_scratch()
+def clean_scratch(target=None):
+    directory = checked_scratch(target)
     if not directory.exists():
         return 0
     pending = [directory]

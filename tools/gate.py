@@ -29,9 +29,11 @@ def merge_base():
 
 
 def changed_files():
-    tracked = git('diff', '--name-only', '--no-renames', merge_base()).splitlines()
-    untracked = git('ls-files', '--others', '--exclude-standard').splitlines()
-    return sorted(set(tracked) | set(untracked))
+    return sorted(set(git('diff', '--name-only', '--no-renames', merge_base()).splitlines()))
+
+
+def untracked_files():
+    return sorted(git('ls-files', '--others', '--exclude-standard').splitlines())
 
 
 def listed(paths, limit=6):

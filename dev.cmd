@@ -1,2 +1,2 @@
 @echo off
-python -B tools\dev.py %*
+python -B -u tools\dev.py %*
