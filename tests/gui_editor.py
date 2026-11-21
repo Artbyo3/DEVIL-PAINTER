@@ -89,7 +89,7 @@ def overlaps(a, b):
 
 
 def type_text(window, text, x, y):
-    for _ in range(80):
+    for _ in range(editor._active.state.text.cursor):
         window.event_simulate(type='BACK_SPACE', value='PRESS', x=int(x), y=int(y))
     for character in text:
         window.event_simulate(type='A', value='PRESS', x=int(x), y=int(y), unicode=character)
