@@ -1,6 +1,10 @@
+import contextlib
+import os
 import time
+from pathlib import Path
 import bpy
 from devil_painter import bakejob, editor
+from tools.workspace import FAILURE_RECORD_VARIABLE
 
 SENTINEL = 'F19'
 POLL = 0.02
@@ -8,6 +12,8 @@ SETTLE_TIMEOUT = 20.0
 WAIT_TIMEOUT = 60.0
 SENTINEL_OPERATOR = 'WM_OT_devil_painter_test_sentinel'
 _seen = dict(count=0, draws=0, x=0, y=0)
+_failures = dict(expected=0, recorded=set())
+FAILURE_RECORD = Path(os.environ[FAILURE_RECORD_VARIABLE]) if FAILURE_RECORD_VARIABLE in os.environ else None
 
 
 def observe(event):
@@ -31,9 +37,28 @@ class WM_OT_devil_painter_test_sentinel(bpy.types.Operator):
         return {'RUNNING_MODAL'} if event.type == SENTINEL else {'PASS_THROUGH'}
 
 
+def record_failure(failure):
+    if id(failure) in _failures['recorded']:
+        return
+    _failures['recorded'].add(id(failure))
+    if _failures['expected'] or FAILURE_RECORD is None:
+        return
+    with FAILURE_RECORD.open('a', encoding='utf-8') as record:
+        record.write(f'{type(failure).__name__}: {failure}\n')
+
+
+@contextlib.contextmanager
+def expected_failures():
+    _failures['expected'] += 1
+    try:
+        yield
+    finally:
+        _failures['expected'] -= 1
+
+
 def instrument():
     cls = editor.DEVIL_PAINTER_OT_editor
-    handle_event, draw_overlay = cls.handle_event, cls.draw_overlay
+    handle_event, draw_overlay, fail = cls.handle_event, cls.draw_overlay, cls.fail
 
     def observed_event(self, context, event):
         observe(event)
@@ -41,10 +66,18 @@ def instrument():
 
     def counted_draw(self):
         draw_overlay(self)
+        if self.failure is not None:
+            record_failure(self.failure)
         if not self._closed and bpy.context.area == self._area:
             _seen['draws'] += 1
 
-    cls.handle_event, cls.draw_overlay = observed_event, counted_draw
+    def recorded_fail(self, failure):
+        record_failure(failure)
+        return fail(self, failure)
+
+    cls.handle_event, cls.draw_overlay, cls.fail = observed_event, counted_draw, recorded_fail
+    if FAILURE_RECORD is not None:
+        FAILURE_RECORD.write_text('', encoding='utf-8')
 
 
 instrument()

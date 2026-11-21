@@ -6,7 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-class RepositoryChecksTests(unittest.TestCase):
+class ManifestTests(unittest.TestCase):
     def test_manifest_metadata(self):
         manifest = tomllib.loads((ROOT / 'devil_painter' / 'blender_manifest.toml').read_text(encoding='utf-8'))
         self.assertEqual(manifest['id'], 'devil_painter')

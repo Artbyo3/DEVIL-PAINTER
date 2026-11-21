@@ -24,16 +24,8 @@ EFFECT_FIELDS = ('kind', 'target', 'enabled', 'blend', 'opacity', 'source', 'val
                  'color', 'color_b', 'other', 'channel', 'anchor', 'anchor_channel', 'anchor_weight', 'clamp', 'levels_component', 'projection', 'tiling', 'offset_u', 'offset_v') + COMPONENT_FIELDS + GENERATOR_FIELDS
 
 
-def allowed(kind, target):
-    return target in next(targets for key, _, targets in EFFECT_KINDS if key == kind)
-
-
 def mask_effects(layer):
     return [effect for effect in layer.effects if effect.target == 'MASK']
-
-
-def content_effects(layer):
-    return [effect for effect in layer.effects if effect.target == 'CONTENT']
 
 
 def find_effect(layer, uid):
