@@ -22,10 +22,16 @@ def check_source(text, filename='<source>'):
 
 def check_repository(root):
     count = 0
+    violations = []
     for directory in ('devil_painter', 'tests', 'tools'):
         for source in sorted((root / directory).rglob('*.py')):
-            check_source(source.read_text(encoding='utf-8-sig'), str(source.relative_to(root)))
+            try:
+                check_source(source.read_text(encoding='utf-8-sig'), str(source.relative_to(root)))
+            except (ValueError, SyntaxError) as error:
+                violations.append(str(error))
             count += 1
+    if violations:
+        raise ValueError('\n'.join(violations))
     return count
 
 

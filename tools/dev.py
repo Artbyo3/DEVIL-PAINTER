@@ -1,28 +1,28 @@
 import os
+import re
 import sys
 import time
 import ctypes
+import shutil
 import argparse
 import threading
+import traceback
 import subprocess
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(ROOT))
-from tools import gate
-from tools.workspace import child_environment, clean_scratch, extension_archive, prepare_scratch
+from tools import gate, gate_state, workspace
+from tools.gate_state import GateBusy
+from tools.workspace import child_environment, clean_scratch, extension_archive, prepare_scratch, scratch_root
 
-BLENDER_PATH = r"C:\Program Files (x86)\Steam\steamapps\common\Blender\blender.exe"
-if not os.path.exists(BLENDER_PATH):
-    for p in [r"C:\Program Files\Blender Foundation\Blender 5.3\blender.exe",
-              r"C:\Program Files\Blender Foundation\Blender 5.2\blender.exe",
-              r"C:\Program Files\Blender Foundation\Blender 4.2\blender.exe"]:
-        if os.path.exists(p):
-            BLENDER_PATH = p
-            break
-
+MINIMUM_BLENDER = (5, 2)
+STEAM_BLENDER = Path(r"C:\Program Files (x86)\Steam\steamapps\common\Blender\blender.exe")
+BLENDER_FOUNDATION = Path(r"C:\Program Files\Blender Foundation")
 GUI_SUITES = ("gui_editor.py", "gui_project.py", "gui_layers.py", "gui_baking.py", "gui_masks.py", "gui_content.py", "gui_anchors.py", "gui_positional.py", "gui_slope_normal.py", "gui_uv_transform.py", "gui_triplanar_hardness.py", "gui_pressure.py", "gui_jitter.py", "gui_follow_path.py", "gui_texture_sampling.py", "gui_painting.py", "gui_shelf.py", "gui_extras.py", "gui_packs.py", "gui_udim.py", "gui_library.py", "gui_layout.py", "gui_reopen.py", "gui_layer_delete.py", "gui_world_size.py", "gui_shift_line.py", "gui_stencil_drag.py", "gui_material_stroke.py", "gui_clone_surface.py")
 JOURNEYS = ("blender_api.py",) + GUI_SUITES
 SLOWEST_JOURNEYS = ("gui_layers.py", "gui_project.py", "gui_positional.py", "gui_slope_normal.py", "gui_extras.py", "gui_masks.py", "gui_anchors.py", "gui_editor.py")
@@ -30,50 +30,181 @@ EXCLUSIVE_JOURNEYS = ("blender_api.py", "gui_library.py", "gui_packs.py")
 JOURNEY_THREADS = 4
 JOURNEY_MEMORY = 4 * 2 ** 30
 JOURNEY_VIDEO_MEMORY = 2 * 2 ** 30
-SMOKE_COMMAND = [BLENDER_PATH, "--background", "--factory-startup", "--python-exit-code", "1", "--python", "tests/blender_smoke.py"]
+JOURNEY_TIMEOUT = 1200
+STEP_TIMEOUT = 1800
+WAIT_LIMIT = 540
+WAIT_POLL = 5
+START_GRACE = 60
+TAIL_LINES = 30
+RUN_ID_VARIABLE = 'DEVIL_PAINTER_RUN_ID'
+WINDOWS_DETACH = 0x08000000 | 0x00000200
+WINDOWS_BREAKAWAY = 0x01000000
+BLENDER = {}
 
 
-def execute(cmd, environment):
-    t0 = time.time()
-    res = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True, env=environment)
-    gui_test = any(Path(argument).name.startswith('gui_') for argument in cmd)
-    return res, time.time() - t0, res.returncode == 0 and not (gui_test and 'Traceback' in res.stdout + res.stderr)
+class BlenderMissing(Exception):
+    pass
 
 
-def report(res, dt, passed):
-    if not passed:
-        print(f"FAILED in {dt:.2f}s:")
-        print(res.stdout)
-        print(res.stderr)
-        return False
-    print(f"    OK ({dt:.2f}s)")
-    return True
+@dataclass
+class Outcome:
+    name: str
+    passed: bool
+    seconds: float
+    log: Path | None
+    detail: str
 
 
-def run_cmd(cmd, desc="", env=None):
-    if desc:
-        print(f"--> {desc}...")
-    return report(*execute(cmd, dict(child_environment(), **(env or {}))))
+@dataclass
+class Run:
+    id: str
+    folder: Path
+    outcomes: list = field(default_factory=list)
+    journeys: int = 0
+    journeys_passed: int = 0
+    exports: int = 0
+    differences: int = 0
+
+    @property
+    def logs(self):
+        return self.folder / 'logs'
+
+    def record(self, name, passed, seconds=0.0, log=None, detail=''):
+        self.outcomes.append(Outcome(name, passed, seconds, log, detail))
+        where = f' log {shown(log)}' if log and not passed else ''
+        print(f"<-- {name}: {'OK' if passed else 'FAILED'} ({detail + ', ' if detail and not passed else ''}{seconds:.1f}s){where}")
+        return passed
+
+    def failures(self):
+        return [outcome for outcome in self.outcomes if not outcome.passed]
 
 
-def do_quick_tests():
-    print("\n=== RUNNING STATIC INTEGRITY & MOCKED HEADLESS UNIT TESTS ===")
-    if not run_cmd([sys.executable, "-m", "tools.check_dead_code"], desc="Static Import & Dead-Code Integrity"):
-        return False
-    if not run_cmd(["git", "diff", "--check", gate.merge_base()], desc="Whitespace check against main"):
-        return False
-    return run_cmd([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py"],
-                   desc="Mocked Headless Unit Tests")
+def shown(path):
+    path = Path(path)
+    return path.relative_to(workspace.ROOT).as_posix() if path.is_relative_to(workspace.ROOT) else path.name
 
 
-def do_smoke():
-    print("\n=== RUNNING REAL-BLENDER BACKGROUND & LOAD SMOKE SUITE ===")
-    return run_cmd(SMOKE_COMMAND, desc="Blender Background: blender_smoke.py")
+def stamp():
+    return datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
+
+
+def slug(name):
+    return re.sub(r'[^A-Za-z0-9_.]+', '-', name).strip('-').lower()
+
+
+def blender_version(path):
+    try:
+        output = subprocess.run([str(path), '--version'], capture_output=True, text=True, errors='replace', timeout=120).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    match = re.search(r'Blender (\d+)\.(\d+)', output)
+    return (int(match[1]), int(match[2])) if match else None
+
+
+def blender_candidates():
+    if os.environ.get('BLENDER'):
+        return [Path(os.environ['BLENDER'])]
+    found = shutil.which('blender')
+    return [STEAM_BLENDER, *sorted(BLENDER_FOUNDATION.glob('Blender */blender.exe'), reverse=True), *([Path(found)] if found else [])]
+
+
+def find_blender():
+    rejected = []
+    for candidate in blender_candidates():
+        if not candidate.is_file():
+            if os.environ.get('BLENDER'):
+                rejected.append(f'BLENDER points at {candidate}, which does not exist')
+            continue
+        version = blender_version(candidate)
+        if version and version >= MINIMUM_BLENDER:
+            return str(candidate)
+        rejected.append(f"{candidate} is Blender {'.'.join(map(str, version)) if version else 'of unknown version'}")
+    found = f" Rejected: {'; '.join(rejected)}." if rejected else ''
+    raise BlenderMissing(f'No Blender {MINIMUM_BLENDER[0]}.{MINIMUM_BLENDER[1]} or newer was found.{found} '
+                         'Set the BLENDER environment variable to the blender executable of Blender 5.2 or newer.')
+
+
+def blender():
+    if 'path' not in BLENDER:
+        BLENDER['path'] = find_blender()
+    return BLENDER['path']
+
+
+def print_tail(path, lines=TAIL_LINES):
+    try:
+        text = Path(path).read_text(encoding='utf-8', errors='replace').splitlines()
+    except FileNotFoundError:
+        return
+    print(f'    last {min(lines, len(text))} lines of {shown(path)}:')
+    for line in text[-lines:]:
+        print(f'    | {line}')
+
+
+def run_process(command, log, environment, timeout, echo):
+    started = time.time()
+    with log.open('w', encoding='utf-8', errors='replace') as handle:
+        process = subprocess.Popen(command, cwd=ROOT, env=environment, stdin=subprocess.DEVNULL, stderr=subprocess.STDOUT,
+                                   stdout=subprocess.PIPE if echo else handle, text=True, encoding='utf-8', errors='replace')
+        reader = None
+        if echo:
+            def copy():
+                for line in process.stdout:
+                    handle.write(line)
+                    handle.flush()
+                    sys.stdout.write('    ' + line)
+            reader = threading.Thread(target=copy, daemon=True)
+            reader.start()
+        try:
+            code, timed_out = process.wait(timeout=timeout), False
+        except subprocess.TimeoutExpired:
+            process.kill()
+            code, timed_out = process.wait(), True
+        if reader:
+            reader.join(30)
+        if timed_out:
+            handle.write(f'\n[gate] killed after {timeout}s without finishing\n')
+    return code, timed_out, time.time() - started
+
+
+def step(run, name, command, environment=None, timeout=STEP_TIMEOUT, echo=True, gui=False):
+    print(f'--> {name}')
+    log = run.logs / f'{slug(name)}.log'
+    code, timed_out, seconds = run_process(command, log, environment or child_environment(run.folder), timeout, echo)
+    traceback_seen = gui and 'Traceback' in log.read_text(encoding='utf-8', errors='replace')
+    detail = f'timed out after {timeout}s and was killed' if timed_out else f'exit code {code}' if code else 'Traceback in output' if traceback_seen else ''
+    if detail and not echo:
+        print_tail(log)
+    return run.record(name, not detail, seconds, log, detail)
+
+
+def python_step(run, name, *arguments):
+    return step(run, name, [sys.executable, *arguments])
+
+
+def smoke_command():
+    return [blender(), "--background", "--factory-startup", "--python-exit-code", "1", "--python", "tests/blender_smoke.py"]
+
+
+def do_public(run):
+    print("\n=== PUBLICATION CHECK (CHEAPEST FAILURE FIRST) ===")
+    python_step(run, "Publication check of source, history and archives", "tools/check_public.py")
+
+
+def do_quick_tests(run):
+    print("\n=== STATIC INTEGRITY & MOCKED HEADLESS UNIT TESTS ===")
+    python_step(run, "Static import and dead-code integrity", "-m", "tools.check_dead_code")
+    step(run, "Whitespace check against main", ["git", "diff", "--check", gate.merge_base()])
+    python_step(run, "Mocked headless unit tests", "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py")
+
+
+def do_smoke(run):
+    print("\n=== REAL-BLENDER BACKGROUND & LOAD SMOKE SUITE ===")
+    step(run, "Real-Blender smoke suite", smoke_command())
 
 
 def journey_command(journey):
-    mode = ["--enable-event-simulate"] if journey.startswith("gui_") else ["--background", "--python-exit-code", "1"]
-    return [BLENDER_PATH, *mode, "--factory-startup", "--python", "tools/journey_probe.py", "--python", f"tests/{journey}"]
+    mode = ["--enable-event-simulate"] if journey.startswith("gui_") else ["--background"]
+    return [blender(), *mode, "--factory-startup", "--python-exit-code", "1", "--python", "tools/journey_probe.py", "--python", f"tests/{journey}"]
 
 
 def available_memory():
@@ -106,62 +237,13 @@ def journey_limits(count):
     return limits
 
 
-def fresh_folder(parent):
-    number = 0
-    while True:
-        try:
-            (parent / str(number)).mkdir()
-            return parent / str(number)
-        except FileExistsError:
-            number += 1
-
-
 def run_journey(journey, run):
-    scratch = run / f"{JOURNEYS.index(journey):02d}"
-    scratch.mkdir()
-    log = run / f"{journey}.jsonl"
-    return execute(journey_command(journey), dict(child_environment(scratch), DEVIL_PAINTER_JOURNEY_LOG=str(log))) + (log,)
-
-
-def run_journeys(keep_going):
-    print("\n=== RUNNING REAL-BLENDER JOURNEYS (EXPORTS HASHED) ===")
-    journeys = prepare_scratch() / "j"
-    journeys.mkdir(exist_ok=True)
-    run = fresh_folder(journeys)
-    shared = [journey for journey in sorted(JOURNEYS, key=slowest_first) if journey not in EXCLUSIVE_JOURNEYS]
-    limits = journey_limits(len(shared))
-    workers = max(1, min(limits.values()))
-    print(f"    {len(JOURNEYS)} journeys, each in its own scratch folder {run.relative_to(ROOT).as_posix()}/<journey number>: "
-          f"{', '.join(EXCLUSIVE_JOURNEYS)} alone, then {workers} at a time ({', '.join(f'{name} {limit}' for name, limit in limits.items())})")
-    hashes = {}
-    failed = []
-
-    def finish(journey, res, dt, passed, log):
-        print(f"--> Journey: {journey} ({JOURNEYS.index(journey):02d})...")
-        hashes[journey] = gate.read_log(log)
-        if not report(res, dt, passed):
-            failed.append(journey)
-
-    for journey in EXCLUSIVE_JOURNEYS:
-        finish(journey, *run_journey(journey, run))
-        if failed and not keep_going:
-            return ordered(hashes), failed
-    stopped = threading.Event()
-
-    def unless_stopped(journey):
-        if stopped.is_set():
-            return None
-        outcome = run_journey(journey, run)
-        if not outcome[2] and not keep_going:
-            stopped.set()
-        return outcome
-
-    with ThreadPoolExecutor(workers) as pool:
-        running = {pool.submit(unless_stopped, journey): journey for journey in shared}
-        for done in as_completed(running):
-            if done.result() is not None:
-                finish(running[done], *done.result())
-    return ordered(hashes), [journey for journey in JOURNEYS if journey in failed]
+    number = f"{JOURNEYS.index(journey):02d}"
+    scratch = prepare_scratch(run.folder / "j" / number)
+    exports = run.folder / "j" / f"{journey}.jsonl"
+    environment = dict(child_environment(scratch), DEVIL_PAINTER_JOURNEY_LOG=str(exports))
+    passed = step(run, f"Journey {number} {journey}", journey_command(journey), environment, JOURNEY_TIMEOUT, echo=False, gui=journey.startswith("gui_"))
+    return gate.read_log(exports), passed
 
 
 def slowest_first(journey):
@@ -172,71 +254,85 @@ def ordered(hashes):
     return {journey: hashes[journey] for journey in JOURNEYS if journey in hashes}
 
 
-def do_journeys(golden_mode, keep_going=False):
-    hashes, failed = run_journeys(keep_going)
-    exports = sum(map(len, hashes.values()))
+def run_journeys(run):
+    print("\n=== REAL-BLENDER JOURNEYS (EXPORTS HASHED) ===")
+    shared = [journey for journey in sorted(JOURNEYS, key=slowest_first) if journey not in EXCLUSIVE_JOURNEYS]
+    limits = journey_limits(len(shared))
+    workers = max(1, min(limits.values()))
+    print(f"    {len(JOURNEYS)} journeys, each in its own scratch folder {shown(run.folder)}/j/<journey number>, logs in {shown(run.logs)}, "
+          f"killed after {JOURNEY_TIMEOUT}s: {', '.join(EXCLUSIVE_JOURNEYS)} alone, then {workers} at a time "
+          f"({', '.join(f'{name} {limit}' for name, limit in limits.items())})")
+    hashes = {}
+    failed = []
+
+    def one(journey):
+        hashes[journey], passed = run_journey(journey, run)
+        if not passed:
+            failed.append(journey)
+
+    for journey in EXCLUSIVE_JOURNEYS:
+        one(journey)
+    with ThreadPoolExecutor(workers) as pool:
+        list(pool.map(one, shared))
+    run.journeys = len(JOURNEYS)
+    run.journeys_passed = len(JOURNEYS) - len(failed)
+    return ordered(hashes), [journey for journey in JOURNEYS if journey in failed]
+
+
+def do_journeys(run, golden_mode):
+    hashes, failed = run_journeys(run)
+    run.exports = sum(map(len, hashes.values()))
     if golden_mode == "update":
         if failed:
-            print(f"Golden manifest not written: {', '.join(failed)} failed.")
-            return False
+            return run.record("Golden manifest update", False, detail=f"not written because {', '.join(failed)} failed")
         gate.write_golden(hashes)
-        print(f"Golden manifest written: {exports} exports across {len(hashes)} journeys -> {gate.GOLDEN.relative_to(ROOT).as_posix()}")
-        return True
-    if failed and not keep_going:
-        return False
+        print(f"Golden manifest written: {run.exports} exports across {len(hashes)} journeys -> {shown(gate.GOLDEN)}")
+        return run.record("Golden manifest update", True)
+    if not run.exports:
+        return run.record("Golden compare", False, detail="no journey produced an export")
     differences = gate.golden_differences(gate.read_golden(), hashes)
-    print(f"Golden compare: {exports} exports across {len(hashes)} journeys, {len(differences)} differences")
+    run.differences = len(differences)
+    print(f"Golden compare: {run.exports} exports across {len(hashes)} journeys, {len(differences)} differences")
     for difference in differences:
         print(f"    DIFFERS {difference}")
-    if failed:
-        print(f"Journeys that failed: {', '.join(failed)}")
-    return not differences and not failed
+    return run.record("Golden compare", not differences, detail=f"{len(differences)} differences" if differences else "")
 
 
-def do_tests(golden_mode="compare"):
-    print("\n=== RUNNING ALL TEST SUITES ===")
-    if not (do_quick_tests() and do_smoke() and do_journeys(golden_mode)):
-        return False
-    print("ALL TESTS PASSED!\n")
-    return True
+def do_tests(run, golden_mode="compare"):
+    do_quick_tests(run)
+    do_smoke(run)
+    do_journeys(run, golden_mode)
 
 
-def do_build():
-    print("\n=== BUILDING & VALIDATING EXTENSION ===")
-
-    if not run_cmd([sys.executable, "tools/build.py"], desc="Package extension zip"):
-        return False
-
-    zip_path = extension_archive()
-
-    if not run_cmd([BLENDER_PATH, "--background", "--factory-startup", "--command", "extension", "validate", str(zip_path)],
-                   desc="Validate extension package"):
-        return False
-
-    import shutil
-    installs = sorted(Path(os.path.expandvars(r"%APPDATA%\Blender Foundation\Blender")).glob("*/extensions/user_default/devil_painter"))
-    for user_ext in installs:
-        shutil.copytree(ROOT / "devil_painter", user_ext, dirs_exist_ok=True, ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
-        print(f"    Synced to {user_ext}")
+def sync_user_extensions(run):
+    print("--> Sync to Blender user extensions")
+    started = time.time()
+    base = Path(os.path.expandvars(r"%APPDATA%\Blender Foundation\Blender"))
+    installs = sorted(base.glob("*/extensions/user_default/devil_painter"))
+    try:
+        for user_ext in installs:
+            shutil.copytree(ROOT / "devil_painter", user_ext, dirs_exist_ok=True, ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+            print(f"    Synced to Blender {user_ext.relative_to(base).as_posix()}")
+    except OSError as error:
+        return run.record("Sync to Blender user extensions", False, time.time() - started, detail=str(error))
     if not installs:
-        print(f"    (User extensions folder not found, skipping sync)")
-
-    if not run_cmd(SMOKE_COMMAND, desc="Real-Blender Full-Package & Zip Load Gate"):
-        return False
-
-    if not run_cmd([sys.executable, "tools/check_public.py"], desc="Public source and archive check"):
-        return False
-
-    print("BUILD & VALIDATION COMPLETE!\n")
-    return True
+        print("    (User extensions folder not found, skipping sync)")
+    return run.record("Sync to Blender user extensions", True, time.time() - started)
 
 
-def test_step(golden_mode):
-    return do_tests if golden_mode == "compare" else lambda: do_tests(golden_mode)
+def do_build(run):
+    print("\n=== BUILDING & VALIDATING EXTENSION ===")
+    python_step(run, "Package extension zip", "tools/build.py")
+    step(run, "Validate extension package", [blender(), "--background", "--factory-startup", "--command", "extension", "validate", str(extension_archive())])
+    sync_user_extensions(run)
+    step(run, "Real-Blender full-package and zip load gate", smoke_command())
+    python_step(run, "Publication check of the built archive", "tools/check_public.py")
 
 
-def tier_steps(tier, golden_mode):
-    return [do_quick_tests if tier == "light" else test_step(golden_mode), do_build]
+def gate_groups(tier, golden_mode):
+    if tier == "light":
+        return [do_public, do_quick_tests, do_build]
+    return [do_public, do_quick_tests, do_smoke, lambda run: do_journeys(run, golden_mode), do_build]
 
 
 def chosen_tier(args):
@@ -247,61 +343,249 @@ def chosen_tier(args):
     return "full", "default for --test --build and --all"
 
 
+def new_run_id():
+    return os.environ.get(RUN_ID_VARIABLE) or f"{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}"
+
+
+def report(run, seconds):
+    failures = run.failures()
+    print(f"\n=== GATE REPORT: {len(run.outcomes)} steps, {len(failures)} failed, {gate_state.duration_text(seconds)} ===")
+    for outcome in failures:
+        print(f"FAILED  {outcome.name}: {outcome.detail}" + (f" -> {shown(outcome.log)}" if outcome.log else ""))
+    return failures
+
+
+def gate_record(run, tier, tree, seconds, failures):
+    archive = extension_archive()
+    return dict(verdict="failed" if failures else "passed", tier=tier, tree=tree,
+                zip_sha256=gate_state.sha256(archive) if archive.is_file() else None,
+                journeys=run.journeys, journeys_passed=run.journeys_passed, exports=run.exports, differences=run.differences,
+                steps=len(run.outcomes), steps_passed=len(run.outcomes) - len(failures), seconds=round(seconds, 1), finished=stamp())
+
+
+def run_gate(groups, args, tier, run_id, command):
+    started = time.time()
+    status = dict(pid=os.getpid(), run=run_id, command=command, started=stamp(), started_at=started)
+    if os.environ.get(RUN_ID_VARIABLE):
+        status["console"] = shown(gate_state.console_path())
+    tree = None
+    if tier:
+        tree = gate_state.tree_fingerprint()
+        saved = None if args.golden == "update" or args.rerun else gate_state.saved_pass(tree, tier, extension_archive())
+        if saved:
+            line = gate_state.summary_line(saved)
+            print(f"The gate already passed on this exact tree ({tree[:12]}) and archive; reporting the saved result instead of running it again (--rerun forces a run).")
+            print(line)
+            gate_state.write_status(**status, state="passed", exit_code=0, finished=stamp(), summary=line, saved=True, failures=[])
+            return 0
+    if any(group not in (do_public, do_quick_tests) for group in groups):
+        try:
+            print(f"Blender: {blender()}")
+        except BlenderMissing as missing:
+            print(missing)
+            gate_state.write_status(**status, state="failed", exit_code=1, finished=stamp(), summary=str(missing), failures=[])
+            return 1
+    run = Run(run_id, prepare_scratch(scratch_root() / f"run-{run_id}"))
+    run.logs.mkdir(exist_ok=True)
+    status["folder"] = shown(run.folder)
+    gate_state.write_status(**status, state="running")
+    print(f"Gate run {run_id}: scratch and logs in {shown(run.folder)}")
+    try:
+        for group in groups:
+            group(run)
+    except Exception:
+        traceback.print_exc()
+        run.record("Gate runner", False, detail="the runner itself raised; see the traceback above")
+    seconds = time.time() - started
+    failures = report(run, seconds)
+    summary = f"{len(run.outcomes)} steps, {len(failures)} failed, {gate_state.duration_text(seconds)}"
+    if tier:
+        record = gate_record(run, tier, tree, seconds, failures)
+        summary = gate_state.summary_line(record)
+        if not failures:
+            if gate_state.tree_fingerprint() == tree:
+                gate_state.save_result(record)
+            else:
+                print("The source tree changed while the gate ran, so this pass is not saved for it.")
+        print(summary)
+    code = 1 if failures else 0
+    if failures:
+        print(f"Task failed after {seconds:.0f}s. Diagnostic artifacts remain in {shown(run.folder)}; use --clean when finished.")
+    elif not args.keep_scratch:
+        try:
+            removed = clean_scratch(run.folder)
+            print(f"Scratch run folder removed ({removed} temporary files). Installable archives remain in dist.")
+        except (OSError, ValueError) as error:
+            print(f"Scratch cleanup failed: {error}")
+            code = 1
+    gate_state.write_status(**status, state="passed" if code == 0 else "failed", exit_code=code, finished=stamp(), summary=summary,
+                            failures=[dict(name=outcome.name, detail=outcome.detail, log=shown(outcome.log) if outcome.log else None) for outcome in failures])
+    if code == 0:
+        print(f"Dev tasks completed successfully in {seconds:.0f}s!")
+    return code
+
+
+def execute(groups, args, tier, command):
+    run_id = new_run_id()
+    try:
+        gate_state.acquire_lock(run_id)
+    except GateBusy as busy:
+        print(busy)
+        return 1
+    try:
+        return run_gate(groups, args, tier, run_id, command)
+    finally:
+        gate_state.release_lock()
+
+
+def clean_all():
+    owner = gate_state.lock_owner()
+    if owner:
+        print(f"A gate is running in this worktree (PID {owner['pid']}); scratch is left alone until it ends.")
+        return 1
+    try:
+        removed = clean_scratch(scratch_root())
+    except (OSError, ValueError) as error:
+        print(f"Scratch cleanup failed: {error}")
+        return 1
+    print(f"Scratch removed ({removed} temporary files). Installable archives remain in dist.")
+    return 0
+
+
+def detach(arguments):
+    owner = gate_state.lock_owner()
+    if owner:
+        print(f"Another gate is already running in this worktree (PID {owner['pid']}, run {owner.get('run')}). Follow it with `python tools/dev.py --wait`.")
+        return 1
+    run_id = new_run_id()
+    console = gate_state.console_path()
+    prepare_scratch(scratch_root())
+    command = " ".join(arguments)
+    gate_state.write_status(pid=None, run=run_id, command=command, started=stamp(), started_at=time.time(), state="starting", console=shown(console))
+    spawn = [sys.executable, "-B", "-u", str(Path(__file__).resolve()), *arguments]
+    environment = dict(os.environ, PYTHONUNBUFFERED="1", **{RUN_ID_VARIABLE: run_id})
+    with console.open("w", encoding="utf-8") as handle:
+        options = dict(cwd=ROOT, env=environment, stdin=subprocess.DEVNULL, stdout=handle, stderr=subprocess.STDOUT)
+        if os.name == "nt":
+            try:
+                process = subprocess.Popen(spawn, creationflags=WINDOWS_DETACH | WINDOWS_BREAKAWAY, **options)
+            except OSError:
+                process = subprocess.Popen(spawn, creationflags=WINDOWS_DETACH, **options)
+        else:
+            process = subprocess.Popen(spawn, start_new_session=True, **options)
+    status = gate_state.read_status()
+    if status and status.get("run") == run_id and status.get("state") == "starting":
+        gate_state.write_status(**dict(status, pid=process.pid))
+    print(f"Gate started in the background: run {run_id}, PID {process.pid}, console log {shown(console)}.")
+    print("Wait for it with `python tools/dev.py --wait` (exit 0 passed, 1 failed, 2 still running).")
+    return 0
+
+
+def still_running(status):
+    if status.get("pid"):
+        return gate_state.process_alive(status["pid"])
+    return time.time() - status.get("started_at", 0) < START_GRACE
+
+
+def show_finished(status):
+    if status.get("console"):
+        print_tail(workspace.ROOT / status["console"])
+    for failure in status.get("failures") or []:
+        print(f"FAILED  {failure['name']}: {failure['detail']}" + (f" -> {failure['log']}" if failure.get("log") else ""))
+    print(status.get("summary", ""))
+    return 0 if status["state"] == "passed" else 1
+
+
+def wait_for_gate():
+    deadline = time.time() + WAIT_LIMIT
+    announced = False
+    while True:
+        status = gate_state.read_status()
+        if not status:
+            print("No gate run is recorded in this worktree. Start one with `python tools/dev.py --detach --tier auto`.")
+            return 1
+        if status["state"] in ("passed", "failed", "dead"):
+            print(f"Gate run {status['run']} {status['state']} ({status['command']}).")
+            return show_finished(status)
+        if not still_running(status):
+            gate_state.write_status(**dict(status, state="dead", finished=stamp(), summary="the gate process ended without reporting a verdict"))
+            print(f"Gate run {status['run']} is dead: its process (PID {status.get('pid')}) ended without reporting a verdict.")
+            if status.get("console"):
+                print_tail(workspace.ROOT / status["console"])
+            if status.get("folder"):
+                print(f"Its logs remain in {status['folder']}/logs.")
+            return 1
+        if time.time() >= deadline:
+            print(f"Gate run {status['run']} is still running after {WAIT_LIMIT // 60} minutes of waiting. Run --wait again.")
+            if status.get("console"):
+                print_tail(workspace.ROOT / status["console"], 10)
+            return 2
+        if not announced:
+            print(f"Waiting up to {WAIT_LIMIT // 60} minutes for gate run {status['run']} (PID {status.get('pid')})...")
+            announced = True
+        time.sleep(WAIT_POLL)
+
+
 def main(argv=None):
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(line_buffering=True, errors="replace")
+    arguments = list(sys.argv[1:] if argv is None else argv)
     parser = argparse.ArgumentParser(description="Devil Painter Dev Tool")
     parser.add_argument("--quick", action="store_true", help="Run fast headless unit tests only")
     parser.add_argument("--test", action="store_true", help="Run all unit, Blender smoke, and GUI tests with the golden journey compare")
     parser.add_argument("--build", action="store_true", help="Build, validate, and sync")
     parser.add_argument("--all", action="store_true", help="Test, build, and validate")
-    parser.add_argument("--tier", choices=("auto", *gate.TIER_NAMES), help="Run the gate at a risk tier; auto picks it from the diff against main")
+    parser.add_argument("--tier", choices=("auto", *gate.TIER_NAMES), help="Run the gate at a risk tier; auto picks it from the tracked diff against main")
     parser.add_argument("--plan", action="store_true", help="With --tier, print the chosen tier and why without running it")
     parser.add_argument("--golden", choices=("compare", "update"), help="Alone, run every journey and compare to or rewrite the golden manifest; with a gate, choose what its journeys do")
+    parser.add_argument("--rerun", action="store_true", help="Run the gate even when it already passed on this exact tree")
+    parser.add_argument("--detach", action="store_true", help="Start the requested task in the background and return at once")
+    parser.add_argument("--wait", action="store_true", help="Wait up to 9 minutes for the gate: exit 0 passed, 1 failed or dead, 2 still running")
     parser.add_argument("--clean", action="store_true", help="Delete disposable scratch artifacts without touching dist or source")
     parser.add_argument("--keep-scratch", action="store_true", help="Keep artifacts after success for manual inspection")
 
-    args = parser.parse_args(argv)
-    if args.clean and args.keep_scratch:
-        parser.error('--clean and --keep-scratch cannot be combined')
+    args = parser.parse_args(arguments)
+    tasks = [args.quick, args.test, args.build, args.all, args.golden, args.tier]
+    if args.wait and (any(tasks) or args.detach or args.clean):
+        parser.error('--wait follows a running gate; do not combine it with other options')
+    if args.clean and (any(tasks) or args.keep_scratch or args.detach):
+        parser.error('--clean runs alone')
     if args.tier and (args.quick or args.test or args.build or args.all):
         parser.error('--tier runs the whole gate; do not combine it with --quick, --test, --build or --all')
     if args.plan and not args.tier:
         parser.error('--plan needs --tier')
-    gated = bool(args.tier or args.all or (args.test and args.build))
-    if not any([args.quick, args.test, args.build, args.golden, gated, args.clean]):
+    if args.detach and (args.plan or not any(tasks)):
+        parser.error('--detach needs a task to run, such as --tier auto')
+    if args.wait:
+        return wait_for_gate()
+    if args.clean:
+        return clean_all()
+    if not any(tasks):
         parser.print_help()
         return 0
+    if args.detach:
+        return detach([argument for argument in arguments if argument != "--detach"])
 
-    started = time.time()
     golden_mode = args.golden or "compare"
+    gated = bool(args.tier or args.all or (args.test and args.build))
+    tier = None
     if gated:
         tier, reason = chosen_tier(args)
         print(f"GATE TIER: {tier.upper()} ({reason})")
+        untracked = gate.untracked_files()
+        if untracked:
+            print(f"Untracked files (named only, they do not change the tier): {gate.listed(untracked)}")
         if args.plan:
             return 0
-        operations = [(True, step) for step in tier_steps(tier, golden_mode)]
+        groups = gate_groups(tier, golden_mode)
     else:
-        operations = [
+        groups = [group for enabled, group in (
             (args.quick, do_quick_tests),
-            (args.test, test_step(golden_mode)),
-            (args.golden and not args.test, lambda: do_journeys(golden_mode, keep_going=True)),
+            (args.test, lambda run: do_tests(run, golden_mode)),
+            (args.golden and not args.test, lambda run: do_journeys(run, golden_mode)),
             (args.build, do_build),
-        ]
-    if any(enabled for enabled, operation in operations):
-        prepare_scratch()
-    for enabled, operation in operations:
-        if enabled and not operation():
-            print(f'Task failed after {time.time() - started:.0f}s. Diagnostic artifacts remain in scratch; use --clean when finished.')
-            return 1
-    if not args.keep_scratch:
-        try:
-            removed = clean_scratch()
-        except (OSError, ValueError) as error:
-            print(f'Scratch cleanup failed: {error}')
-            return 1
-        print(f'Scratch removed ({removed} temporary files). Installable archives remain in dist.')
-
-    print(f"Dev tasks completed successfully in {time.time() - started:.0f}s!")
-    return 0
+        ) if enabled]
+    return execute(groups, args, tier, " ".join(arguments))
 
 
 if __name__ == '__main__':

@@ -2,8 +2,8 @@ import ast
 import importlib
 from pathlib import Path
 import pkgutil
-import shutil
 import sys
+import tempfile
 from zipfile import ZipFile
 import bpy
 
@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(ROOT))
 import devil_painter
+from tools.workspace import prepare_scratch
 
 
 def check(condition, message):
@@ -51,8 +52,7 @@ for pf in py_files:
 from tools.build import build_extension
 zip_path = build_extension()
 check(zip_path.is_file(), f'packaged extension zip exists ({zip_path.name})')
-ext_root = ROOT / 'scratch' / 'ext_load_check'
-shutil.rmtree(ext_root, ignore_errors=True)
+ext_root = Path(tempfile.mkdtemp(prefix='ext_load_check-', dir=prepare_scratch()))
 pkg_target = ext_root / 'bl_ext' / 'user_default' / 'devil_painter'
 pkg_target.mkdir(parents=True, exist_ok=True)
 (ext_root / 'bl_ext' / '__init__.py').write_text('', encoding='utf-8')
@@ -79,10 +79,6 @@ finally:
     for k in [k for k in sys.modules if k == 'bl_ext' or k.startswith('bl_ext.')]:
         del sys.modules[k]
     sys.modules.update(saved_bl_ext)
-    shutil.rmtree(ext_root, ignore_errors=True)
-    scratch_dir = ROOT / 'scratch'
-    if scratch_dir.exists() and not any(scratch_dir.iterdir()):
-        scratch_dir.rmdir()
 
 devil_painter.register()
 check_registered('direct package')

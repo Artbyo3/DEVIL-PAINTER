@@ -1,3 +1,6 @@
+import json
+import os
+import sys
 from pathlib import Path
 from contextlib import nullcontext
 import tempfile
@@ -87,27 +90,27 @@ class ScratchWorkspaceTests(unittest.TestCase):
                 workspace.clean_scratch()
         self.assertTrue(protected.exists())
 
-    def test_journey_scratch_is_a_numbered_folder_inside_scratch_j(self):
-        journey = self.scratch / 'j' / '0' / '01'
+    def test_run_scratch_is_a_folder_inside_scratch_run(self):
+        journey = self.scratch / 'run-1' / 'j' / '01'
         journey.mkdir(parents=True)
         with patch.object(workspace, 'SCRATCH', journey):
             self.assertEqual(workspace.prepare_scratch(), journey)
-            environment = workspace.child_environment(journey)
-        self.assertEqual(Path(environment[workspace.JOURNEY_SCRATCH]), journey)
+        environment = workspace.child_environment(journey)
+        self.assertEqual(Path(environment[workspace.SCRATCH_VARIABLE]), journey)
         self.assertEqual(Path(environment['BLENDER_USER_CONFIG']), journey / 'blender-config')
         self.assertEqual(Path(environment['TEMP']), journey / 'blender-temp')
-        self.assertNotIn(workspace.JOURNEY_SCRATCH, workspace.child_environment())
+        self.assertEqual(environment['PYTHONUNBUFFERED'], '1')
 
-    def test_journey_scratch_refuses_escapes_and_links(self):
-        (self.scratch / 'j').mkdir(parents=True)
+    def test_run_scratch_refuses_escapes_and_links(self):
+        (self.scratch / 'run-1').mkdir(parents=True)
         outside = self.root / 'source'
         outside.mkdir()
-        for escape in (self.scratch / 'j', self.scratch / 'j' / '..' / '..' / 'source', outside / 'journeys' / 'run'):
+        for escape in (self.scratch / 'j', self.scratch / 'run-1' / '..' / '..' / 'source', outside / 'run-1'):
             with patch.object(workspace, 'SCRATCH', escape):
                 with self.assertRaises(ValueError):
                     workspace.prepare_scratch()
-        with self.linked_directory(self.scratch / 'j' / 'linked', outside):
-            with patch.object(workspace, 'SCRATCH', self.scratch / 'j' / 'linked' / '01'):
+        with self.linked_directory(self.scratch / 'run-1' / 'linked', outside):
+            with patch.object(workspace, 'SCRATCH', self.scratch / 'run-1' / 'linked' / '01'):
                 with self.assertRaises(ValueError):
                     workspace.prepare_scratch()
         self.assertEqual(list(outside.iterdir()), [])
@@ -138,25 +141,46 @@ class ScratchWorkspaceTests(unittest.TestCase):
                 workspace.clean_scratch()
         self.assertTrue(artifact.exists())
 
-    def test_successful_runner_cleans_scratch(self):
-        workspace.prepare_scratch()
-        (self.scratch / 'report.json').write_text('{}', encoding='utf-8')
-        with patch.object(dev, 'do_quick_tests', return_value=True), patch('builtins.print'):
-            self.assertEqual(dev.main(['--quick']), 0)
-        self.assertFalse(self.scratch.exists())
+    def run_folders(self):
+        return sorted(path.name for path in self.scratch.glob('run-*'))
 
-    def test_failed_runner_preserves_diagnostics(self):
+    def passing(self, name='step'):
+        return lambda run: run.record(name, True)
+
+    def test_successful_runner_removes_only_its_own_run_folder(self):
         workspace.prepare_scratch()
-        report = self.scratch / 'report.json'
-        report.write_text('{}', encoding='utf-8')
-        with patch.object(dev, 'do_quick_tests', return_value=False), patch('builtins.print'):
-            self.assertEqual(dev.main(['--quick']), 1)
-        self.assertTrue(report.exists())
+        other = self.scratch / 'report.json'
+        other.write_text('{}', encoding='utf-8')
+        with patch.object(dev, 'do_quick_tests', side_effect=self.passing()), patch('builtins.print'):
+            self.assertEqual(dev.main(['--quick']), 0)
+        self.assertEqual(self.run_folders(), [])
+        self.assertTrue(other.exists())
+        self.assertFalse((self.scratch / 'gate.lock').exists())
+        self.assertEqual(json.loads((self.scratch / 'gate-status.json').read_text(encoding='utf-8'))['state'], 'passed')
+
+    def test_failed_runner_preserves_diagnostics_and_runs_every_group(self):
+        ran = []
+
+        def failing(run):
+            ran.append('first')
+            run.record('first', False, detail='exit code 1')
+
+        def later(run):
+            ran.append('later')
+            run.record('later', True)
+
+        with patch.object(dev, 'do_quick_tests', side_effect=failing), patch.object(dev, 'do_build', side_effect=later), \
+                patch.object(dev, 'blender', return_value='blender'), patch('builtins.print'):
+            self.assertEqual(dev.main(['--quick', '--build']), 1)
+        self.assertEqual(ran, ['first', 'later'])
+        self.assertEqual(len(self.run_folders()), 1)
+        status = json.loads((self.scratch / 'gate-status.json').read_text(encoding='utf-8'))
+        self.assertEqual((status['state'], [failure['name'] for failure in status['failures']]), ('failed', ['first']))
 
     def test_keep_scratch_retains_successful_run_artifacts(self):
-        with patch.object(dev, 'do_quick_tests', return_value=True), patch('builtins.print'):
+        with patch.object(dev, 'do_quick_tests', side_effect=self.passing()), patch('builtins.print'):
             self.assertEqual(dev.main(['--quick', '--keep-scratch']), 0)
-        self.assertTrue(self.scratch.exists())
+        self.assertEqual(len(self.run_folders()), 1)
 
     def test_explicit_clean_does_not_run_tests_or_build(self):
         workspace.prepare_scratch()
@@ -166,42 +190,85 @@ class ScratchWorkspaceTests(unittest.TestCase):
         build.assert_not_called()
         self.assertFalse(self.scratch.exists())
 
-    def test_runner_reports_cleanup_failure_and_retains_diagnostics(self):
-        with patch.object(dev, 'do_quick_tests', return_value=True), patch.object(dev, 'clean_scratch', side_effect=PermissionError('locked')), patch('builtins.print'):
-            self.assertEqual(dev.main(['--quick']), 1)
-        self.assertTrue(self.scratch.exists())
+    def test_clean_refuses_while_a_gate_holds_the_lock(self):
+        workspace.prepare_scratch()
+        (self.scratch / 'gate.lock').write_text(json.dumps(dict(pid=os.getpid(), run='live')), encoding='utf-8')
+        with patch('builtins.print'):
+            self.assertEqual(dev.main(['--clean']), 1)
+        self.assertTrue((self.scratch / 'gate.lock').exists())
 
-    def test_journeys_stop_after_a_failure_and_keep_going_runs_every_journey(self):
+    def test_runner_reports_cleanup_failure_and_retains_diagnostics(self):
+        with patch.object(dev, 'do_quick_tests', side_effect=self.passing()), patch.object(dev, 'clean_scratch', side_effect=PermissionError('locked')), patch('builtins.print'):
+            self.assertEqual(dev.main(['--quick']), 1)
+        self.assertEqual(len(self.run_folders()), 1)
+
+    def test_every_journey_runs_after_a_failure(self):
         started = []
 
         def journey(name, run):
             started.append(name)
-            return SimpleNamespace(stdout='', stderr=''), 0.0, name != 'gui_project.py', run / 'missing.jsonl'
+            return [], name != 'gui_project.py'
 
-        for keep_going, expected in ((False, len(dev.SLOWEST_JOURNEYS)), (True, len(dev.JOURNEYS))):
-            started.clear()
-            with patch.object(dev, 'run_journey', side_effect=journey), patch.object(dev, 'journey_limits', return_value=dict(journeys=1)), patch('builtins.print'):
-                hashes, failed = dev.run_journeys(keep_going)
-            self.assertEqual(failed, ['gui_project.py'])
-            self.assertLessEqual(len(started), expected)
-            self.assertEqual(list(hashes), [name for name in dev.JOURNEYS if name in started])
+        run = dev.Run('test', workspace.prepare_scratch(self.scratch / 'run-test'))
+        with patch.object(dev, 'run_journey', side_effect=journey), patch.object(dev, 'journey_limits', return_value=dict(journeys=1)), patch('builtins.print'):
+            hashes, failed = dev.run_journeys(run)
+        self.assertEqual(failed, ['gui_project.py'])
         self.assertEqual(sorted(started), sorted(dev.JOURNEYS))
+        self.assertEqual(list(hashes), list(dev.JOURNEYS))
+        self.assertEqual((run.journeys, run.journeys_passed), (len(dev.JOURNEYS), len(dev.JOURNEYS) - 1))
 
-    def test_combined_run_cleans_only_after_build_finishes(self):
-        report = self.scratch / 'test-report.json'
-        archive = self.root / 'dist' / 'extension.zip'
+    def test_golden_compare_runs_even_when_a_journey_failed(self):
+        run = dev.Run('test', workspace.prepare_scratch(self.scratch / 'run-test'))
+        exports = {'blender_api.py': [['a.png', '0' * 64]]}
+        with patch.object(dev, 'run_journeys', return_value=(exports, ['gui_editor.py'])), \
+                patch.object(dev.gate, 'read_golden', return_value=exports), patch('builtins.print'):
+            self.assertTrue(dev.do_journeys(run, 'compare'))
+        self.assertEqual([outcome.name for outcome in run.outcomes], ['Golden compare'])
 
-        def tests():
-            report.write_text('{}', encoding='utf-8')
-            return True
+    def test_journey_timeout_kills_the_process_and_keeps_the_partial_log(self):
+        run = dev.Run('test', workspace.prepare_scratch(self.scratch / 'run-test'))
+        run.logs.mkdir()
+        command = [sys.executable, '-c', 'import time; print("partial", flush=True); time.sleep(60)']
+        with patch('builtins.print'):
+            passed = dev.step(run, 'Journey 99 hung.py', command, workspace.child_environment(run.folder), timeout=3, echo=False, gui=True)
+        self.assertFalse(passed)
+        self.assertIn('timed out', run.outcomes[0].detail)
+        self.assertIn('partial', run.outcomes[0].log.read_text(encoding='utf-8'))
 
-        def build():
-            self.assertTrue(report.exists())
-            archive.parent.mkdir()
-            archive.write_bytes(b'installable')
-            return True
+    def test_full_gate_saves_its_result_and_skips_an_unchanged_tree(self):
+        archive = self.root / 'dist' / 'devil_painter-0.4.0.zip'
+        calls = []
 
-        with patch.object(dev, 'do_tests', side_effect=tests), patch.object(dev, 'do_build', side_effect=build), patch('builtins.print'):
+        def group(name):
+            def record(run, *arguments):
+                calls.append(name)
+                if name == 'build':
+                    archive.parent.mkdir(exist_ok=True)
+                    archive.write_bytes(b'installable')
+                run.record(name, True)
+            return record
+
+        saved = {}
+        patches = [patch.object(dev, 'do_' + name, side_effect=group(name)) for name in ('public', 'quick_tests', 'smoke', 'journeys', 'build')]
+        patches += [patch.object(dev, 'blender', return_value='blender'), patch.object(dev, 'extension_archive', return_value=archive),
+                    patch.object(dev.gate_state, 'tree_fingerprint', return_value='f' * 40),
+                    patch.object(dev.gate_state, 'save_result', side_effect=saved.update),
+                    patch.object(dev.gate_state, 'result_path', return_value=self.root / 'result.json'), patch('builtins.print')]
+        for active in patches:
+            active.start()
+        try:
             self.assertEqual(dev.main(['--test', '--build']), 0)
-        self.assertFalse(self.scratch.exists())
-        self.assertEqual(archive.read_bytes(), b'installable')
+            self.assertEqual(calls, ['public', 'quick_tests', 'smoke', 'journeys', 'build'])
+            self.assertEqual((saved['verdict'], saved['tier'], saved['tree']), ('passed', 'full', 'f' * 40))
+            (self.root / 'result.json').write_text(json.dumps(saved), encoding='utf-8')
+            calls.clear()
+            self.assertEqual(dev.main(['--tier', 'standard']), 0)
+            self.assertEqual(calls, [])
+            status = json.loads((self.scratch / 'gate-status.json').read_text(encoding='utf-8'))
+            self.assertTrue(status['saved'])
+            self.assertIn('GATE RESULT: PASSED | tier FULL', status['summary'])
+            self.assertEqual(dev.main(['--tier', 'full', '--rerun']), 0)
+            self.assertEqual(len(calls), 5)
+        finally:
+            for active in patches:
+                active.stop()
