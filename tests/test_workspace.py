@@ -169,10 +169,16 @@ class ScratchWorkspaceTests(unittest.TestCase):
             ran.append('later')
             run.record('later', True)
 
-        with patch.object(dev, 'do_quick_tests', side_effect=failing), patch.object(dev, 'do_build', side_effect=later), \
-                patch.object(dev, 'blender', return_value='blender'), patch('builtins.print'):
-            self.assertEqual(dev.main(['--quick', '--build']), 1)
-        self.assertEqual(ran, ['first', 'later'])
+        later_groups = [patch.object(dev, name, side_effect=later) for name in ('do_package', 'do_smoke', 'do_install', 'do_archive_public')]
+        for active in later_groups:
+            active.start()
+        try:
+            with patch.object(dev, 'do_quick_tests', side_effect=failing), patch.object(dev, 'blender', return_value='blender'), patch('builtins.print'):
+                self.assertEqual(dev.main(['--quick', '--build']), 1)
+        finally:
+            for active in later_groups:
+                active.stop()
+        self.assertEqual(ran, ['first', 'later', 'later', 'later', 'later'])
         self.assertEqual(len(self.run_folders()), 1)
         status = json.loads((self.scratch / 'gate-status.json').read_text(encoding='utf-8'))
         self.assertEqual((status['state'], [failure['name'] for failure in status['failures']]), ('failed', ['first']))
@@ -184,7 +190,7 @@ class ScratchWorkspaceTests(unittest.TestCase):
 
     def test_explicit_clean_does_not_run_tests_or_build(self):
         workspace.prepare_scratch()
-        with patch.object(dev, 'do_tests') as tests, patch.object(dev, 'do_build') as build, patch('builtins.print'):
+        with patch.object(dev, 'do_quick_tests') as tests, patch.object(dev, 'do_package') as build, patch('builtins.print'):
             self.assertEqual(dev.main(['--clean']), 0)
         tests.assert_not_called()
         build.assert_not_called()
@@ -242,14 +248,14 @@ class ScratchWorkspaceTests(unittest.TestCase):
         def group(name):
             def record(run, *arguments):
                 calls.append(name)
-                if name == 'build':
+                if name == 'package':
                     archive.parent.mkdir(exist_ok=True)
                     archive.write_bytes(b'installable')
                 run.record(name, True)
             return record
 
         saved = {}
-        patches = [patch.object(dev, 'do_' + name, side_effect=group(name)) for name in ('public', 'quick_tests', 'smoke', 'journeys', 'build')]
+        patches = [patch.object(dev, 'do_' + name, side_effect=group(name)) for name in ('public', 'quick_tests', 'package', 'smoke', 'journeys', 'install', 'archive_public')]
         patches += [patch.object(dev, 'blender', return_value='blender'), patch.object(dev, 'extension_archive', return_value=archive),
                     patch.object(dev.gate_state, 'tree_fingerprint', return_value='f' * 40),
                     patch.object(dev.gate_state, 'save_result', side_effect=saved.update),
@@ -258,7 +264,7 @@ class ScratchWorkspaceTests(unittest.TestCase):
             active.start()
         try:
             self.assertEqual(dev.main(['--test', '--build']), 0)
-            self.assertEqual(calls, ['public', 'quick_tests', 'smoke', 'journeys', 'build'])
+            self.assertEqual(calls, ['public', 'quick_tests', 'package', 'smoke', 'journeys', 'install', 'archive_public'])
             self.assertEqual((saved['verdict'], saved['tier'], saved['tree']), ('passed', 'full', 'f' * 40))
             (self.root / 'result.json').write_text(json.dumps(saved), encoding='utf-8')
             calls.clear()
@@ -268,7 +274,7 @@ class ScratchWorkspaceTests(unittest.TestCase):
             self.assertTrue(status['saved'])
             self.assertIn('GATE RESULT: PASSED | tier FULL', status['summary'])
             self.assertEqual(dev.main(['--tier', 'full', '--rerun']), 0)
-            self.assertEqual(len(calls), 5)
+            self.assertEqual(len(calls), 7)
         finally:
             for active in patches:
                 active.stop()

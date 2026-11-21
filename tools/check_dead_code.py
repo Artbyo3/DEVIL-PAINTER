@@ -2,6 +2,9 @@ import ast
 from pathlib import Path
 import sys
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from tools.check_comments import check_repository
+
 
 def _extract_target_names(target):
     if isinstance(target, ast.Name):
@@ -204,20 +207,6 @@ def find_draw_integrity_violations(root):
     return violations
 
 
-def check_draw_integrity(root):
-    violations = find_draw_integrity_violations(root)
-    if violations:
-        raise ValueError('\n'.join(violations))
-    return len(violations)
-
-
-def check_import_integrity(root):
-    violations = find_missing_imports(root)
-    if violations:
-        raise ValueError('\n'.join(violations))
-    return len(list((root / 'devil_painter').glob('*.py')))
-
-
 def find_dead_code(root):
     pkg = root / 'devil_painter'
     py_files = sorted(pkg.glob('*.py'))
@@ -272,9 +261,10 @@ def check_dead_code(root):
     return len(list((root / 'devil_painter').glob('*.py')))
 
 
+def check_source_rules(root):
+    return check_repository(root), check_dead_code(root)
+
+
 if __name__ == '__main__':
-    root = Path(__file__).resolve().parents[1]
-    count = check_dead_code(root)
-    check_import_integrity(root)
-    check_draw_integrity(root)
-    print(f'Checked {count} package modules: zero dead code, unused imports, missing cross-module imports, or draw integrity violations detected.')
+    files, modules = check_source_rules(Path(__file__).resolve().parents[1])
+    print(f'Checked {files} Python files: zero comments or docstrings. Checked {modules} package modules: zero dead code, unused imports, missing cross-module imports, or draw integrity violations detected.')

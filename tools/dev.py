@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from zipfile import ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.dont_write_bytecode = True
@@ -40,6 +41,9 @@ RUN_ID_VARIABLE = 'DEVIL_PAINTER_RUN_ID'
 WINDOWS_DETACH = 0x08000000 | 0x00000200
 WINDOWS_BREAKAWAY = 0x01000000
 BLENDER = {}
+SCAN_STEP = "Rule Zero, dead-code and import scan"
+INSTALL_STEP = "Install the validated zip into Blender user extensions"
+SMOKE_STEP = "Real-Blender smoke suite and zip load gate"
 
 
 class BlenderMissing(Exception):
@@ -64,6 +68,7 @@ class Run:
     journeys_passed: int = 0
     exports: int = 0
     differences: int = 0
+    package: dict | None = None
 
     @property
     def logs(self):
@@ -181,8 +186,8 @@ def python_step(run, name, *arguments):
     return step(run, name, [sys.executable, *arguments])
 
 
-def smoke_command():
-    return [blender(), "--background", "--factory-startup", "--python-exit-code", "1", "--python", "tests/blender_smoke.py"]
+def smoke_command(package):
+    return [blender(), "--background", "--factory-startup", "--python-exit-code", "1", "--python", "tests/blender_smoke.py", "--", str(package["path"]), package["sha256"]]
 
 
 def do_public(run):
@@ -192,14 +197,41 @@ def do_public(run):
 
 def do_quick_tests(run):
     print("\n=== STATIC INTEGRITY & MOCKED HEADLESS UNIT TESTS ===")
-    python_step(run, "Static import and dead-code integrity", "-m", "tools.check_dead_code")
+    python_step(run, SCAN_STEP, "-m", "tools.check_dead_code")
     step(run, "Whitespace check against main", ["git", "diff", "--check", gate.merge_base()])
     python_step(run, "Mocked headless unit tests", "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py")
 
 
+def scanned(run):
+    return any(outcome.name == SCAN_STEP and outcome.passed for outcome in run.outcomes)
+
+
+def do_package(run):
+    print("\n=== PACKAGING & VALIDATING THE EXTENSION ONCE ===")
+    run.package = None
+    if not python_step(run, "Package extension zip", "tools/build.py", *(["--scanned"] if scanned(run) else [])):
+        return False
+    archive = extension_archive()
+    digest = gate_state.sha256(archive)
+    print(f"    {shown(archive)} sha256 {digest}")
+    if not step(run, "Validate extension package", [blender(), "--background", "--factory-startup", "--command", "extension", "validate", str(archive)]):
+        return False
+    run.package = dict(path=archive, sha256=digest)
+    return True
+
+
+def validated_package(run, name):
+    if not run.package:
+        return run.record(name, False, detail="no zip from this run passed validation")
+    if gate_state.sha256(run.package["path"]) != run.package["sha256"]:
+        return run.record(name, False, detail="the zip changed after it was validated")
+    return True
+
+
 def do_smoke(run):
-    print("\n=== REAL-BLENDER BACKGROUND & LOAD SMOKE SUITE ===")
-    step(run, "Real-Blender smoke suite", smoke_command())
+    print("\n=== REAL-BLENDER SMOKE SUITE ON THE VALIDATED ZIP ===")
+    if validated_package(run, SMOKE_STEP):
+        step(run, SMOKE_STEP, smoke_command(run.package))
 
 
 def journey_command(journey):
@@ -298,41 +330,88 @@ def do_journeys(run, golden_mode):
     return run.record("Golden compare", not differences, detail=f"{len(differences)} differences" if differences else "")
 
 
-def do_tests(run, golden_mode="compare"):
-    do_quick_tests(run)
-    do_smoke(run)
-    do_journeys(run, golden_mode)
-
-
-def sync_user_extensions(run):
-    print("--> Sync to Blender user extensions")
-    started = time.time()
+def user_extension_installs():
     base = Path(os.path.expandvars(r"%APPDATA%\Blender Foundation\Blender"))
-    installs = sorted(base.glob("*/extensions/user_default/devil_painter"))
+    return base, sorted(base.glob("*/extensions/user_default/devil_painter"))
+
+
+def remove_folder(folder):
+    if workspace.is_link(folder) or not folder.is_dir():
+        raise ValueError(f"{folder.name} is a link or not a folder, so it is left alone")
+    shutil.rmtree(folder)
+
+
+def installed_differences(archive, target):
+    with ZipFile(archive) as package:
+        expected = {name: package.read(name) for name in package.namelist() if not name.endswith("/")}
+    present = {path.relative_to(target).as_posix() for path in target.rglob("*") if path.is_file()}
+    differences = sorted(present.symmetric_difference(expected))
+    return differences + sorted(name for name in present & expected.keys() if (target / name).read_bytes() != expected[name])
+
+
+def install_package(archive, target):
+    if workspace.is_link(target) or not target.is_dir():
+        raise ValueError(f"{target.name} is a link or not a folder, so it is left alone")
+    staging = target.with_name(target.name + ".installing")
+    replaced = target.with_name(target.name + ".replaced")
+    for leftover in (staging, replaced):
+        if leftover.exists():
+            remove_folder(leftover)
+    with ZipFile(archive) as package:
+        package.extractall(staging)
+    target.rename(replaced)
     try:
-        for user_ext in installs:
-            shutil.copytree(ROOT / "devil_painter", user_ext, dirs_exist_ok=True, ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
-            print(f"    Synced to Blender {user_ext.relative_to(base).as_posix()}")
-    except OSError as error:
-        return run.record("Sync to Blender user extensions", False, time.time() - started, detail=str(error))
+        staging.rename(target)
+    except OSError:
+        replaced.rename(target)
+        raise
+    remove_folder(replaced)
+    return installed_differences(archive, target)
+
+
+def do_install(run):
+    print("\n=== INSTALLING THE VALIDATED ZIP ===")
+    if not validated_package(run, INSTALL_STEP):
+        return False
+    print(f"--> {INSTALL_STEP}")
+    started = time.time()
+    base, installs = user_extension_installs()
+    try:
+        for target in installs:
+            differences = install_package(run.package["path"], target)
+            where = target.relative_to(base).as_posix()
+            if differences:
+                return run.record(INSTALL_STEP, False, time.time() - started, detail=f"{where} differs from the zip: {', '.join(differences[:5])}")
+            print(f"    Replaced Blender {where} with the zip contents, every file identical to the zip (sha256 {run.package['sha256']})")
+    except (OSError, ValueError) as error:
+        return run.record(INSTALL_STEP, False, time.time() - started, detail=str(error))
     if not installs:
-        print("    (User extensions folder not found, skipping sync)")
-    return run.record("Sync to Blender user extensions", True, time.time() - started)
+        print("    (No Devil Painter folder in Blender's user_default extensions, nothing to replace)")
+    return run.record(INSTALL_STEP, True, time.time() - started)
 
 
-def do_build(run):
-    print("\n=== BUILDING & VALIDATING EXTENSION ===")
-    python_step(run, "Package extension zip", "tools/build.py")
-    step(run, "Validate extension package", [blender(), "--background", "--factory-startup", "--command", "extension", "validate", str(extension_archive())])
-    sync_user_extensions(run)
-    step(run, "Real-Blender full-package and zip load gate", smoke_command())
+def do_archive_public(run):
     python_step(run, "Publication check of the built archive", "tools/check_public.py")
 
 
+def journeys_group(golden_mode):
+    return lambda run: do_journeys(run, golden_mode)
+
+
 def gate_groups(tier, golden_mode):
-    if tier == "light":
-        return [do_public, do_quick_tests, do_build]
-    return [do_public, do_quick_tests, do_smoke, lambda run: do_journeys(run, golden_mode), do_build]
+    journeys = [] if tier == "light" else [journeys_group(golden_mode)]
+    return [do_public, do_quick_tests, do_package, do_smoke, *journeys, do_install, do_archive_public]
+
+
+def task_groups(args, golden_mode):
+    return [group for enabled, group in (
+        (args.quick or args.test, do_quick_tests),
+        (args.test or args.build, do_package),
+        (args.test or args.build, do_smoke),
+        (args.test or args.golden, journeys_group(golden_mode)),
+        (args.build, do_install),
+        (args.build, do_archive_public),
+    ) if enabled]
 
 
 def chosen_tier(args):
@@ -579,12 +658,7 @@ def main(argv=None):
             return 0
         groups = gate_groups(tier, golden_mode)
     else:
-        groups = [group for enabled, group in (
-            (args.quick, do_quick_tests),
-            (args.test, lambda run: do_tests(run, golden_mode)),
-            (args.golden and not args.test, lambda run: do_journeys(run, golden_mode)),
-            (args.build, do_build),
-        ) if enabled]
+        groups = task_groups(args, golden_mode)
     return execute(groups, args, tier, " ".join(arguments))
 
 
