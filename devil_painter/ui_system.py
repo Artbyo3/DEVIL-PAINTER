@@ -4,7 +4,6 @@ import blf
 import bpy
 from .canvas import Rect
 
-BG_BASE = (0.133, 0.098, 0.104, 1.0)
 BG_ELEVATED = (0.251, 0.188, 0.199, 1.0)
 BG_WELL = (0.110, 0.078, 0.083, 1.0)
 

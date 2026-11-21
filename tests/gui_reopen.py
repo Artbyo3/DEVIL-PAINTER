@@ -15,7 +15,7 @@ import devil_painter
 from devil_painter import editor, library
 from devil_painter.editor import HIDDEN_REGIONS
 from tools.workspace import prepare_scratch
-from tests.gui_harness import settle, until
+from tests.gui_harness import expected_failures, settle, until
 
 TIMEOUT = 600
 STARTED = time.time()
@@ -102,9 +102,10 @@ def fails_once(window, where, patch):
     setattr(cls, patch, broken)
     sys.stderr = console
     try:
-        for _ in range(10):
-            wiggle(window)
-            yield from settle()
+        with expected_failures():
+            for _ in range(10):
+                wiggle(window)
+                yield from settle()
     finally:
         sys.stderr = stderr
         setattr(cls, patch, original)

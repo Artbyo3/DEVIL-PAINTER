@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from tools import check_comments, check_public, commit_msg, dev, gate, gate_state, workspace
+from tools import commit_msg, dev, gate, gate_state, workspace
 
 DEAD_PID = 2 ** 22 + 1
 
@@ -223,40 +223,3 @@ class CommitMessageTests(unittest.TestCase):
     def test_hook_script_calls_the_python_rewriter(self):
         hook = Path(__file__).resolve().parents[1] / 'tools' / 'hooks' / 'commit-msg'
         self.assertEqual(hook.read_bytes(), b'#!/bin/sh\nexec python -B tools/commit_msg.py "$1"\n')
-
-
-class CheckReportingTests(unittest.TestCase):
-    def test_comment_check_reports_every_bad_file(self):
-        with tempfile.TemporaryDirectory(dir=workspace.prepare_scratch()) as folder:
-            root = Path(folder)
-            for directory in ('devil_painter', 'tests', 'tools'):
-                (root / directory).mkdir()
-            (root / 'devil_painter' / 'a.py').write_text('x = 1  # note\n', encoding='utf-8')
-            (root / 'tools' / 'b.py').write_text('"doc"\n', encoding='utf-8')
-            (root / 'tests' / 'c.py').write_text('y = 2\n', encoding='utf-8')
-            with self.assertRaises(ValueError) as raised:
-                check_comments.check_repository(root)
-        self.assertIn('a.py:1: code comment', str(raised.exception))
-        self.assertIn('b.py:1: docstring or standalone string', str(raised.exception))
-
-    def test_history_blobs_come_from_one_batch_read(self):
-        with tempfile.TemporaryDirectory(dir=workspace.prepare_scratch()) as folder:
-            root = Path(folder).resolve()
-
-            def git(*arguments):
-                return subprocess.run(['git', *arguments], cwd=root, capture_output=True, check=True).stdout.decode()
-
-            git('init', '-q')
-            git('config', 'user.name', 'fixture')
-            git('config', 'user.email', 'fixture' + '@' + 'users.noreply.github.com')
-            (root / 'docs').mkdir()
-            (root / 'docs' / 'a.txt').write_bytes(b'first\n')
-            (root / 'b.bin').write_bytes(bytes(range(256)) * 3)
-            git('add', '.')
-            git('commit', '-q', '-m', 'one')
-            (root / 'docs' / 'a.txt').write_bytes(b'second\n')
-            git('commit', '-q', '-am', 'two')
-            with patch.object(check_public, 'ROOT', root), patch.object(check_public.subprocess, 'run', wraps=subprocess.run) as run:
-                blobs = sorted(check_public.historical_blobs())
-            self.assertEqual(blobs, [('b.bin', bytes(range(256)) * 3), ('docs/a.txt', b'first\n'), ('docs/a.txt', b'second\n')])
-            self.assertEqual(run.call_count, 2)

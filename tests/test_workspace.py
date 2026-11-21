@@ -236,10 +236,27 @@ class ScratchWorkspaceTests(unittest.TestCase):
         run.logs.mkdir()
         command = [sys.executable, '-c', 'import time; print("partial", flush=True); time.sleep(60)']
         with patch('builtins.print'):
-            passed = dev.step(run, 'Journey 99 hung.py', command, workspace.child_environment(run.folder), timeout=3, echo=False, gui=True)
+            passed = dev.step(run, 'Journey 99 hung.py', command, workspace.child_environment(run.folder), timeout=3, echo=False, failure_record=run.folder / 'hung.failures')
         self.assertFalse(passed)
         self.assertIn('timed out', run.outcomes[0].detail)
         self.assertIn('partial', run.outcomes[0].log.read_text(encoding='utf-8'))
+
+    def test_journey_fails_when_the_editor_recorded_a_failure_despite_exit_zero(self):
+        run = dev.Run('test', workspace.prepare_scratch(self.scratch / 'run-test'))
+        run.logs.mkdir()
+        record = run.folder / 'probe.failures'
+        cases = (
+            ("open(r'{0}', 'w').write('KeyError: probe\\n')", False, "the editor recorded 1 failure(s), first: KeyError: probe"),
+            ("print('no record opened')", False, 'the journey never opened its editor failure record'),
+            ("open(r'{0}', 'w').write('')", True, ''),
+        )
+        for script, expected, detail in cases:
+            with self.subTest(script=script):
+                record.unlink(missing_ok=True)
+                with patch('builtins.print'):
+                    passed = dev.step(run, 'Journey 98 probe.py', [sys.executable, '-c', script.format(record)], workspace.child_environment(run.folder),
+                                      timeout=30, echo=False, failure_record=record)
+                self.assertEqual((passed, run.outcomes[-1].detail), (expected, detail))
 
     def test_full_gate_saves_its_result_and_skips_an_unchanged_tree(self):
         archive = self.root / 'dist' / 'devil_painter-0.4.0.zip'

@@ -6,6 +6,7 @@ import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRATCH_VARIABLE = 'DEVIL_PAINTER_SCRATCH'
+FAILURE_RECORD_VARIABLE = 'DEVIL_PAINTER_FAILURE_RECORD'
 SCRATCH = Path(os.environ[SCRATCH_VARIABLE]) if SCRATCH_VARIABLE in os.environ else ROOT / 'scratch'
 DIST = ROOT / 'dist'
 RUN_PREFIX = 'run-'

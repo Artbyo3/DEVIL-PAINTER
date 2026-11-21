@@ -19,7 +19,7 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, str(ROOT))
 from tools import gate, gate_state, workspace
 from tools.gate_state import GateBusy
-from tools.workspace import child_environment, clean_scratch, extension_archive, prepare_scratch, scratch_root
+from tools.workspace import FAILURE_RECORD_VARIABLE, child_environment, clean_scratch, extension_archive, prepare_scratch, scratch_root
 
 MINIMUM_BLENDER = (5, 2)
 STEAM_BLENDER = Path(r"C:\Program Files (x86)\Steam\steamapps\common\Blender\blender.exe")
@@ -171,12 +171,21 @@ def run_process(command, log, environment, timeout, echo):
     return code, timed_out, time.time() - started
 
 
-def step(run, name, command, environment=None, timeout=STEP_TIMEOUT, echo=True, gui=False):
+def editor_failures(record):
+    if not record.is_file():
+        return 'the journey never opened its editor failure record'
+    failures = record.read_text(encoding='utf-8', errors='replace').splitlines()
+    return f"the editor recorded {len(failures)} failure(s), first: {failures[0]}" if failures else ''
+
+
+def step(run, name, command, environment=None, timeout=STEP_TIMEOUT, echo=True, failure_record=None):
     print(f'--> {name}')
     log = run.logs / f'{slug(name)}.log'
     code, timed_out, seconds = run_process(command, log, environment or child_environment(run.folder), timeout, echo)
-    traceback_seen = gui and 'Traceback' in log.read_text(encoding='utf-8', errors='replace')
-    detail = f'timed out after {timeout}s and was killed' if timed_out else f'exit code {code}' if code else 'Traceback in output' if traceback_seen else ''
+    recorded = editor_failures(failure_record) if failure_record else ''
+    traceback_seen = failure_record is not None and 'Traceback' in log.read_text(encoding='utf-8', errors='replace')
+    detail = (f'timed out after {timeout}s and was killed' if timed_out else f'exit code {code}' if code else recorded if recorded
+              else 'Traceback in output' if traceback_seen else '')
     if detail and not echo:
         print_tail(log)
     return run.record(name, not detail, seconds, log, detail)
@@ -273,8 +282,9 @@ def run_journey(journey, run):
     number = f"{JOURNEYS.index(journey):02d}"
     scratch = prepare_scratch(run.folder / "j" / number)
     exports = run.folder / "j" / f"{journey}.jsonl"
-    environment = dict(child_environment(scratch), DEVIL_PAINTER_JOURNEY_LOG=str(exports))
-    passed = step(run, f"Journey {number} {journey}", journey_command(journey), environment, JOURNEY_TIMEOUT, echo=False, gui=journey.startswith("gui_"))
+    record = run.folder / "j" / f"{journey}.failures" if journey.startswith("gui_") else None
+    environment = dict(child_environment(scratch), DEVIL_PAINTER_JOURNEY_LOG=str(exports), **({FAILURE_RECORD_VARIABLE: str(record)} if record else {}))
+    passed = step(run, f"Journey {number} {journey}", journey_command(journey), environment, JOURNEY_TIMEOUT, echo=False, failure_record=record)
     return gate.read_log(exports), passed
 
 

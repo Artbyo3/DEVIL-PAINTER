@@ -3,7 +3,10 @@ import subprocess
 import tempfile
 import unittest
 import zlib
+from pathlib import Path
+from unittest.mock import patch
 
+from tools import check_public, workspace
 from tools.check_public import ALIAS, EMAIL, OWNER_MERGE_IDENTITY, PUBLISHED_REFS, inspect_commit_metadata, inspect_payload, inspect_text
 
 
@@ -109,3 +112,25 @@ class PublicationTests(unittest.TestCase):
             self.assertIn(published, listed)
             self.assertNotIn(local, listed)
             self.assertNotIn('--all', PUBLISHED_REFS)
+
+    def test_history_blobs_come_from_one_batch_read(self):
+        with tempfile.TemporaryDirectory(dir=workspace.prepare_scratch()) as folder:
+            root = Path(folder).resolve()
+
+            def git(*arguments):
+                return subprocess.run(['git', *arguments], cwd=root, capture_output=True, check=True).stdout.decode()
+
+            git('init', '-q')
+            git('config', 'user.name', 'fixture')
+            git('config', 'user.email', 'fixture' + '@' + 'users.noreply.github.com')
+            (root / 'docs').mkdir()
+            (root / 'docs' / 'a.txt').write_bytes(b'first\n')
+            (root / 'b.bin').write_bytes(bytes(range(256)) * 3)
+            git('add', '.')
+            git('commit', '-q', '-m', 'one')
+            (root / 'docs' / 'a.txt').write_bytes(b'second\n')
+            git('commit', '-q', '-am', 'two')
+            with patch.object(check_public, 'ROOT', root), patch.object(check_public.subprocess, 'run', wraps=subprocess.run) as run:
+                blobs = sorted(check_public.historical_blobs())
+            self.assertEqual(blobs, [('b.bin', bytes(range(256)) * 3), ('docs/a.txt', b'first\n'), ('docs/a.txt', b'second\n')])
+            self.assertEqual(run.call_count, 2)
