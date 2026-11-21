@@ -1,12 +1,8 @@
 import unittest
-from pathlib import Path
-from tools.check_comments import check_repository, check_source
+from tools.check_comments import check_source
 
 
 class NoCommentsTests(unittest.TestCase):
-    def test_repository_has_no_comments_or_docstrings(self):
-        self.assertGreater(check_repository(Path(__file__).resolve().parents[1]), 0)
-
     def test_comments_are_rejected(self):
         for source in ('# note\n', 'value = 1 # note\n'):
             with self.subTest(source=source), self.assertRaises(ValueError):

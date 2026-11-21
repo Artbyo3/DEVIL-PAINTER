@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(ROOT))
 import devil_painter
+from tools.gate_state import sha256
 from tools.workspace import prepare_scratch
 
 
@@ -49,9 +50,12 @@ check(len(loaded_modules) == len(py_files), f'full package import in real Blende
 for pf in py_files:
     ast.parse(pf.read_text(encoding='utf-8-sig'), filename=str(pf))
 
-from tools.build import build_extension
-zip_path = build_extension()
+package_arguments = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
+check(len(package_arguments) == 2, 'the gate passed the validated zip and its SHA-256 after --')
+zip_path, validated_sha256 = Path(package_arguments[0]), package_arguments[1]
 check(zip_path.is_file(), f'packaged extension zip exists ({zip_path.name})')
+loaded_sha256 = sha256(zip_path)
+check(loaded_sha256 == validated_sha256, f'the zip loaded here is the validated zip (sha256 {loaded_sha256})')
 ext_root = Path(tempfile.mkdtemp(prefix='ext_load_check-', dir=prepare_scratch()))
 pkg_target = ext_root / 'bl_ext' / 'user_default' / 'devil_painter'
 pkg_target.mkdir(parents=True, exist_ok=True)

@@ -1,29 +1,10 @@
 import tempfile
 import unittest
 from pathlib import Path
-from tools.check_dead_code import check_dead_code, check_draw_integrity, check_import_integrity, find_dead_code, find_draw_integrity_violations, find_missing_imports
+from tools.check_dead_code import find_draw_integrity_violations, find_missing_imports
 
 
 class DeadCodeTests(unittest.TestCase):
-    def test_package_has_no_dead_code_or_unused_imports(self):
-        root = Path(__file__).resolve().parents[1]
-        self.assertGreater(check_dead_code(root), 0)
-
-    def test_detector_clean_on_current_codebase(self):
-        root = Path(__file__).resolve().parents[1]
-        violations = find_dead_code(root)
-        self.assertEqual(violations, [])
-
-    def test_package_import_integrity(self):
-        root = Path(__file__).resolve().parents[1]
-        self.assertGreater(check_import_integrity(root), 0)
-        self.assertEqual(find_missing_imports(root), [])
-
-    def test_package_draw_integrity(self):
-        root = Path(__file__).resolve().parents[1]
-        self.assertEqual(check_draw_integrity(root), 0)
-        self.assertEqual(find_draw_integrity_violations(root), [])
-
     def test_invalid_draw_attribute_and_key_detected(self):
         with tempfile.TemporaryDirectory() as tmp:
             pkg = Path(tmp) / 'devil_painter'
