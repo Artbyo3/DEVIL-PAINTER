@@ -1,6 +1,6 @@
 # Frequently Asked Questions & Troubleshooting
 
-This page answers common questions about installing and painting with Devil Painter (`v0.4.0`).
+This page answers common questions about installing and painting with Devil Painter (`v0.5.0`).
 
 ## Setup & Workspace
 
@@ -16,7 +16,7 @@ No. While the workspace is open, Devil Painter hides Blender's 3D Viewport heade
 
 If both a repository link and an installed ZIP copy are enabled at once, their operators and draw handlers conflict. Remove or disable one copy in **Edit > Preferences > Get Extensions** (or **Add-ons**) and restart Blender.
 
-!!! warning "Known issues (v0.4.0)"
+!!! warning "Known issues (v0.5.0)"
     - **#148 — Damaged settings file crash:** Devil Painter can crash if `devil_painter/library.json` in Blender's user config folder is damaged. Remove or rename that file to reset local settings.
     - **#143 — Reinstalling a pack:** Reinstalling an asset pack in the **Packs** shelf tab replaces its pack folder and can lose local changes or added files inside it.
     - **#149 — Undoing a deleted layer:** Undoing a layer deletion can restore the layer blank.
