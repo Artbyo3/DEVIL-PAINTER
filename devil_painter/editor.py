@@ -12,7 +12,7 @@ from . import actions, autosave, bakejob, baking, bridge, brushes, caches, compo
 from .blending import BLEND_MODES, CHANNEL, FOLDER_BLENDS, linear_to_srgb, srgb_to_linear
 from .ui_system import ACCENT
 from .canvas import Rect
-from .document import (BAKE_ANTIALIAS_LABELS, BAKE_ID_LABELS, CHANNEL_DEPTHS, DYNAMICS, PROJECTIONS, PROJECTORS, RESOLUTIONS, STROKE_METHODS, TEXTURE_SAMPLING, active_effect, active_layer, active_tile, find_layer,
+from .document import (BAKE_ANTIALIAS_LABELS, BAKE_CURVATURE_LABELS, BAKE_ID_LABELS, CHANNEL_DEPTHS, DYNAMICS, PROJECTIONS, PROJECTORS, RESOLUTIONS, STROKE_METHODS, TEXTURE_SAMPLING, active_effect, active_layer, active_tile, bake_map_settings, find_layer,
                        editing_mask, paint_target, set_channels, slot_value, texture_set, uses_coordinates)
 from .effects import FILL_PROJECTIONS, LEVEL_COMPONENTS, MASK_BLENDS, mask_effects
 from .filters import FILTER, FILTERS, GROUPS
@@ -1621,6 +1621,16 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             data.bake_samples = max(1, round(x * 128))
         elif key == 'BAKE_EXTRUSION' and data is not None:
             data.bake_extrusion = max(.005, x * .5)
+        elif key == 'BAKE_MAP_SAMPLES' and data is not None:
+            bake_map_settings(data, self.state.bake_map).samples = max(1, round(x * 128))
+        elif key == 'BAKE_MAP_EXTRUSION' and data is not None:
+            bake_map_settings(data, self.state.bake_map).extrusion = max(.005, x * .5)
+        elif key == 'BAKE_AO_DISTANCE' and data is not None:
+            data.bake_ao_distance = max(.01, x * 2.0)
+        elif key == 'BAKE_AO_SPREAD' and data is not None:
+            data.bake_ao_spread = 15.0 + x * 165.0
+        elif key == 'BAKE_THICKNESS_RANGE' and data is not None:
+            data.bake_thickness_range = max(.01, x * 2.0)
         elif key.startswith('BRUSHVAL.') and data is not None:
             data.brush_slots[key.removeprefix('BRUSHVAL.')].value = x
             self.brush_changed(context, data)
@@ -1878,6 +1888,18 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         elif key.startswith('SET_BAKE_ANTIALIAS.'):
             value = key.removeprefix('SET_BAKE_ANTIALIAS.')
             self.message = actions.set_bake(context, obj, data, 'bake_antialias', value, f'Bake anti-aliasing: {BAKE_ANTIALIAS_LABELS[value]}.')
+        elif key.startswith('BAKE_SELECT.'):
+            self.state.bake_map = key.removeprefix('BAKE_SELECT.')
+        elif key == 'BAKE_MAP_SAMPLES_RESET':
+            self.message = actions.reset_bake_map(context, obj, data, self.state.bake_map, 'samples')
+        elif key == 'BAKE_MAP_EXTRUSION_RESET':
+            self.message = actions.reset_bake_map(context, obj, data, self.state.bake_map, 'extrusion')
+        elif key == 'BAKE_CURVATURE':
+            self.state.popover = Popover('MENU', control.rect, items=tuple((f'SET_BAKE_CURVATURE.{value}', label, data.bake_curvature == value)
+                                                                           for value, label in BAKE_CURVATURE_LABELS.items()))
+        elif key.startswith('SET_BAKE_CURVATURE.'):
+            value = key.removeprefix('SET_BAKE_CURVATURE.')
+            self.message = actions.set_bake(context, obj, data, 'bake_curvature', value, f'Curvature method: {BAKE_CURVATURE_LABELS[value]}.')
         elif key == 'BAKE_MATCH':
             self.message = actions.set_bake(context, obj, data, 'bake_match', not data.bake_match,
                                             'High-poly and cage match by name.' if not data.bake_match else 'High-poly and cage are picked by hand.')

@@ -992,6 +992,16 @@ def set_bake_object(context, obj, data, name, value):
     return set_bake(context, obj, data, name, target, f'{noun}: {value}.' if value else f'{noun}: none.')
 
 
+def reset_bake_map(context, obj, data, key, field):
+    entry = data.bake_maps.get(key)
+    if entry is not None:
+        setattr(entry, field, 0 if field == 'samples' else 0.0)
+    noun = 'samples' if field == 'samples' else 'ray distance'
+    message = f'{MESH_MAP[key].label} uses the shared {noun}.'
+    bpy.ops.ed.undo_push(message='Devil Painter: ' + message)
+    return message
+
+
 def add_generator(context, obj, data, values):
     layer = active_layer(data)
     effect = new_effect(data, layer, 'GENERATOR', 'MASK')

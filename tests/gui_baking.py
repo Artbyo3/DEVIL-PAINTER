@@ -9,6 +9,7 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, str(ROOT))
 import devil_painter
 from devil_painter import bakejob, editor
+from devil_painter.document import map_extrusion, map_samples
 from devil_painter.meshmaps import id_color
 from tools.workspace import prepare_scratch
 from tests.gui_harness import bake_landed, check, click, control, finish, has, keys, pixels, press, run_journey, settle, until, viewport
@@ -213,6 +214,86 @@ def journey():
     click(window, region, 'BAKE_AUTO')
     yield from settle()
     check(not data.bake_auto, 'automatic rebaking turns off')
+
+    yield from open_card(window, region)
+    check(all(has(key) for key in ('BAKE_SELECT.ao', 'BAKE_SELECT.curvature', 'BAKE_SELECT.thickness', 'BAKE_SELECT.normal', 'BAKE_SELECT.height', 'BAKE_SELECT.id'))
+          and has('BAKE_AO_DISTANCE') and has('BAKE_AO_SPREAD') and has('BAKE_MAP_SAMPLES'),
+          'the bake card shows per-map settings starting on ambient occlusion')
+    rect = control('BAKE_MAP_SAMPLES').rect
+    press(window, 'LEFTMOUSE', region.x + rect.x + rect.w * .5, region.y + rect.y + rect.h / 2)
+    yield from settle()
+    check(map_samples(data, 'ao') != data.bake_samples and map_samples(data, 'thickness') == data.bake_samples
+          and control('BAKE_SELECT.ao').label == 'Custom' and control('BAKE_MAP_SAMPLES_RESET').label == 'Reset',
+          'per-map samples override only the selected map')
+    click(window, region, 'BAKE_MAP_SAMPLES_RESET')
+    yield from settle()
+    check(map_samples(data, 'ao') == data.bake_samples and control('BAKE_MAP_SAMPLES_RESET').label == 'Shared',
+          'Reset returns per-map samples to the shared value')
+    rect = control('BAKE_AO_DISTANCE').rect
+    press(window, 'LEFTMOUSE', region.x + rect.x + rect.w * .4, region.y + rect.y + rect.h / 2)
+    yield from settle()
+    rect = control('BAKE_AO_SPREAD').rect
+    press(window, 'LEFTMOUSE', region.x + rect.x + rect.w * .45, region.y + rect.y + rect.h / 2)
+    yield from settle()
+    check(data.bake_ao_distance > .5 and data.bake_ao_spread < 120.0 and control('BAKE_SELECT.ao').label == 'Custom',
+          'AO distance and spread sliders update the ambient occlusion settings')
+
+    click(window, region, 'BAKE_SELECT.curvature')
+    yield from settle()
+    check(has('BAKE_CURVATURE') and has('BAKE_MAP_SAMPLES') and not has('BAKE_MAP_EXTRUSION'),
+          'curvature settings offer the curvature method and per-map samples')
+    yield from toggle_maps(window, region, {'curvature'})
+    yield from bake(window, region)
+    curv_pixel = pixels(data.maps['curvature'].image).copy()
+    yield from choose(window, region, 'BAKE_CURVATURE', 'SET_BAKE_CURVATURE.PER_VERTEX')
+    check(data.bake_curvature == 'PER_VERTEX', 'curvature method switches to per-vertex')
+    yield from open_card(window, region)
+    check(not has('BAKE_MAP_SAMPLES'), 'per-vertex curvature hides the ray-traced samples slider')
+    yield from bake(window, region)
+    curv_vertex = pixels(data.maps['curvature'].image).copy()
+    check(numpy.abs(curv_vertex - curv_pixel).max() > .05, 'per-vertex curvature produces a different map from per-pixel')
+    yield from choose(window, region, 'BAKE_CURVATURE', 'SET_BAKE_CURVATURE.NORMAL')
+    check(data.bake_curvature == 'NORMAL', 'curvature method switches to from-normal')
+    yield from open_card(window, region)
+    check(has('BAKE_MAP_SAMPLES') and has('BAKE_MAP_EXTRUSION'), 'from-normal curvature exposes samples and ray distance overrides')
+    yield from bake(window, region)
+    curv_normal = pixels(data.maps['curvature'].image)
+    covered = curv_normal[curv_normal[:, 3] > .5][:, 0]
+    check(covered.max() > .55 and numpy.abs(curv_normal - curv_vertex).max() > .05, 'from-normal curvature derives convexity from tangent-space normals')
+    yield from choose(window, region, 'BAKE_CURVATURE', 'SET_BAKE_CURVATURE.PER_PIXEL')
+
+    yield from open_card(window, region)
+    click(window, region, 'BAKE_SELECT.thickness')
+    yield from settle()
+    check(has('BAKE_THICKNESS_RANGE'), 'thickness settings expose thickness range')
+    yield from toggle_maps(window, region, {'thickness'})
+    rect = control('BAKE_THICKNESS_RANGE').rect
+    press(window, 'LEFTMOUSE', region.x + rect.x + rect.w * .03, region.y + rect.y + rect.h / 2)
+    yield from settle()
+    yield from bake(window, region)
+    thick_low = pixels(data.maps['thickness'].image)
+    low_mean = float(thick_low[thick_low[:, 3] > .5][:, 0].mean())
+    yield from open_card(window, region)
+    rect = control('BAKE_THICKNESS_RANGE').rect
+    press(window, 'LEFTMOUSE', region.x + rect.x + rect.w * .9, region.y + rect.y + rect.h / 2)
+    yield from settle()
+    yield from bake(window, region)
+    thick_high = pixels(data.maps['thickness'].image)
+    high_mean = float(thick_high[thick_high[:, 3] > .5][:, 0].mean())
+    check(high_mean > low_mean + .05, 'a larger thickness range detects deeper opposite walls')
+
+    yield from open_card(window, region)
+    click(window, region, 'BAKE_SELECT.height')
+    yield from settle()
+    check(has('BAKE_MAP_EXTRUSION') and has('BAKE_MAP_EXTRUSION_RESET'), 'height settings expose per-map ray distance')
+    rect = control('BAKE_MAP_EXTRUSION').rect
+    press(window, 'LEFTMOUSE', region.x + rect.x + rect.w * .7, region.y + rect.y + rect.h / 2)
+    yield from settle()
+    check(abs(map_extrusion(data, 'height') - data.bake_extrusion) > .1 and map_extrusion(data, 'normal') == data.bake_extrusion,
+          'per-map ray distance overrides only the selected map')
+    click(window, region, 'BAKE_MAP_EXTRUSION_RESET')
+    yield from settle()
+    check(map_extrusion(data, 'height') == data.bake_extrusion, 'Reset returns per-map ray distance to the shared value')
 
     press(window, 'ESC', *middle)
     yield from settle()
