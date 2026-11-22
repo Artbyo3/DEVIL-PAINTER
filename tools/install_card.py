@@ -16,6 +16,7 @@ CARD_PAGES = ('index.html', 'install/index.html')
 CARD_HREF = re.compile(r'href="https://github\.com/Artbyo3/DEVIL-PAINTER/releases/download/[^"]*"')
 VERSION_PLACEHOLDER = '{{VERSION}}'
 VERSIONED_DOCS = ('README.md', 'SPEC.md')
+SITE_PATTERNS = ('*.html', '*.json')
 
 
 class CardError(Exception):
@@ -34,10 +35,11 @@ def card_href(index):
 def stamp_version(site, root=None):
     source_root = ROOT if root is None else Path(root)
     version = read_manifest(source_root)['version']
-    for page in sorted(site.rglob('*.html')):
-        text = page.read_text(encoding='utf-8')
-        if VERSION_PLACEHOLDER in text:
-            page.write_text(text.replace(VERSION_PLACEHOLDER, version), encoding='utf-8')
+    for pattern in SITE_PATTERNS:
+        for page in sorted(site.rglob(pattern)):
+            text = page.read_text(encoding='utf-8')
+            if VERSION_PLACEHOLDER in text:
+                page.write_text(text.replace(VERSION_PLACEHOLDER, version), encoding='utf-8')
     for name in VERSIONED_DOCS:
         text = (source_root / name).read_text(encoding='utf-8')
         if VERSION_PLACEHOLDER not in text:
