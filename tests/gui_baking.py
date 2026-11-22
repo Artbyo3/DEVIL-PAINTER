@@ -99,7 +99,7 @@ def journey():
     data = cube.devil_painter.sets[0]
 
     yield from open_card(window, region)
-    check(all(has(key) for key in ('BAKEMAP.normal', 'BAKEMAP.height', 'BAKE_SET.0', 'BAKE_ID', 'BAKE_SAMPLES', 'BAKE_MATCH', 'BAKE_SOURCE', 'BAKE_CAGE',
+    check(all(has(key) for key in ('BAKEMAP.normal', 'BAKEMAP.height', 'BAKE_SET.0', 'BAKE_ID', 'BAKE_SAMPLES', 'BAKE_RESOLUTION', 'BAKE_MATCH', 'BAKE_SOURCE', 'BAKE_CAGE',
                                    'BAKE_EXTRUSION', 'BAKE_AUTO')), 'the bake card offers every map and bake setting')
     check('needs high-poly' in control('BAKEMAP.height').label and 'needs' not in control('BAKEMAP.normal').label,
           'height asks for a high-poly while normal also bakes from the mesh itself')
@@ -294,6 +294,17 @@ def journey():
     click(window, region, 'BAKE_MAP_EXTRUSION_RESET')
     yield from settle()
     check(map_extrusion(data, 'height') == data.bake_extrusion, 'Reset returns per-map ray distance to the shared value')
+
+    yield from choose(window, region, 'BAKE_RESOLUTION', 'SET_BAKE_RESOLUTION.512')
+    check(data.bake_resolution == 512, 'the resolution dropdown picks a separate bake resolution')
+    yield from toggle_maps(window, region, {'position'})
+    yield from bake(window, region)
+    check(tuple(data.maps['position'].image.size) == (512, 512) and data.resolution == 1024 and tuple(data.layers[0].image.size) == (1024, 1024),
+          'baking writes mesh maps at the bake resolution without changing the texture set resolution')
+    yield from choose(window, region, 'BAKE_RESOLUTION', 'SET_BAKE_RESOLUTION.0')
+    check(data.bake_resolution == 0, 'the resolution dropdown returns to the texture set size')
+    yield from bake(window, region)
+    check(tuple(data.maps['position'].image.size) == (1024, 1024), 'returning to texture set size rebakes at the texture set resolution')
 
     press(window, 'ESC', *middle)
     yield from settle()

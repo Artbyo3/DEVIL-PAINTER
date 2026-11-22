@@ -238,33 +238,32 @@ def needed_channels(template):
     return {channel for item in template['outputs'] for key in item['sources'] for channel in source_channels(key)}
 
 
-def map_image(data, key, number, size):
+def map_image(data, key, number):
     item = data.maps.get(key)
     if item is None or item.image is None:
         return None
-    image = tiles.variant(data, item.image, number)
-    return image if image.size[1] == size else None
+    return tiles.variant(data, item.image, number)
 
 
-def ao_image(data, number, size):
-    return map_image(data, 'ao', number, size)
+def ao_image(data, number):
+    return map_image(data, 'ao', number)
 
 
 def ao_pixels(data, number, size):
-    image = ao_image(data, number, size)
-    return None if image is None else baking.read_pixels(image)[..., 0]
+    image = ao_image(data, number)
+    return None if image is None else baking.resized(baking.read_pixels(image)[..., 0], (size, size))
 
 
 def unbaked_maps(data, number, item):
     keys = dict.fromkeys(MAP_SOURCES[key][0] for key in item['sources'] if key in MAP_SOURCES)
-    return [MESH_MAP[key].label for key in keys if map_image(data, key, number, data.resolution) is None]
+    return [MESH_MAP[key].label for key in keys if map_image(data, key, number) is None]
 
 
-def mesh_pixels(data, number, item, cache):
+def mesh_pixels(data, number, item, cache, size):
     for key in item['sources']:
         if key in MAP_SOURCES and MAP_SOURCES[key][0] not in cache:
             map_key = MAP_SOURCES[key][0]
-            cache[map_key] = baking.read_pixels(map_image(data, map_key, number, data.resolution))
+            cache[map_key] = baking.resized(baking.read_pixels(map_image(data, map_key, number)), (size, size))
     return cache
 
 
@@ -361,7 +360,7 @@ def planned_files(obj, project, template, wanted, folder, pattern, size):
         data = project.sets[index]
         set_tiles = tiles.numbers(data)
         for number in set_tiles:
-            ao = ao_image(data, number, data.resolution)
+            ao = ao_image(data, number)
             for item in template['outputs']:
                 varying = [key for key in item['sources'] if key not in {'white', 'black'} and key not in MAP_SOURCES]
                 if varying and not any(source_available(data, key, ao) for key in varying):
@@ -435,7 +434,7 @@ def export(context, obj, project, template, wanted, directory, pattern, override
             meshes = {}
         file_format = item['format']
         present = {channel.key for channel in set_channels(data)}
-        mesh = mesh_pixels(data, number, item, meshes)
+        mesh = mesh_pixels(data, number, item, meshes, data.resolution)
         planes = [plane(key, baked.get((index, number), {}), ao[(index, number)], data.resolution, item['srgb'], file_format == 'OPEN_EXR', present, project.normal_format, mesh)
                   for key in item['sources']]
         if coverage:

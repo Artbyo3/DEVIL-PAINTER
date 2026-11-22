@@ -590,7 +590,9 @@ def export_layer(context, obj, project, uids, directory, mask=False):
 
 
 def set_resolution(context, obj, data, size):
-    keys = [image for layer in data.layers for image in owned_images(layer)] + [item.image for item in data.maps if item.image is not None]
+    keys = [image for layer in data.layers for image in owned_images(layer)]
+    if not data.bake_resolution:
+        keys += [item.image for item in data.maps if item.image is not None]
     for image in tiles.every_image(data, keys):
         image.scale(size, size)
         image.pack()

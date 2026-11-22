@@ -187,7 +187,7 @@ def layer_signature(layer):
 
 def signature(data):
     channels = ','.join(channel.key for channel in set_channels(data))
-    maps = ','.join(item.name for item in data.maps if item.image is not None)
+    maps = ','.join(f'{item.name}={item.image.name}' for item in data.maps if item.image is not None)
     layers = '|'.join(layer_signature(layer) for layer in shown_layers(resolved(data.layers)))
     stroke = stroke_link(data)
     owner = f'{stroke[0]}:{",".join(stroke[2])}:{active_tile(data)}:{data.stroke_tool}' if stroke else ''

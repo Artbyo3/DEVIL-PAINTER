@@ -19,6 +19,7 @@ BAKE_IDS = (('ISLAND', 'UV islands', ''), ('MATERIAL', 'Materials', ''), ('OBJEC
 BAKE_ID_LABELS = {key: label for key, label, _ in BAKE_IDS}
 BAKE_ANTIALIAS = (('1', 'Off', ''), ('2', '2x', ''), ('4', '4x', ''))
 BAKE_ANTIALIAS_LABELS = {key: label for key, label, _ in BAKE_ANTIALIAS}
+BAKE_RESOLUTIONS = (0, 512, 1024, 2048, 4096)
 BAKE_CURVATURES = (('PER_PIXEL', 'Per pixel', ''), ('PER_VERTEX', 'Per vertex', ''), ('NORMAL', 'From normal', ''))
 BAKE_CURVATURE_LABELS = {key: label for key, label, _ in BAKE_CURVATURES}
 BAKE_AO_DISTANCE = .25
@@ -261,6 +262,7 @@ class DEVIL_PAINTER_PG_texture_set(bpy.types.PropertyGroup):
     bake_cage: bpy.props.PointerProperty(type=bpy.types.Object, poll=is_mesh)
     bake_extrusion: bpy.props.FloatProperty(default=.1, min=.005, max=.5)
     bake_id: bpy.props.EnumProperty(items=BAKE_IDS)
+    bake_resolution: bpy.props.IntProperty(default=0, min=0, max=8192)
     bake_antialias: bpy.props.EnumProperty(items=BAKE_ANTIALIAS)
     bake_ao_distance: bpy.props.FloatProperty(default=BAKE_AO_DISTANCE, min=.01, max=2.0)
     bake_ao_spread: bpy.props.FloatProperty(default=BAKE_AO_SPREAD, min=15.0, max=180.0)

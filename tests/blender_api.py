@@ -99,6 +99,13 @@ check('Baked 1' in api.bake(two, maps=('position',)) and 'position' in two.devil
 two.devil_painter.sets[0].bake = False
 check('Pick at least one texture set' in api.bake(two, maps=('position',)), 'bake() asks for a texture set when none are enabled')
 two.devil_painter.sets[0].bake = two.devil_painter.sets[1].bake = True
+two.devil_painter.sets[0].bake_resolution = 128
+check('Baked 1' in api.bake(two, maps=('ao',)) and tuple(two.devil_painter.sets[0].maps['ao'].image.size) == (128, 128)
+      and tuple(two.devil_painter.sets[1].maps['ao'].image.size) == (128, 128) and two.devil_painter.sets[0].resolution == 64,
+      'bake_resolution bakes mesh maps separately from the texture set resolution')
+check(any('AO' in path for path in api.export(two, clash_dir, template='Standard PBR')),
+      'exporting still reads baked AO whose resolution differs from the texture set')
+two.devil_painter.sets[0].bake_resolution = 0
 try:
     api.layers(bpy.data.objects.new('Empty', bpy.data.meshes.new('Empty')))
     check(False, 'an object without a project is refused')
