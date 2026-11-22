@@ -933,22 +933,32 @@ def finish_bake(context, obj, data, baked, failure, signature):
     return refresh(context, obj, data, f'Baked {len(baked)} mesh maps.')
 
 
+def bake_sets(project):
+    return [index for index, item in enumerate(project.sets) if item.bake]
+
+
 def bake_mesh_maps(context, obj, data, keys):
     project = obj.devil_painter
+    wanted = bake_sets(project)
+    if not wanted:
+        return 'Pick at least one texture set to bake.'
     failure = ''
     try:
-        baked = meshmaps.bake_maps(context, obj, project, list(range(len(project.sets))), keys, data)
+        baked = meshmaps.bake_maps(context, obj, project, wanted, keys, data)
     except RuntimeError as error:
         baked, failure = [], str(error).strip()
     return finish_bake(context, obj, data, baked, failure, meshmaps.signature(context, obj, data))
 
 
 def start_bake(context, obj, data, keys, rebake=False):
+    wanted = bake_sets(obj.devil_painter)
+    if not wanted:
+        return 'Pick at least one texture set to bake.'
     keys = meshmaps.bakeable(context, obj, data, keys)
     if not keys:
         return finish_bake(context, obj, data, [], '', meshmaps.signature(context, obj, data))
     try:
-        bakejob.start(context, obj, data, keys, rebake)
+        bakejob.start(context, obj, data, keys, wanted, rebake)
     except (OSError, RuntimeError) as error:
         return finish_bake(context, obj, data, [], str(error).strip(), meshmaps.signature(context, obj, data))
     return f'Baking {len(keys)} mesh maps in the background.'
@@ -974,7 +984,7 @@ def cancel_bake():
 
 def rebake(context, obj, data):
     keys = meshmaps.baked_keys(data)
-    if not keys:
+    if not keys or not bake_sets(obj.devil_painter):
         data.bake_signature = meshmaps.signature(context, obj, data)
         return None
     return start_bake(context, obj, data, keys, rebake=True)

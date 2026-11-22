@@ -1868,6 +1868,10 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.state.popover = None if self.state.popover is not None and self.state.popover.kind == 'BAKE' else Popover('BAKE', control.rect)
         elif key.startswith('BAKEMAP.'):
             self.state.bake_keys ^= {key.removeprefix('BAKEMAP.')}
+        elif key.startswith('BAKE_SET.'):
+            item = obj.devil_painter.sets[int(key.removeprefix('BAKE_SET.'))]
+            self.message = actions.set_bake(context, obj, item, 'bake', not item.bake,
+                                            f'{item.name} {"included in" if not item.bake else "excluded from"} baking.')
         elif key in BAKE_OBJECTS:
             field, prefix = BAKE_OBJECTS[key]
             current = getattr(data, field)

@@ -99,7 +99,7 @@ def journey():
     data = cube.devil_painter.sets[0]
 
     yield from open_card(window, region)
-    check(all(has(key) for key in ('BAKEMAP.normal', 'BAKEMAP.height', 'BAKE_ID', 'BAKE_SAMPLES', 'BAKE_MATCH', 'BAKE_SOURCE', 'BAKE_CAGE',
+    check(all(has(key) for key in ('BAKEMAP.normal', 'BAKEMAP.height', 'BAKE_SET.0', 'BAKE_ID', 'BAKE_SAMPLES', 'BAKE_MATCH', 'BAKE_SOURCE', 'BAKE_CAGE',
                                    'BAKE_EXTRUSION', 'BAKE_AUTO')), 'the bake card offers every map and bake setting')
     check('needs high-poly' in control('BAKEMAP.height').label and 'needs' not in control('BAKEMAP.normal').label,
           'height asks for a high-poly while normal also bakes from the mesh itself')

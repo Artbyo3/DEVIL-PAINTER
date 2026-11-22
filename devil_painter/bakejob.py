@@ -57,7 +57,7 @@ def running():
     return _state['job'] is not None
 
 
-def start(context, obj, data, keys, rebake):
+def start(context, obj, data, keys, wanted, rebake):
     project = obj.devil_painter
     folder = Path(tempfile.mkdtemp(prefix='devil_painter_bake_', dir=bpy.app.tempdir or None))
     painted = {}
@@ -65,7 +65,7 @@ def start(context, obj, data, keys, rebake):
         numpy.save(folder / f'painted.{number}.npy', baking.read_pixels(image))
         painted[image.name] = number
     set_index = next(index for index, item in enumerate(project.sets) if item == data)
-    write_atomic(folder / 'job.json', dict(object=obj.name, set=set_index, keys=keys, devices=device_settings(context.scene), painted=painted))
+    write_atomic(folder / 'job.json', dict(object=obj.name, set=set_index, wanted=wanted, keys=keys, devices=device_settings(context.scene), painted=painted))
     package = Path(__file__).resolve().parent
     flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
     try:
@@ -151,7 +151,7 @@ def bake_all(folder, job):
     baking.TILE_BAKED.append(lambda number: write_atomic(folder / 'progress.json', dict(progress, tile=number)))
     write_atomic(folder / 'progress.json', progress)
     baked = []
-    for key, pixels in meshmaps.baked_results(context, obj, project, list(range(len(project.sets))), job['keys'], project.sets[job['set']]):
+    for key, pixels in meshmaps.baked_results(context, obj, project, job['wanted'], job['keys'], project.sets[job['set']]):
         for (index, number), values in pixels.items():
             numpy.save(folder / f'{key}.{index}.{number}.npy', values)
         baked.append([key, [[index, number] for index, number in pixels]])

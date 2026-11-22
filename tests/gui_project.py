@@ -11,7 +11,7 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, str(ROOT))
 import devil_painter
 import bmesh
-from devil_painter import editor, exporting, library, projects, tiles
+from devil_painter import bakejob, editor, exporting, library, projects, tiles
 from devil_painter.actions import owned_images
 from devil_painter.document import texture_set
 from tools.workspace import prepare_scratch
@@ -248,6 +248,33 @@ def journey():
     body, trim_set = project.sets[0], project.sets[1]
     check(body.maps['ao'].image is not None, 'Ctrl+Shift+Z brings the baked maps back')
 
+    click(window, region, 'BAKE')
+    yield from settle()
+    check(has('BAKE_SET.0') and has('BAKE_SET.1') and control('BAKE_SET.0').active and control('BAKE_SET.1').active,
+          'the bake card lists every texture set checked by default')
+    click(window, region, 'BAKE_SET.1')
+    yield from settle()
+    check(body.bake and not trim_set.bake and not control('BAKE_SET.1').active, 'unchecking a texture set excludes it from baking')
+    click(window, region, 'BAKE_SET.0')
+    yield from settle()
+    click(window, region, 'BAKE_RUN')
+    yield from settle()
+    check(not bakejob.running() and 'Pick at least one texture set' in editor._active.message,
+          'baking with no texture sets checked asks to pick one')
+    click(window, region, 'BAKE')
+    yield from settle()
+    click(window, region, 'BAKE_SET.0')
+    yield from settle()
+    click(window, region, 'BAKEMAP.ao')
+    yield from settle()
+    click(window, region, 'BAKEMAP.position')
+    yield from settle()
+    click(window, region, 'BAKE_RUN')
+    yield from settle()
+    yield from bake_landed()
+    check('position' in body.maps and body.maps['position'].image is not None and 'position' not in trim_set.maps,
+          'baking writes mesh maps only for the checked texture sets')
+
     def card():
         if not has('EXPORT_RUN'):
             click(window, region, 'EXPORT')
@@ -366,7 +393,7 @@ def journey():
     cube = bpy.data.objects['Cube']
     project = cube.devil_painter
     body = project.sets[0]
-    check(editor._active is None and project.enabled and len(project.sets) == 2
+    check(editor._active is None and project.enabled and len(project.sets) == 2 and body.bake and not project.sets[1].bake
           and pixels(tiles.variant(body, body.layers[0].image, 1002))[:, 3].max() > .5, 'reopening the .blend restores the project and its painted tiles')
     press(window, 'P', *middle, ctrl=True, alt=True)
     yield from settle()

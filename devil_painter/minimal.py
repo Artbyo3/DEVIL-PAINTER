@@ -1473,13 +1473,26 @@ def bake_map_section(layout, data, selected, x, y, w, s):
                    text=f'{data.bake_thickness_range * 100:.0f}%', tip='How far interior rays travel through the mesh, as a share of its size')
 
 
+def bake_sets_section(layout, project, x, y, w, s):
+    layout.add('BAKE_SETS_TITLE', Rect(x, y, w, 22 * s), 'NOTE', label='Texture sets')
+    for index, item in enumerate(project.sets):
+        y -= LINE_HEIGHT * s
+        count = len(numbers(item))
+        label = f'{item.name} · {item.resolution} px' + (f' · {count} tiles' if count > 1 else '')
+        layout.add(f'BAKE_SET.{index}', Rect(x, y, w, 24 * s), 'TOGGLE', active=item.bake,
+                   label=label, tip='Include this texture set in the bake')
+
+
 def bake_popover(layout, state, bounds, data):
-    s, sources = layout.scale, state.bake_found
-    card = place_popover(bounds, state.popover.anchor, BAKE_WIDTH * s, ((len(MESH_MAPS) + 11) * LINE_HEIGHT + 24) * s, s)
+    s, sources, project = layout.scale, state.bake_found, data.id_data.devil_painter
+    rows = max(len(MESH_MAPS) + 10, 6 + len(project.sets))
+    card = place_popover(bounds, state.popover.anchor, BAKE_WIDTH * s, ((rows + 1) * LINE_HEIGHT + 24) * s, s)
     x, w, full_w = card.x + 14 * s, 312 * s, card.w - 28 * s
     y = card.top - 34 * s
     selected = state.bake_map if state.bake_map in PER_MAP_BAKE else PER_MAP_BAKE[0]
-    bake_map_section(layout, data, selected, x + w + 14 * s, y, full_w - w - 14 * s, s)
+    right_x, right_w = x + w + 14 * s, full_w - w - 14 * s
+    bake_map_section(layout, data, selected, right_x, y, right_w, s)
+    bake_sets_section(layout, project, right_x, y - 5 * LINE_HEIGHT * s, right_w, s)
     layout.add('BAKE_TITLE', Rect(x, y, w, 22 * s), 'NOTE', label='Bake mesh maps')
     for item in MESH_MAPS:
         y -= LINE_HEIGHT * s
