@@ -1,9 +1,6 @@
 import json
 import math
-import os
 import sys
-import time
-import traceback
 from pathlib import Path
 import bmesh
 import bpy
@@ -18,10 +15,8 @@ import devil_painter
 from devil_painter import editor, library, painting
 from devil_painter.document import active_layer
 from tools.workspace import prepare_scratch
-from tests.gui_harness import POLL, settle, until
+from tests.gui_harness import POLL, check, control, finish, keys, run_journey, settle, spot, type_text, until, viewport
 
-TIMEOUT = 600
-STARTED = time.time()
 DISTANCE = 2.4
 STEPS = 10
 EDGE = .5
@@ -30,25 +25,6 @@ BRUSH_RADIUS = 1000
 MOVE = (-120, 70)
 SCALE_FROM, SCALE_TO = 60, 90
 TURN = 40
-
-
-def check(condition, message):
-    if not condition:
-        raise AssertionError(message)
-    print('PASS:', message)
-
-
-def finish(code):
-    sys.stdout.flush()
-    sys.stderr.flush()
-    os._exit(code)
-
-
-def viewport():
-    window = bpy.context.window_manager.windows[0]
-    area = next(area for area in window.screen.areas if area.type == 'VIEW_3D')
-    region = next(region for region in area.regions if region.type == 'WINDOW')
-    return window, area, region
 
 
 def move(window, x, y, **modifiers):
@@ -61,33 +37,8 @@ def press(window, kind, x, y, **modifiers):
     window.event_simulate(type=kind, value='RELEASE', x=int(round(x)), y=int(round(y)), **modifiers)
 
 
-def control(key):
-    return next(item for item in reversed(editor._active.workspace.controls) if item.key == key)
-
-
-def has(key):
-    return any(item.key == key for item in editor._active.workspace.controls)
-
-
-def keys(prefix):
-    return [item.key for item in editor._active.workspace.controls if item.key.startswith(prefix)]
-
-
-def spot(region, key, fx=.5, fy=.5):
-    rect = control(key).rect
-    return region.x + rect.x + rect.w * fx, region.y + rect.y + rect.h * fy
-
-
 def click(window, region, key, kind='LEFTMOUSE', fx=.5, fy=.5):
     press(window, kind, *spot(region, key, fx, fy))
-
-
-def type_text(window, text, x, y):
-    for _ in range(160):
-        window.event_simulate(type='BACK_SPACE', value='PRESS', x=int(x), y=int(y))
-    for character in text:
-        window.event_simulate(type='A', value='PRESS', x=int(x), y=int(y), unicode=character)
-    window.event_simulate(type='RET', value='PRESS', x=int(x), y=int(y))
 
 
 def make_plane(obj):
@@ -321,18 +272,4 @@ def journey():
     finish(0)
 
 
-steps = journey()
-
-
-def advance():
-    try:
-        if time.time() - STARTED > TIMEOUT:
-            raise AssertionError('GUI stencil drag test timed out')
-        return next(steps)
-    except Exception:
-        traceback.print_exc()
-        print('GUI TEST FAILED')
-        finish(1)
-
-
-bpy.app.timers.register(advance, first_interval=1.0, persistent=True)
+run_journey(journey(), 'GUI stencil drag test')

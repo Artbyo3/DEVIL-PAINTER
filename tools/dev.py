@@ -16,6 +16,7 @@ from zipfile import ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.dont_write_bytecode = True
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 sys.path.insert(0, str(ROOT))
 from tools import gate, gate_state, workspace
 from tools.gate_state import GateBusy
@@ -34,7 +35,7 @@ def discover_gui_suites(tests_dir=ROOT / "tests"):
 GUI_SUITES = discover_gui_suites()
 JOURNEYS = ("blender_api.py",) + GUI_SUITES
 SLOWEST_JOURNEYS = ("gui_layers.py", "gui_project.py", "gui_positional.py", "gui_slope_normal.py", "gui_extras.py", "gui_masks.py", "gui_anchors.py", "gui_editor.py")
-EXCLUSIVE_JOURNEYS = ("blender_api.py", "gui_library.py", "gui_packs.py")
+EXCLUSIVE_JOURNEYS = ()
 JOURNEY_THREADS = 4
 JOURNEY_MEMORY = 4 * 2 ** 30
 JOURNEY_VIDEO_MEMORY = 2 * 2 ** 30
@@ -308,8 +309,9 @@ def run_journeys(run):
     shared = [journey for journey in sorted(JOURNEYS, key=slowest_first) if journey not in EXCLUSIVE_JOURNEYS]
     limits = journey_limits(len(shared))
     workers = max(1, min(limits.values()))
+    alone = f"{', '.join(EXCLUSIVE_JOURNEYS)} alone, then " if EXCLUSIVE_JOURNEYS else ""
     print(f"    {len(JOURNEYS)} journeys, each in its own scratch folder {shown(run.folder)}/j/<journey number>, logs in {shown(run.logs)}, "
-          f"killed after {JOURNEY_TIMEOUT}s: {', '.join(EXCLUSIVE_JOURNEYS)} alone, then {workers} at a time "
+          f"killed after {JOURNEY_TIMEOUT}s: {alone}{workers} at a time "
           f"({', '.join(f'{name} {limit}' for name, limit in limits.items())})")
     hashes = {}
     failed = []
@@ -331,15 +333,20 @@ def run_journeys(run):
 def do_journeys(run, golden_mode):
     hashes, failed = run_journeys(run)
     run.exports = sum(map(len, hashes.values()))
+    count_differences = gate.export_count_differences(hashes)
     if golden_mode == "update":
         if failed:
             return run.record("Golden manifest update", False, detail=f"not written because {', '.join(failed)} failed")
+        if count_differences:
+            for difference in count_differences:
+                print(f"    COUNT {difference}")
+            return run.record("Golden manifest update", False, detail=f"{len(count_differences)} export count mismatches")
         gate.write_golden(hashes)
         print(f"Golden manifest written: {run.exports} exports across {len(hashes)} journeys -> {shown(gate.GOLDEN)}")
         return run.record("Golden manifest update", True)
     if not run.exports:
         return run.record("Golden compare", False, detail="no journey produced an export")
-    differences = gate.golden_differences(gate.read_golden(), hashes)
+    differences = count_differences + gate.golden_differences(gate.read_golden(), hashes)
     run.differences = len(differences)
     print(f"Golden compare: {run.exports} exports across {len(hashes)} journeys, {len(differences)} differences")
     for difference in differences:

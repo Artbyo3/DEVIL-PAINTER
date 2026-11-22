@@ -1,28 +1,22 @@
 import json
 import math
-import os
 import sys
-import time
-import traceback
 from pathlib import Path
 import bmesh
 import bpy
 import numpy
 from bpy_extras import view3d_utils
-from mathutils import Quaternion
 
 bpy.context.preferences.view.show_splash = False
 ROOT = Path(__file__).resolve().parents[1]
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(ROOT))
 import devil_painter
-from devil_painter import brushes, editor, library, shelf
-from devil_painter.document import active_layer, find_layer
+from devil_painter import brushes, editor, library
+from devil_painter.document import find_layer
 from tools.workspace import prepare_scratch
-from tests.gui_harness import settle
+from tests.gui_harness import check, click, close_cards, control, finish, has, native_dab, new_layer, press, run_journey, settle, shelf_index, spot, top_view, type_text, viewport
 
-TIMEOUT = 600
-STARTED = time.time()
 DAB_REACH = .07
 EDGE_LEVEL = .05
 STEP = .3
@@ -39,52 +33,6 @@ CURVE_STEPS = 7
 ARROW = 'Arrow'
 
 
-def check(condition, message):
-    if not condition:
-        raise AssertionError(message)
-    print('PASS:', message)
-
-
-def finish(code):
-    sys.stdout.flush()
-    sys.stderr.flush()
-    os._exit(code)
-
-
-def viewport():
-    window = bpy.context.window_manager.windows[0]
-    area = next(area for area in window.screen.areas if area.type == 'VIEW_3D')
-    region = next(region for region in area.regions if region.type == 'WINDOW')
-    return window, area, region
-
-
-def move(window, x, y):
-    window.event_simulate(type='MOUSEMOVE', value='NOTHING', x=int(x), y=int(y))
-
-
-def press(window, kind, x, y, **modifiers):
-    move(window, x, y)
-    window.event_simulate(type=kind, value='PRESS', x=int(x), y=int(y), **modifiers)
-    window.event_simulate(type=kind, value='RELEASE', x=int(x), y=int(y), **modifiers)
-
-
-def control(key):
-    return next(item for item in reversed(editor._active.workspace.controls) if item.key == key)
-
-
-def has(key):
-    return any(item.key == key for item in editor._active.workspace.controls)
-
-
-def spot(region, key, fx=.5, fy=.5):
-    rect = control(key).rect
-    return region.x + rect.x + rect.w * fx, region.y + rect.y + rect.h * fy
-
-
-def click(window, region, key, kind='LEFTMOUSE', fx=.5, fy=.5):
-    press(window, kind, *spot(region, key, fx, fy))
-
-
 def card_click(window, region, key, fx=.5):
     if not (editor._active.state.popover is not None and editor._active.state.popover.kind == 'BRUSH'):
         click(window, region, 'BRUSH_CARD')
@@ -94,16 +42,6 @@ def card_click(window, region, key, fx=.5):
     yield from settle()
 
 
-def close_cards(window, middle):
-    if editor._active.state.popover is not None:
-        press(window, 'ESC', *middle)
-    yield from settle()
-
-
-def shelf_index(label):
-    return next(index for index, item in enumerate(shelf.items(editor._active.state.shelf_tab)) if item.label == label)
-
-
 def make_plane(obj):
     mesh = bmesh.new()
     mesh.loops.layers.uv.new('UVMap')
@@ -111,14 +49,6 @@ def make_plane(obj):
     mesh.to_mesh(obj.data)
     mesh.free()
     obj.data.update()
-
-
-def top_view(area):
-    view = area.spaces.active.region_3d
-    view.view_perspective = 'ORTHO'
-    view.view_rotation = Quaternion((1.0, 0.0, 0.0, 0.0))
-    view.view_location = (0.0, 0.0, 0.0)
-    view.view_distance = 3.0
 
 
 def screen_point(area, region, x, y):
@@ -136,14 +66,6 @@ def layer_alpha(data, uid):
 def stroke(window, area, region, points):
     with bpy.context.temp_override(window=window, area=area, region=region):
         editor._active.run_gesture(bpy.context, points)
-
-
-def native_dab(window, region, point):
-    x, y = round(region.x + point[0]), round(region.y + point[1])
-    move(window, x, y)
-    window.event_simulate(type='LEFTMOUSE', value='PRESS', x=x, y=y)
-    window.event_simulate(type='LEFTMOUSE', value='RELEASE', x=x, y=y)
-    return x - region.x, y - region.y
 
 
 def footprint(alpha, center):
@@ -171,20 +93,6 @@ def wrap(angle):
 
 def spread(values):
     return dict(min=round(float(min(values)), 3), max=round(float(max(values)), 3))
-
-
-def type_text(window, text, x, y):
-    for _ in range(80):
-        window.event_simulate(type='BACK_SPACE', value='PRESS', x=int(x), y=int(y))
-    for character in text:
-        window.event_simulate(type='A', value='PRESS', x=int(x), y=int(y), unicode=character)
-    window.event_simulate(type='RET', value='PRESS', x=int(x), y=int(y))
-
-
-def new_layer(window, region, data):
-    click(window, region, 'ADD_PAINT')
-    yield from settle()
-    return active_layer(data).uid
 
 
 def paint_stroke(window, area, region, cube, data, points):
@@ -415,18 +323,4 @@ def journey():
     finish(0)
 
 
-steps = journey()
-
-
-def advance():
-    try:
-        if time.time() - STARTED > TIMEOUT:
-            raise AssertionError('GUI follow path test timed out')
-        return next(steps)
-    except Exception:
-        traceback.print_exc()
-        print('GUI TEST FAILED')
-        finish(1)
-
-
-bpy.app.timers.register(advance, first_interval=1.0, persistent=True)
+run_journey(journey(), 'GUI follow path test')

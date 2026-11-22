@@ -1,8 +1,5 @@
 import math
-import os
 import sys
-import time
-import traceback
 from pathlib import Path
 import bpy
 import numpy
@@ -17,114 +14,11 @@ import devil_painter
 from devil_painter import editor, library, painting
 from devil_painter.document import active_layer, find_layer
 from tools.workspace import prepare_scratch
-from tests.gui_harness import settle, until
-
-TIMEOUT = 600
-STARTED = time.time()
-
-
-def check(condition, message):
-    if not condition:
-        raise AssertionError(message)
-    print('PASS:', message)
-
-
-def finish(code):
-    sys.stdout.flush()
-    sys.stderr.flush()
-    os._exit(code)
-
-
-def viewport():
-    window = bpy.context.window_manager.windows[0]
-    area = next(area for area in window.screen.areas if area.type == 'VIEW_3D')
-    region = next(region for region in area.regions if region.type == 'WINDOW')
-    return window, area, region
-
-
-def move(window, x, y):
-    window.event_simulate(type='MOUSEMOVE', value='NOTHING', x=int(x), y=int(y))
-
-
-def press(window, kind, x, y, **modifiers):
-    move(window, x, y)
-    window.event_simulate(type=kind, value='PRESS', x=int(x), y=int(y), **modifiers)
-    window.event_simulate(type=kind, value='RELEASE', x=int(x), y=int(y), **modifiers)
-
-
-def control(key):
-    return next(item for item in reversed(editor._active.workspace.controls) if item.key == key)
-
-
-def has(key):
-    return any(item.key == key for item in editor._active.workspace.controls)
-
-
-def keys(prefix):
-    return [item.key for item in editor._active.workspace.controls if item.key.startswith(prefix)]
+from tests.gui_harness import check, click, close_cards, context_menu, control, finish, has, keys, move, nodes, pixels, png, press, reveal, run_journey, select_row, set_hex, settle, slide, spot, type_text, until, viewport
 
 
 def spot_of(region, key, fx=.5, fy=.5):
     return spot(region, key, fx, fy)
-
-
-def spot(region, key, fx=.5, fy=.5):
-    rect = control(key).rect
-    return region.x + rect.x + rect.w * fx, region.y + rect.y + rect.h * fy
-
-
-def click(window, region, key, kind='LEFTMOUSE', fx=.5, fy=.5, **modifiers):
-    press(window, kind, *spot(region, key, fx, fy), **modifiers)
-
-
-def shown(key):
-    if not has(key):
-        return False
-    item = control(key)
-    return item.clip is None or (item.clip.contains(item.rect.x, item.rect.y) and item.clip.contains(item.rect.x + item.rect.w, item.rect.top))
-
-
-def reveal(window, region, key, panel='PROPERTIES'):
-    for direction in ('WHEELUPMOUSE', 'WHEELDOWNMOUSE'):
-        for _ in range(30):
-            if shown(key) or panel not in editor._active.workspace.scroll_areas:
-                break
-            viewport_rect = editor._active.workspace.scroll_areas[panel][0]
-            x, y = region.x + viewport_rect.x + viewport_rect.w / 2, region.y + viewport_rect.y + viewport_rect.h / 2
-            move(window, x, y)
-            window.event_simulate(type=direction, value='PRESS', x=int(x), y=int(y))
-            yield from settle()
-            if direction == 'WHEELUPMOUSE' and editor._active.state.scroll.get(panel, 0.0) <= 0.0:
-                break
-        if shown(key):
-            break
-    check(shown(key), key + ' is in view')
-
-
-def type_text(window, text, x, y):
-    for _ in range(160):
-        window.event_simulate(type='BACK_SPACE', value='PRESS', x=int(x), y=int(y))
-    for character in text:
-        window.event_simulate(type='A', value='PRESS', x=int(x), y=int(y), unicode=character)
-    window.event_simulate(type='RET', value='PRESS', x=int(x), y=int(y))
-
-
-def pixels(image):
-    values = numpy.empty(len(image.pixels), dtype=numpy.float32)
-    image.pixels.foreach_get(values)
-    return values.reshape(-1, 4)
-
-
-def png(path):
-    image = bpy.data.images.load(str(path))
-    image.colorspace_settings.name = 'Non-Color'
-    values = pixels(image)
-    bpy.data.images.remove(image)
-    return values
-
-
-def nodes(data):
-    return data.material.node_tree.nodes
 
 
 def pick(window, region, opener, item):
@@ -137,39 +31,6 @@ def menu(window, region, opener, item):
     yield from settle()
     check(has(item), f'{opener} offers {item}')
     click(window, region, item)
-    yield from settle()
-
-
-def context_menu(window, region, uid, item):
-    yield from reveal(window, region, 'ROW_' + uid, 'LAYERS')
-    click(window, region, 'ROW_' + uid, kind='RIGHTMOUSE')
-    yield from settle()
-    check(has(item), f'the layer menu offers {item}')
-    click(window, region, item)
-    yield from settle()
-
-
-def select_row(window, region, uid, **modifiers):
-    yield from reveal(window, region, 'ROW_' + uid, 'LAYERS')
-    click(window, region, 'ROW_' + uid, fx=.6, **modifiers)
-    yield from settle()
-
-
-def slide(window, region, key, fx):
-    yield from reveal(window, region, key)
-    click(window, region, key, fx=fx)
-    yield from settle()
-
-
-def set_hex(window, region, opener, text):
-    yield from reveal(window, region, opener)
-    click(window, region, opener)
-    yield from settle()
-    click(window, region, 'COLOR_HEX')
-    yield from settle()
-    type_text(window, text, *spot(region, 'COLOR_HEX'))
-    yield from settle()
-    press(window, 'ESC', *spot(region, 'COLOR_HEX'))
     yield from settle()
 
 
@@ -215,12 +76,6 @@ def card_click(window, region, opener, key, popover):
         yield from settle()
     check(has(key), f'{opener} shows {key}')
     click(window, region, key)
-    yield from settle()
-
-
-def close_cards(window, middle):
-    if editor._active.state.popover is not None:
-        press(window, 'ESC', *middle)
     yield from settle()
 
 
@@ -629,18 +484,4 @@ def journey():
     finish(0)
 
 
-steps = journey()
-
-
-def advance():
-    try:
-        if time.time() - STARTED > TIMEOUT:
-            raise AssertionError('GUI painting test timed out')
-        return next(steps)
-    except Exception:
-        traceback.print_exc()
-        print('GUI TEST FAILED')
-        finish(1)
-
-
-bpy.app.timers.register(advance, first_interval=1.0, persistent=True)
+run_journey(journey(), 'GUI painting test')

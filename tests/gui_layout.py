@@ -1,8 +1,5 @@
 import json
-import os
 import sys
-import time
-import traceback
 from pathlib import Path
 import bpy
 
@@ -15,44 +12,13 @@ from devil_painter import editor, library
 from devil_painter.privacy import MASK, masked_path
 from devil_painter.shell import COLUMNS, MAX_SIZE, PANELS, SECTIONS
 from tools.workspace import prepare_scratch
-from tests.gui_harness import settle
+from tests.gui_harness import check, finish, move, press, run_journey, settle, type_text, viewport
 
-TIMEOUT = 600
-STARTED = time.time()
 EXEMPT_KINDS = {'GRIP', 'GHOST'}
 NAMES = dict(BAR='workspace bar', STRIP='tool strip', DOCK='tool dock', SHELF='asset browser', SETS='Texture sets panel',
              LAYERS='Layers panel', PROPERTIES='Properties panel', MAPS='Mesh maps panel')
 GROW = dict(TOP=(0, -1), BOTTOM=(0, 1), LEFT=(1, 0), RIGHT=(-1, 0))
 EXEMPT_KEYS = {'DROP_LINE', 'DRAG_GHOST'}
-
-
-def check(condition, message):
-    if not condition:
-        raise AssertionError(message)
-    print('PASS:', message)
-
-
-def finish(code):
-    sys.stdout.flush()
-    sys.stderr.flush()
-    os._exit(code)
-
-
-def viewport():
-    window = bpy.context.window_manager.windows[0]
-    area = next(area for area in window.screen.areas if area.type == 'VIEW_3D')
-    region = next(region for region in area.regions if region.type == 'WINDOW')
-    return window, area, region
-
-
-def move(window, x, y):
-    window.event_simulate(type='MOUSEMOVE', value='NOTHING', x=int(x), y=int(y))
-
-
-def press(window, kind, x, y, **modifiers):
-    move(window, x, y)
-    window.event_simulate(type=kind, value='PRESS', x=int(x), y=int(y), **modifiers)
-    window.event_simulate(type=kind, value='RELEASE', x=int(x), y=int(y), **modifiers)
 
 
 def workspace():
@@ -83,14 +49,6 @@ def drag(window, region, key, dx, dy, fx=.5, fy=.5):
     for step in range(1, 9):
         move(window, x + dx * step / 8, y + dy * step / 8)
     window.event_simulate(type='LEFTMOUSE', value='RELEASE', x=int(x + dx), y=int(y + dy))
-
-
-def type_text(window, text, x, y):
-    for _ in range(200):
-        window.event_simulate(type='BACK_SPACE', value='PRESS', x=int(x), y=int(y))
-    for character in text:
-        window.event_simulate(type='A', value='PRESS', x=int(x), y=int(y), unicode=character)
-    window.event_simulate(type='RET', value='PRESS', x=int(x), y=int(y))
 
 
 def inside(rect, box, slack=1.0):
@@ -386,18 +344,4 @@ def journey():
     finish(0)
 
 
-steps = journey()
-
-
-def advance():
-    try:
-        if time.time() - STARTED > TIMEOUT:
-            raise AssertionError('GUI layout test timed out')
-        return next(steps)
-    except Exception:
-        traceback.print_exc()
-        print('GUI TEST FAILED')
-        finish(1)
-
-
-bpy.app.timers.register(advance, first_interval=1.0, persistent=True)
+run_journey(journey(), 'GUI layout test')

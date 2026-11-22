@@ -1,8 +1,11 @@
+import logging
 from dataclasses import dataclass
 from typing import Tuple
 import blf
 import bpy
 from .canvas import Rect
+
+LOG = logging.getLogger(__name__)
 
 BG_ELEVATED = (0.251, 0.188, 0.199, 1.0)
 BG_WELL = (0.110, 0.078, 0.083, 1.0)
@@ -45,8 +48,8 @@ class MinimalMetrics:
                 wcol = getattr(ui, 'wcol_' + role, None)
                 if wcol is not None and hasattr(wcol, 'roundness'):
                     setattr(m, role, 0.5 * float(wcol.roundness) * 20.0)
-        except Exception:
-            pass
+        except (AttributeError, IndexError, ReferenceError, RuntimeError, TypeError, ValueError) as error:
+            LOG.warning('Devil Painter could not read Blender theme metrics: %s', error)
         return m
 
 

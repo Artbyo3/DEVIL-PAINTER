@@ -1,9 +1,6 @@
 import json
 import math
-import os
 import sys
-import time
-import traceback
 from pathlib import Path
 import bmesh
 import bpy
@@ -16,14 +13,12 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(ROOT))
 import devil_painter
-from devil_painter import brushes, editor, library, painting, shelf
-from devil_painter.document import active_layer, find_layer
+from devil_painter import brushes, editor, library, painting
+from devil_painter.document import find_layer
 from devil_painter.minimal import MAX_WORLD_SIZE
 from tools.workspace import prepare_scratch
-from tests.gui_harness import settle
+from tests.gui_harness import check, click, close_cards, control, finish, has, move, new_layer, press, run_journey, settle, shelf_index, spot, type_text, viewport
 
-TIMEOUT = 600
-STARTED = time.time()
 WORLD_SIZE = .2
 NEAR, FAR = 3.0, 9.0
 MATCH = .03
@@ -33,52 +28,6 @@ JITTER_AMOUNT = .5
 RADIAL_REACH = 60
 
 
-def check(condition, message):
-    if not condition:
-        raise AssertionError(message)
-    print('PASS:', message)
-
-
-def finish(code):
-    sys.stdout.flush()
-    sys.stderr.flush()
-    os._exit(code)
-
-
-def viewport():
-    window = bpy.context.window_manager.windows[0]
-    area = next(area for area in window.screen.areas if area.type == 'VIEW_3D')
-    region = next(region for region in area.regions if region.type == 'WINDOW')
-    return window, area, region
-
-
-def move(window, x, y):
-    window.event_simulate(type='MOUSEMOVE', value='NOTHING', x=int(x), y=int(y))
-
-
-def press(window, kind, x, y, **modifiers):
-    move(window, x, y)
-    window.event_simulate(type=kind, value='PRESS', x=int(x), y=int(y), **modifiers)
-    window.event_simulate(type=kind, value='RELEASE', x=int(x), y=int(y), **modifiers)
-
-
-def control(key):
-    return next(item for item in reversed(editor._active.workspace.controls) if item.key == key)
-
-
-def has(key):
-    return any(item.key == key for item in editor._active.workspace.controls)
-
-
-def spot(region, key, fx=.5, fy=.5):
-    rect = control(key).rect
-    return region.x + rect.x + rect.w * fx, region.y + rect.y + rect.h * fy
-
-
-def click(window, region, key, kind='LEFTMOUSE', fx=.5, fy=.5):
-    press(window, kind, *spot(region, key, fx, fy))
-
-
 def card_click(window, region, key, fx=.5):
     if not (editor._active.state.popover is not None and editor._active.state.popover.kind == 'BRUSH'):
         click(window, region, 'BRUSH_CARD')
@@ -86,16 +35,6 @@ def card_click(window, region, key, fx=.5):
     check(has(key), f'the Brush card shows {key}')
     click(window, region, key, fx=fx)
     yield from settle()
-
-
-def close_cards(window, middle):
-    if editor._active.state.popover is not None:
-        press(window, 'ESC', *middle)
-    yield from settle()
-
-
-def shelf_index(label):
-    return next(index for index, item in enumerate(shelf.items(editor._active.state.shelf_tab)) if item.label == label)
 
 
 def make_plane(obj):
@@ -140,12 +79,6 @@ def footprint(obj, data, alpha):
     return 2 * math.sqrt(float((alpha > EDGE).sum()) / math.pi) / texels_per_unit(obj, data)
 
 
-def new_layer(window, region, data):
-    click(window, region, 'ADD_PAINT')
-    yield from settle()
-    return active_layer(data).uid
-
-
 def dab(window, area, region, obj, data, pressure=1.0):
     uid = yield from new_layer(window, region, data)
     with bpy.context.temp_override(window=window, area=area, region=region):
@@ -172,14 +105,6 @@ def measure(window, area, region, obj, data, perspective, distance):
     size = native_size()
     painted = yield from dab(window, area, region, obj, data)
     return dict(view=perspective, distance=distance, pixels_per_unit=round(pixels_per_unit(area, region), 3), cursor_px=size, footprint=round(painted, 5))
-
-
-def type_text(window, text, x, y):
-    for _ in range(80):
-        window.event_simulate(type='BACK_SPACE', value='PRESS', x=int(x), y=int(y))
-    for character in text:
-        window.event_simulate(type='A', value='PRESS', x=int(x), y=int(y), unicode=character)
-    window.event_simulate(type='RET', value='PRESS', x=int(x), y=int(y))
 
 
 def journey():
@@ -370,18 +295,4 @@ def journey():
     finish(0)
 
 
-steps = journey()
-
-
-def advance():
-    try:
-        if time.time() - STARTED > TIMEOUT:
-            raise AssertionError('GUI world size test timed out')
-        return next(steps)
-    except Exception:
-        traceback.print_exc()
-        print('GUI TEST FAILED')
-        finish(1)
-
-
-bpy.app.timers.register(advance, first_interval=1.0, persistent=True)
+run_journey(journey(), 'GUI world size test')

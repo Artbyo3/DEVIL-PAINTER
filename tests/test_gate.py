@@ -42,6 +42,27 @@ class TierTests(unittest.TestCase):
             self.assertEqual(gate.select_tier(gate.changed_files())[0], 'light')
 
 
+class ExportCountTests(unittest.TestCase):
+    def test_every_journey_declares_its_expected_export_count_and_zero_reason(self):
+        self.assertEqual(set(gate.EXPECTED_EXPORTS), set(dev.JOURNEYS))
+        golden = gate.read_golden()
+        self.assertEqual(gate.export_count_differences(golden), [])
+        for journey, (count, reason) in gate.EXPECTED_EXPORTS.items():
+            if count == 0:
+                self.assertTrue(reason.strip() and '\n' not in reason, journey)
+
+    def test_export_count_differences_flags_mismatches_missing_and_unexplained_zero(self):
+        declared = {'a.py': (2, ''), 'b.py': (0, 'no exports'), 'c.py': (0, ''), 'missing_run.py': (1, '')}
+        actual = {'a.py': [['x.png', '0' * 64]], 'b.py': [], 'c.py': [], 'undeclared.py': []}
+        differences = gate.export_count_differences(actual, declared)
+        self.assertEqual(differences, [
+            'a.py: expected 2 exports, got 1',
+            'c.py: declared 0 exports without a reason',
+            'missing_run.py: declared journey did not run',
+            'undeclared.py: missing expected export count declaration',
+        ])
+
+
 class LockTests(GateTestCase):
     def test_second_gate_is_refused_while_the_first_is_alive(self):
         gate_state.acquire_lock('first')

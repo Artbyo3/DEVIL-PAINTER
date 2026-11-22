@@ -13,6 +13,39 @@ LIGHT_PATTERNS = (
     'devil_painter/assets/*.txt', 'devil_painter/assets/icons/sources.json',
 )
 TIER_NAMES = ('light', 'standard', 'full')
+EXPECTED_EXPORTS = {
+    'blender_api.py': (22, ''),
+    'gui_anchors.py': (80, ''),
+    'gui_baking.py': (0, 'verifies background mesh-map baking, cage/skew maps, and bake cancel rather than texture export'),
+    'gui_clone_surface.py': (0, 'verifies surface-space clone source picking and seam-crossing strokes directly on layer pixels'),
+    'gui_content.py': (50, ''),
+    'gui_editor.py': (12, ''),
+    'gui_extras.py': (5, ''),
+    'gui_follow_path.py': (5, ''),
+    'gui_jitter.py': (5, ''),
+    'gui_layer_delete.py': (0, 'verifies layer deletion, undo/redo, and workspace liveness without exporting textures'),
+    'gui_layers.py': (91, ''),
+    'gui_layout.py': (0, 'verifies docking, resizing, privacy path masking, and layout persistence without exporting textures'),
+    'gui_library.py': (0, 'verifies 600-texture background thumbnail streaming, caching, and worker shutdown'),
+    'gui_masks.py': (24, ''),
+    'gui_material_stroke.py': (5, ''),
+    'gui_missing_material.py': (0, 'verifies recovering a deleted texture-set material on open and mid-session paint strokes'),
+    'gui_packs.py': (0, 'verifies online/offline asset-pack catalog security, checksum checks, install, and removal'),
+    'gui_painting.py': (20, ''),
+    'gui_positional.py': (65, ''),
+    'gui_pressure.py': (0, 'verifies pen-pressure size, flow, hardness, and angle response directly on layer pixels'),
+    'gui_project.py': (26, ''),
+    'gui_reopen.py': (0, 'verifies reopening, fullscreen/maximize screen toggles, region restoration, and error recovery'),
+    'gui_shelf.py': (11, ''),
+    'gui_shift_line.py': (0, 'verifies Shift-click straight-line stroke geometry directly on layer pixels'),
+    'gui_slope_normal.py': (65, ''),
+    'gui_stencil_drag.py': (0, 'verifies viewport stencil move, scale, and rotate transforms directly on layer pixels'),
+    'gui_texture_sampling.py': (35, ''),
+    'gui_triplanar_hardness.py': (25, ''),
+    'gui_udim.py': (10, ''),
+    'gui_uv_transform.py': (30, ''),
+    'gui_world_size.py': (5, ''),
+}
 
 
 def git(*arguments):
@@ -69,6 +102,25 @@ def write_golden(hashes):
 
 def entry_text(entry):
     return f'{entry[0]} ({entry[1][:12]})' if entry else 'nothing'
+
+
+def export_count_differences(actual, declared=None):
+    declared = EXPECTED_EXPORTS if declared is None else declared
+    differences = []
+    for journey in list(declared) + [name for name in actual if name not in declared]:
+        if journey not in declared:
+            differences.append(f'{journey}: missing expected export count declaration')
+            continue
+        expected, reason = declared[journey]
+        if expected == 0 and not reason.strip():
+            differences.append(f'{journey}: declared 0 exports without a reason')
+        if journey not in actual:
+            differences.append(f'{journey}: declared journey did not run')
+            continue
+        produced = len(actual[journey])
+        if produced != expected:
+            differences.append(f'{journey}: expected {expected} exports, got {produced}')
+    return differences
 
 
 def golden_differences(expected, actual):
