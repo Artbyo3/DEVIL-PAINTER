@@ -39,15 +39,6 @@ jobs:
             exit 1
           fi
 
-      - name: Validate the release tag
-        env:
-          RELEASE_TAG: ${{ inputs.release_tag }}
-        run: |
-          if [ -n "$RELEASE_TAG" ] && [[ ! "$RELEASE_TAG" =~ ^v[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}(-[A-Za-z0-9]{1,32}(\.[A-Za-z0-9]{1,32}){0,3})?$ ]]; then
-            echo "ERROR: release_tag must look like v1.2.3 or v1.2.3-label."
-            exit 1
-          fi
-
       - name: Check out the gate
         uses: actions/checkout@v4
         with:
@@ -58,6 +49,11 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
+      - name: Validate the release tag
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: python -B tools/vt_release_gate.py --validate-tag
 
       - name: Scan the draft release
         id: gate

@@ -21,7 +21,7 @@ their workflow, behaving the way they expect, without leaving Blender. A
 Blender artist should be able to follow the same workflow without learning a
 second program.
 
-The product is past its MVP. Version 0.3.0 is the public announcement
+The product is past its MVP. Version {{VERSION}} is the public announcement
 release, shipped through the project's own Blender extension repository.
 
 Devil Painter shares the Devil workspace with Devil Designer: the same shell,

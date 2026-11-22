@@ -47,6 +47,24 @@ class InstallCardTests(unittest.TestCase):
             with self.assertRaises(install_card.CardError):
                 install_card.stamp_cards(site)
 
+    def test_version_is_stamped_from_manifest_into_site_and_docs(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder) / 'repo'
+            site = Path(folder) / 'site'
+            (root / 'devil_painter').mkdir(parents=True)
+            site.mkdir()
+            (root / 'devil_painter' / 'blender_manifest.toml').write_text('id = "devil_painter"\nversion = "1.2.3"\n', encoding='utf-8')
+            (root / 'README.md').write_text('v{{VERSION}}/devil_painter-{{VERSION}}.zip', encoding='utf-8')
+            (root / 'SPEC.md').write_text('Version {{VERSION}} is the public announcement', encoding='utf-8')
+            (site / 'index.html').write_text('<a href="https://github.com/Artbyo3/DEVIL-PAINTER/releases/download/v{{VERSION}}/devil_painter-{{VERSION}}.zip">Download</a>', encoding='utf-8')
+            self.assertEqual(install_card.stamp_version(site, root), '1.2.3')
+            self.assertIn('v1.2.3/devil_painter-1.2.3.zip', (site / 'index.html').read_text(encoding='utf-8'))
+            self.assertEqual((site / 'README.md').read_text(encoding='utf-8'), 'v1.2.3/devil_painter-1.2.3.zip')
+            self.assertEqual((site / 'SPEC.md').read_text(encoding='utf-8'), 'Version 1.2.3 is the public announcement')
+            (root / 'SPEC.md').write_text('No placeholder here', encoding='utf-8')
+            with self.assertRaises(install_card.CardError):
+                install_card.stamp_version(site, root)
+
 
 if __name__ == '__main__':
     unittest.main()

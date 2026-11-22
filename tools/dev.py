@@ -24,7 +24,14 @@ from tools.workspace import FAILURE_RECORD_VARIABLE, child_environment, clean_sc
 MINIMUM_BLENDER = (5, 2)
 STEAM_BLENDER = Path(r"C:\Program Files (x86)\Steam\steamapps\common\Blender\blender.exe")
 BLENDER_FOUNDATION = Path(r"C:\Program Files\Blender Foundation")
-GUI_SUITES = ("gui_editor.py", "gui_project.py", "gui_layers.py", "gui_baking.py", "gui_masks.py", "gui_content.py", "gui_anchors.py", "gui_positional.py", "gui_slope_normal.py", "gui_uv_transform.py", "gui_triplanar_hardness.py", "gui_pressure.py", "gui_jitter.py", "gui_follow_path.py", "gui_texture_sampling.py", "gui_painting.py", "gui_shelf.py", "gui_extras.py", "gui_packs.py", "gui_udim.py", "gui_library.py", "gui_layout.py", "gui_reopen.py", "gui_layer_delete.py", "gui_world_size.py", "gui_shift_line.py", "gui_stencil_drag.py", "gui_material_stroke.py", "gui_clone_surface.py", "gui_missing_material.py")
+GUI_HELPERS = frozenset(("gui_harness.py",))
+
+
+def discover_gui_suites(tests_dir=ROOT / "tests"):
+    return tuple(sorted(path.name for path in tests_dir.glob("gui_*.py") if path.name not in GUI_HELPERS))
+
+
+GUI_SUITES = discover_gui_suites()
 JOURNEYS = ("blender_api.py",) + GUI_SUITES
 SLOWEST_JOURNEYS = ("gui_layers.py", "gui_project.py", "gui_positional.py", "gui_slope_normal.py", "gui_extras.py", "gui_masks.py", "gui_anchors.py", "gui_editor.py")
 EXCLUSIVE_JOURNEYS = ("blender_api.py", "gui_library.py", "gui_packs.py")

@@ -336,7 +336,14 @@ def run():
     return 0
 
 
-def main():
+def main(argv=None):
+    arguments = sys.argv[1:] if argv is None else argv
+    if arguments == ['--validate-tag']:
+        tag = os.environ.get('RELEASE_TAG', '')
+        if tag and not valid_tag(tag):
+            print('ERROR: release_tag must look like v1.2.3 or v1.2.3-label.')
+            return 1
+        return 0
     try:
         return run()
     except GateError as error:

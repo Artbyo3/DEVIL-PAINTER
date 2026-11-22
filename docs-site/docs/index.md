@@ -21,7 +21,7 @@ hide:
         Get Add-on
       </button>
       <div class="dp-install-drag-group" id="dp-install-drag-group">
-        <a href="https://github.com/Artbyo3/DEVIL-PAINTER/releases/download/v0.2.1/devil_painter-0.2.1.zip?repository=https%3A%2F%2Fartbyo3.github.io%2FDEVIL-PAINTER%2Frepo%2Findex.json&amp;blender_version_min=5.2.0"
+        <a href="https://github.com/Artbyo3/DEVIL-PAINTER/releases/download/v{{VERSION}}/devil_painter-{{VERSION}}.zip?repository=https%3A%2F%2Fartbyo3.github.io%2FDEVIL-PAINTER%2Frepo%2Findex.json&amp;blender_version_min=5.2.0"
            class="dp-install-drag-zone"
            id="dp-install-drag"
            target="_blank"

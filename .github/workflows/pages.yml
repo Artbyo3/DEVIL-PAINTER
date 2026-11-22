@@ -6,6 +6,10 @@ on:
       - main
     paths:
       - 'docs-site/**'
+      - 'devil_painter/blender_manifest.toml'
+      - 'README.md'
+      - 'SPEC.md'
+      - 'tools/install_card.py'
   workflow_dispatch:
 
 permissions:

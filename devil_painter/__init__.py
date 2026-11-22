@@ -1,5 +1,14 @@
+from pathlib import Path
+import tomllib
+
+
+def manifest_version():
+    manifest = tomllib.loads(Path(__file__).with_name('blender_manifest.toml').read_text(encoding='utf-8'))
+    return tuple(int(part) for part in manifest['version'].split('-', 1)[0].split('+', 1)[0].split('.'))
+
+
 bl_info = {
-    "name": "Devil Painter", "author": "Artbyo3", "version": (0, 5, 0),
+    "name": "Devil Painter", "author": "Artbyo3", "version": manifest_version(),
     "blender": (5, 2, 0), "location": "View3D > View > Devil Painter; Ctrl+Alt+P",
     "description": "Layer-based texture painting inside Blender", "category": "Paint",
 }

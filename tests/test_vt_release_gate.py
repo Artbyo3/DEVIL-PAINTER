@@ -2,6 +2,7 @@ import io
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 import zipfile
 from pathlib import Path
 from tools import vt_release_gate as gate
@@ -20,6 +21,11 @@ class ReleaseScanGateTests(unittest.TestCase):
             self.assertTrue(gate.valid_tag(tag), tag)
         for tag in ('', '0.2.0', 'v0.2', 'v0.2.0;rm', 'v0.2.0\nx', '../v0.2.0', 'v0.2.0-', 'v0.2.0-a..b', 'v0.2.0 '):
             self.assertFalse(gate.valid_tag(tag), tag)
+
+    def test_validate_tag_cli_uses_the_single_tag_pattern(self):
+        for tag, expected in (('', 0), ('v0.5.0', 0), ('v1.2.3-rc.1', 0), ('0.5.0', 1), ('v0.5.0 ', 1)):
+            with patch.dict(os.environ, {'RELEASE_TAG': tag}), patch('builtins.print'):
+                self.assertEqual(gate.main(['--validate-tag']), expected, tag)
 
     def test_the_draft_must_carry_exactly_the_versioned_add_on_zip(self):
         self.assertEqual(gate.asset_name('v0.2.0'), 'devil_painter-0.2.0.zip')
