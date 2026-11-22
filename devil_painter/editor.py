@@ -12,7 +12,7 @@ from . import actions, autosave, bakejob, baking, bridge, brushes, caches, compo
 from .blending import BLEND_MODES, CHANNEL, FOLDER_BLENDS, linear_to_srgb, srgb_to_linear
 from .ui_system import ACCENT
 from .canvas import Rect
-from .document import (BAKE_ANTIALIAS_LABELS, BAKE_CURVATURE_LABELS, BAKE_ID_LABELS, CHANNEL_DEPTHS, DYNAMICS, PROJECTIONS, PROJECTORS, RESOLUTIONS, STROKE_METHODS, TEXTURE_SAMPLING, active_effect, active_layer, active_tile, bake_map_settings, find_layer,
+from .document import (BAKE_ANTIALIAS_LABELS, BAKE_CURVATURE_LABELS, BAKE_ID_LABELS, BAKE_RESOLUTIONS, CHANNEL_DEPTHS, DYNAMICS, PROJECTIONS, PROJECTORS, RESOLUTIONS, STROKE_METHODS, TEXTURE_SAMPLING, active_effect, active_layer, active_tile, bake_map_settings, find_layer,
                        editing_mask, paint_target, set_channels, slot_value, texture_set, uses_coordinates)
 from .effects import FILL_PROJECTIONS, LEVEL_COMPONENTS, MASK_BLENDS, mask_effects
 from .filters import FILTER, FILTERS, GROUPS
@@ -1886,6 +1886,14 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         elif key.startswith('SET_BAKE_ID.'):
             value = key.removeprefix('SET_BAKE_ID.')
             self.message = actions.set_bake(context, obj, data, 'bake_id', value, f'ID map colors by {BAKE_ID_LABELS[value].lower()}.')
+        elif key == 'BAKE_RESOLUTION':
+            self.state.popover = Popover('MENU', control.rect, items=tuple(
+                (f'SET_BAKE_RESOLUTION.{size}', f'{size} px' if size else 'Texture set size', data.bake_resolution == size)
+                for size in BAKE_RESOLUTIONS))
+        elif key.startswith('SET_BAKE_RESOLUTION.'):
+            size = int(key.removeprefix('SET_BAKE_RESOLUTION.'))
+            self.message = actions.set_bake(context, obj, data, 'bake_resolution', size,
+                                            f'Bake resolution: {size} px.' if size else 'Bake resolution: texture set size.')
         elif key == 'BAKE_ANTIALIAS':
             self.state.popover = Popover('MENU', control.rect, items=tuple((f'SET_BAKE_ANTIALIAS.{value}', label, data.bake_antialias == value)
                                                                            for value, label in BAKE_ANTIALIAS_LABELS.items()))

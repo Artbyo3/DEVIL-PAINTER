@@ -107,7 +107,26 @@ def downsampled(pixels, scale):
     return pixels.reshape(height // scale, scale, width // scale, scale, depth).mean(axis=(1, 3), dtype=numpy.float32)
 
 
-def bake_tiles(obj, project, wanted, prepare, bake_type, margin, scale=1, **options):
+def resized(values, shape):
+    if values.shape[:2] == shape:
+        return values
+    source_h, source_w = values.shape[:2]
+    target_h, target_w = shape
+    if source_h % target_h == 0 and source_w % target_w == 0:
+        return values.reshape(target_h, source_h // target_h, target_w, source_w // target_w, *values.shape[2:]).mean(axis=(1, 3), dtype=numpy.float32)
+    ys = numpy.linspace(0, source_h - 1, target_h, dtype=numpy.float32)
+    xs = numpy.linspace(0, source_w - 1, target_w, dtype=numpy.float32)
+    y0, x0 = numpy.floor(ys).astype(numpy.int32), numpy.floor(xs).astype(numpy.int32)
+    y1, x1 = numpy.minimum(y0 + 1, source_h - 1), numpy.minimum(x0 + 1, source_w - 1)
+    wy, wx = (ys - y0)[:, None], (xs - x0)[None, :]
+    if values.ndim == 3:
+        wy, wx = wy[..., None], wx[..., None]
+    top = values[y0[:, None], x0[None, :]] * (1 - wx) + values[y0[:, None], x1[None, :]] * wx
+    bottom = values[y1[:, None], x0[None, :]] * (1 - wx) + values[y1[:, None], x1[None, :]] * wx
+    return (top * (1 - wy) + bottom * wy).astype(numpy.float32)
+
+
+def bake_tiles(obj, project, wanted, prepare, bake_type, margin, scale=1, resolution=0, **options):
     mesh = obj.data
     name = uv_name(obj, project)
     face_tiles = tiles.face_tiles(mesh, name)
@@ -121,7 +140,8 @@ def bake_tiles(obj, project, wanted, prepare, bake_type, margin, scale=1, **opti
                 tree = data.material.node_tree
                 if index in wanted and number in tiles.numbers(data):
                     prepare(data)
-                    image = target_image(f'DP Bake {data.name} {number}', data.resolution * scale)
+                    size = resolution or data.resolution
+                    image = target_image(f'DP Bake {data.name} {number}', size * scale)
                     targets[index] = image
                 else:
                     emission_tree(tree, (0.0, 0.0, 0.0, 1.0))
@@ -153,11 +173,11 @@ def resync(project):
         compositing.sync(data)
 
 
-def bake_pass(context, obj, project, wanted, prepare, bake_type='EMIT', samples=BAKE_SAMPLES, extra=(), margin=BAKE_MARGIN, scale=1, **options):
+def bake_pass(context, obj, project, wanted, prepare, bake_type='EMIT', samples=BAKE_SAMPLES, extra=(), margin=BAKE_MARGIN, scale=1, resolution=0, **options):
     refresh_below(context, obj, project)
     with bake_scene(context, obj, samples, extra):
         try:
-            return bake_tiles(obj, project, wanted, prepare, bake_type, margin, scale, **options)
+            return bake_tiles(obj, project, wanted, prepare, bake_type, margin, scale, resolution, **options)
         finally:
             resync(project)
 

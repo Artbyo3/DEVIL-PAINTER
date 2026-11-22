@@ -1485,7 +1485,7 @@ def bake_sets_section(layout, project, x, y, w, s):
 
 def bake_popover(layout, state, bounds, data):
     s, sources, project = layout.scale, state.bake_found, data.id_data.devil_painter
-    rows = max(len(MESH_MAPS) + 10, 6 + len(project.sets))
+    rows = max(len(MESH_MAPS) + 11, 6 + len(project.sets))
     card = place_popover(bounds, state.popover.anchor, BAKE_WIDTH * s, ((rows + 1) * LINE_HEIGHT + 24) * s, s)
     x, w, full_w = card.x + 14 * s, 312 * s, card.w - 28 * s
     y = card.top - 34 * s
@@ -1512,6 +1512,9 @@ def bake_popover(layout, state, bounds, data):
     y -= LINE_HEIGHT * s
     layout.add('BAKE_SAMPLES', Rect(x, y, w, 24 * s), 'SLIDER', label='Samples', value=data.bake_samples / 128, text=str(data.bake_samples),
                tip='More samples give smoother occlusion and thickness')
+    y -= LINE_HEIGHT * s
+    layout.add('BAKE_RESOLUTION', Rect(x, y, w, 24 * s), 'DROPDOWN', label='Resolution', text=size_label(data.bake_resolution),
+               tip='Bake mesh maps at this size, or at each texture set resolution')
     y -= LINE_HEIGHT * s
     layout.add('BAKE_ANTIALIAS', Rect(x, y, w, 24 * s), 'DROPDOWN', label='Anti-aliasing', text=BAKE_ANTIALIAS_LABELS[data.bake_antialias],
                tip='Bake at 2x or 4x the size and shrink it down for smooth edges on ID, curvature, and island borders. Slower')

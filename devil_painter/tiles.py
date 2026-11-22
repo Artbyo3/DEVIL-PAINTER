@@ -40,8 +40,8 @@ def adopt(data, key, fill):
     return key
 
 
-def create(data, name, fill, data_values=False, float_buffer=False):
-    return adopt(data, blank(name, data.resolution, fill, data_values, float_buffer), fill)
+def create(data, name, fill, data_values=False, float_buffer=False, size=0):
+    return adopt(data, blank(name, size or data.resolution, fill, data_values, float_buffer), fill)
 
 
 def converted(image, float_buffer):
