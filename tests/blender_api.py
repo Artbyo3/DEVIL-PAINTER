@@ -93,6 +93,12 @@ two.devil_painter.export_pattern = '{mesh}_{set}_{output}'
 written = api.export(two, clash_dir)
 check(len(written) == len({path.lower() for path in written}) and all(Path(path).is_file() for path in written) and len(list(clash_dir.iterdir())) == len(written),
       f'with {{set}} in the pattern every texture set exports its own {len(written)} files')
+two.devil_painter.sets[1].bake = False
+check('Baked 1' in api.bake(two, maps=('position',)) and 'position' in two.devil_painter.sets[0].maps
+      and 'position' not in two.devil_painter.sets[1].maps, 'bake() covers only the texture sets enabled for baking')
+two.devil_painter.sets[0].bake = False
+check('Pick at least one texture set' in api.bake(two, maps=('position',)), 'bake() asks for a texture set when none are enabled')
+two.devil_painter.sets[0].bake = two.devil_painter.sets[1].bake = True
 try:
     api.layers(bpy.data.objects.new('Empty', bpy.data.meshes.new('Empty')))
     check(False, 'an object without a project is refused')

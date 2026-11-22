@@ -196,6 +196,7 @@ class DEVIL_PAINTER_PG_texture_set(bpy.types.PropertyGroup):
     tiles: bpy.props.CollectionProperty(type=DEVIL_PAINTER_PG_tile)
     tile_images: bpy.props.CollectionProperty(type=DEVIL_PAINTER_PG_tile_image)
     export: bpy.props.BoolProperty(default=True)
+    bake: bpy.props.BoolProperty(default=True)
     visible: bpy.props.BoolProperty(default=True)
     shader: bpy.props.EnumProperty(items=SHADERS)
     transparency: bpy.props.EnumProperty(items=TRANSPARENCY)
