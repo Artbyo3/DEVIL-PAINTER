@@ -1,4 +1,5 @@
 import math
+import bpy
 from .blending import MIX_NODE_BLENDS
 from .document import PROJECTORS, TRIPLANAR_BLEND, active_tile, children, folder_mode, geometry_attribute, isolated_uids, linked_layer, set_channels, shown_layers, slot_value, uses_coordinates
 from .effects import COMPONENT_FIELDS, CONTENT_KINDS, EFFECT_FIELDS
@@ -1197,7 +1198,19 @@ def set_build(data, tree, raw=False):
     return Build(tree.nodes, tree.links, sampler, None if raw else stroke_link(data), maps, False, 1.0, active_tile(data), shading, data, data.resolution)
 
 
+def ensure_material(obj, data):
+    if data.material is not None:
+        return False
+    data.material = bpy.data.materials.new(f'Devil Painter {obj.name} {data.name}')
+    data.material[SIGNATURE_KEY] = ''
+    while len(obj.material_slots) <= data.slot:
+        obj.data.materials.append(None)
+    obj.material_slots[data.slot].material = data.material
+    return True
+
+
 def rebuild(data, solo=None, raw=False):
+    ensure_material(data.id_data, data)
     material = data.material
     build = set_build(data, material.node_tree, raw)
     channels = set_channels(data)
@@ -1212,6 +1225,8 @@ def rebuild(data, solo=None, raw=False):
 
 
 def update_values(data, raw=False):
+    if ensure_material(data.id_data, data):
+        rebuild(data, raw=raw)
     nodes = data.material.node_tree.nodes
     if not data.visible:
         return
@@ -1231,6 +1246,7 @@ def update_values(data, raw=False):
 
 
 def sync(data):
+    ensure_material(data.id_data, data)
     if data.material.get(SIGNATURE_KEY) != signature(data):
         rebuild(data)
     update_values(data)

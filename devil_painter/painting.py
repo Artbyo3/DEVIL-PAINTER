@@ -84,7 +84,7 @@ def update_canvas(context, data):
     owner = data.active_uid if buffered else ''
     tool = active_tool(context) or ''
     set_brush_mode(context, tool, buffered)
-    if data.stroke_owner != owner or data.stroke_tool != tool:
+    if data.stroke_owner != owner or data.stroke_tool != tool or data.material is None:
         data.stroke_owner, data.stroke_tool = owner, tool
         compositing.sync(data)
     context.tool_settings.image_paint.canvas = data.stroke if buffered else variant(data, paint_target(data), active_tile(data))
