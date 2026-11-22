@@ -104,7 +104,8 @@ def entry_text(entry):
     return f'{entry[0]} ({entry[1][:12]})' if entry else 'nothing'
 
 
-def export_count_differences(actual, declared=EXPECTED_EXPORTS):
+def export_count_differences(actual, declared=None):
+    declared = EXPECTED_EXPORTS if declared is None else declared
     differences = []
     for journey in list(declared) + [name for name in actual if name not in declared]:
         if journey not in declared:
