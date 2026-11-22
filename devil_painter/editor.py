@@ -1070,6 +1070,8 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
                 if message:
                     self.message = message
                     data = texture_set(obj)
+        if inside and data.material is None:
+            compositing.sync(data)
         if inside and painting.uses_stroke_buffer(context, data):
             self.stroke_pending = True
         else:

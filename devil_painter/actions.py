@@ -4,6 +4,7 @@ import bpy
 import numpy
 from . import bakejob, baking, bridge, brushes, compositing, exporting, library, meshmaps, painting, projects, sets, smart, strokes, tiles
 from .blending import linear_to_srgb
+from .compositing import ensure_material
 from .effects import EFFECT_LABEL, copy_effect, find_effect, level_target, mask_effects
 from .masks import GENERATOR, GENERATOR_FIELDS
 from .meshmaps import MESH_MAP
@@ -35,17 +36,6 @@ def refresh(context, obj, data, message):
     bpy.ops.ed.undo_push(message='Devil Painter: ' + message)
     strokes.record(None)
     return message
-
-
-def ensure_material(obj, data):
-    if data.material is not None:
-        return False
-    data.material = bpy.data.materials.new(f'Devil Painter {obj.name} {data.name}')
-    data.material[compositing.SIGNATURE_KEY] = ''
-    while len(obj.material_slots) <= data.slot:
-        obj.data.materials.append(None)
-    obj.material_slots[data.slot].material = data.material
-    return True
 
 
 def prepare(obj, data):
