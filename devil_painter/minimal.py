@@ -10,8 +10,8 @@ from .brushes import world_size_text
 from pathlib import Path
 from .blending import BLEND_MODES, CHANNEL, CHANNELS, FOLDER_BLENDS, linear_to_srgb
 from .canvas import Layout, Rect
-from .document import (BAKE_ANTIALIAS_LABELS, BAKE_ID_LABELS, DEPTH_LABELS, DYNAMICS, NORMAL_FORMATS, PROJECTORS, STROKE_METHODS, TEXTURE_SAMPLING, TRANSPARENCY, NORMAL_SPACES, PROJECTIONS, RESOLUTIONS, SHADERS, active_effect, active_layer, children, editing_mask, find_layer, isolated_uids,
-                       linked_layer, set_channels, slot_value, uses_coordinates)
+from .document import (BAKE_ANTIALIAS_LABELS, BAKE_CURVATURE_LABELS, BAKE_ID_LABELS, DEPTH_LABELS, DYNAMICS, NORMAL_FORMATS, PROJECTORS, STROKE_METHODS, TEXTURE_SAMPLING, TRANSPARENCY, NORMAL_SPACES, PROJECTIONS, RESOLUTIONS, SHADERS, active_effect, active_layer, children, editing_mask, find_layer, isolated_uids,
+                       linked_layer, map_extrusion, map_samples, set_channels, slot_value, uses_coordinates)
 from .effects import ANCHORED_KINDS, CONTENT_SOURCES, EFFECT_ICONS, EFFECT_KINDS, FILL_PROJECTIONS, LEVEL_COMPONENTS, MASK_BLEND_LABEL, LevelsView, effect_label
 from .filters import FILTER, FILTERS
 from .library import capture, libraries as library_folders, texture_folder
@@ -21,7 +21,7 @@ from .shortcuts import ACTIONS, bindings, key_label
 from .masks import BREAKUP, GENERATOR
 from .sets import tile_label
 from .tiles import numbers
-from .meshmaps import MESH_MAP, MESH_MAPS
+from .meshmaps import MESH_MAP, MESH_MAPS, PER_MAP_BAKE, map_customized, uses_extrusion, uses_samples
 from .painting import TOOLS
 from .polyfill import POLY_MODES
 from .privacy import masked, masked_path
@@ -1434,17 +1434,64 @@ def stencil_popover(layout, state, bounds, data):
     return card
 
 
+BAKE_WIDTH = 594
+
+
+def bake_map_section(layout, data, selected, x, y, w, s):
+    layout.add('BAKE_MAP_TITLE', Rect(x, y, w, 22 * s), 'NOTE', label=f'{MESH_MAP[selected].label} settings')
+    entry = data.bake_maps.get(selected)
+    if selected == 'curvature':
+        y -= LINE_HEIGHT * s
+        layout.add('BAKE_CURVATURE', Rect(x, y, w, 24 * s), 'DROPDOWN', label='Method', text=BAKE_CURVATURE_LABELS[data.bake_curvature],
+                   tip='Per pixel uses bevel rays, Per vertex uses mesh pointiness, From normal derives curvature from tangent-space normals')
+    if uses_samples(data, selected):
+        y -= LINE_HEIGHT * s
+        custom = entry is not None and entry.samples > 0
+        samples = map_samples(data, selected)
+        layout.add('BAKE_MAP_SAMPLES', Rect(x, y, w - 62 * s, 24 * s), 'SLIDER', label='Samples', value=samples / 128, text=str(samples),
+                   tip='Samples for this map; drag to override the shared Samples')
+        layout.add('BAKE_MAP_SAMPLES_RESET', Rect(x + w - 58 * s, y, 58 * s, 24 * s), 'CHIP', label='Reset' if custom else 'Shared',
+                   active=not custom, tip='Follow the shared Samples setting')
+    if uses_extrusion(data, selected):
+        y -= LINE_HEIGHT * s
+        custom = entry is not None and entry.extrusion > 0.0
+        extrusion = map_extrusion(data, selected)
+        layout.add('BAKE_MAP_EXTRUSION', Rect(x, y, w - 62 * s, 24 * s), 'SLIDER', label='Ray distance', value=extrusion / .5,
+                   text=f'{extrusion * 100:.1f}%', tip='Ray search distance for this map; drag to override the shared Ray distance')
+        layout.add('BAKE_MAP_EXTRUSION_RESET', Rect(x + w - 58 * s, y, 58 * s, 24 * s), 'CHIP', label='Reset' if custom else 'Shared',
+                   active=not custom, tip='Follow the shared Ray distance setting')
+    if selected == 'ao':
+        y -= LINE_HEIGHT * s
+        layout.add('BAKE_AO_DISTANCE', Rect(x, y, w, 24 * s), 'SLIDER', label='Distance', value=data.bake_ao_distance / 2.0,
+                   text=f'{data.bake_ao_distance * 100:.0f}%', tip='How far ambient occlusion rays reach, as a share of the object size')
+        y -= LINE_HEIGHT * s
+        layout.add('BAKE_AO_SPREAD', Rect(x, y, w, 24 * s), 'SLIDER', label='Spread', value=(data.bake_ao_spread - 15.0) / 165.0,
+                   text=f'{data.bake_ao_spread:.0f}°', tip='Cone angle for ambient occlusion; narrower angles focus darkening into crevices')
+    elif selected == 'thickness':
+        y -= LINE_HEIGHT * s
+        layout.add('BAKE_THICKNESS_RANGE', Rect(x, y, w, 24 * s), 'SLIDER', label='Range', value=data.bake_thickness_range / 2.0,
+                   text=f'{data.bake_thickness_range * 100:.0f}%', tip='How far interior rays travel through the mesh, as a share of its size')
+
+
 def bake_popover(layout, state, bounds, data):
     s, sources = layout.scale, state.bake_found
-    card = place_popover(bounds, state.popover.anchor, 340 * s, ((len(MESH_MAPS) + 11) * LINE_HEIGHT + 24) * s, s)
-    x, w = card.x + 14 * s, card.w - 28 * s
+    card = place_popover(bounds, state.popover.anchor, BAKE_WIDTH * s, ((len(MESH_MAPS) + 11) * LINE_HEIGHT + 24) * s, s)
+    x, w, full_w = card.x + 14 * s, 312 * s, card.w - 28 * s
     y = card.top - 34 * s
+    selected = state.bake_map if state.bake_map in PER_MAP_BAKE else PER_MAP_BAKE[0]
+    bake_map_section(layout, data, selected, x + w + 14 * s, y, full_w - w - 14 * s, s)
     layout.add('BAKE_TITLE', Rect(x, y, w, 22 * s), 'NOTE', label='Bake mesh maps')
     for item in MESH_MAPS:
         y -= LINE_HEIGHT * s
         baked = data.maps[item.key].image if item.key in data.maps else None
-        layout.add('BAKEMAP.' + item.key, Rect(x, y, w - 30 * s, 24 * s), 'TOGGLE', label=item.label + (' (needs high-poly)' if item.needs_source else ''),
+        configurable = item.key in PER_MAP_BAKE
+        layout.add('BAKEMAP.' + item.key, Rect(x, y, w - (84 if configurable else 30) * s, 24 * s), 'TOGGLE',
+                   label=item.label + (' (needs high-poly)' if item.needs_source else ''),
                    active=item.key in state.bake_keys, tip=BAKE_TIPS.get(item.key, 'Include this map in the bake'))
+        if configurable:
+            layout.add('BAKE_SELECT.' + item.key, Rect(x + w - 80 * s, y, 52 * s, 24 * s), 'CHIP',
+                       label='Custom' if map_customized(data, item.key) else 'Tune', active=selected == item.key,
+                       tip=f'Edit per-map settings for {item.label.lower()}')
         layout.add('BAKETHUMB.' + item.key, Rect(x + w - 24 * s, y, 24 * s, 24 * s), 'SOURCE', icon='GRID', preview=baked)
     y -= LINE_HEIGHT * s
     layout.add('BAKE_ID', Rect(x, y, w, 24 * s), 'DROPDOWN', label='ID from', text=BAKE_ID_LABELS[data.bake_id],
@@ -1486,12 +1533,12 @@ def bake_popover(layout, state, bounds, data):
     layout.add('BAKE_AUTO', Rect(x, y, w, 24 * s), 'TOGGLE', label='Rebake automatically', active=data.bake_auto,
                tip='Rebake the baked maps when these settings, the high-poly, the cage, or this mesh change')
     if state.baking is None:
-        layout.add('BAKE_RUN', Rect(x, card.y + 12 * s, w, 28 * s), 'PRIMARY', icon='PLAY', label='Bake', tip='Bake the selected maps now')
+        layout.add('BAKE_RUN', Rect(x, card.y + 12 * s, full_w, 28 * s), 'PRIMARY', icon='PLAY', label='Bake', tip='Bake the selected maps now')
         return card
     fraction, label = state.baking
-    layout.add('BAKE_PROGRESS', Rect(x, card.y + 12 * s, w - 88 * s, 28 * s), 'PROGRESS', label=label, value=fraction, text=f'{round(fraction * 100)}%',
+    layout.add('BAKE_PROGRESS', Rect(x, card.y + 12 * s, full_w - 88 * s, 28 * s), 'PROGRESS', label=label, value=fraction, text=f'{round(fraction * 100)}%',
                tip='The bake runs in the background, so you can keep working')
-    layout.add('BAKE_CANCEL', Rect(x + w - 82 * s, card.y + 12 * s, 82 * s, 28 * s), 'CHIP', label='Cancel', tip='Stop the bake and keep the mesh maps as they were')
+    layout.add('BAKE_CANCEL', Rect(x + full_w - 82 * s, card.y + 12 * s, 82 * s, 28 * s), 'CHIP', label='Cancel', tip='Stop the bake and keep the mesh maps as they were')
     return card
 
 

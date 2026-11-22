@@ -19,6 +19,11 @@ BAKE_IDS = (('ISLAND', 'UV islands', ''), ('MATERIAL', 'Materials', ''), ('OBJEC
 BAKE_ID_LABELS = {key: label for key, label, _ in BAKE_IDS}
 BAKE_ANTIALIAS = (('1', 'Off', ''), ('2', '2x', ''), ('4', '4x', ''))
 BAKE_ANTIALIAS_LABELS = {key: label for key, label, _ in BAKE_ANTIALIAS}
+BAKE_CURVATURES = (('PER_PIXEL', 'Per pixel', ''), ('PER_VERTEX', 'Per vertex', ''), ('NORMAL', 'From normal', ''))
+BAKE_CURVATURE_LABELS = {key: label for key, label, _ in BAKE_CURVATURES}
+BAKE_AO_DISTANCE = .25
+BAKE_AO_SPREAD = 180.0
+BAKE_THICKNESS_RANGE = .5
 TRANSPARENCY = (('AUTO', 'Automatic', ''), ('DITHERED', 'Order independent', ''), ('BLENDED', 'Blended', ''))
 DYNAMICS = (('NONE', 'None', ''), ('DRIPS', 'Drips', ''), ('SPLATTER', 'Splatter', ''), ('SPEED', 'Speed', ''))
 SIZE_SPACES = (('SCREEN', 'Screen', ''), ('WORLD', 'World', ''))
@@ -55,6 +60,11 @@ class DEVIL_PAINTER_PG_channel(bpy.types.PropertyGroup):
 
 class DEVIL_PAINTER_PG_map(bpy.types.PropertyGroup):
     image: bpy.props.PointerProperty(type=bpy.types.Image)
+
+
+class DEVIL_PAINTER_PG_bake_map(bpy.types.PropertyGroup):
+    samples: bpy.props.IntProperty(default=0, min=0, max=256)
+    extrusion: bpy.props.FloatProperty(default=0.0, min=0.0, max=.5)
 
 
 class DEVIL_PAINTER_PG_tile(bpy.types.PropertyGroup):
@@ -251,6 +261,11 @@ class DEVIL_PAINTER_PG_texture_set(bpy.types.PropertyGroup):
     bake_extrusion: bpy.props.FloatProperty(default=.1, min=.005, max=.5)
     bake_id: bpy.props.EnumProperty(items=BAKE_IDS)
     bake_antialias: bpy.props.EnumProperty(items=BAKE_ANTIALIAS)
+    bake_ao_distance: bpy.props.FloatProperty(default=BAKE_AO_DISTANCE, min=.01, max=2.0)
+    bake_ao_spread: bpy.props.FloatProperty(default=BAKE_AO_SPREAD, min=15.0, max=180.0)
+    bake_curvature: bpy.props.EnumProperty(items=BAKE_CURVATURES)
+    bake_thickness_range: bpy.props.FloatProperty(default=BAKE_THICKNESS_RANGE, min=.01, max=2.0)
+    bake_maps: bpy.props.CollectionProperty(type=DEVIL_PAINTER_PG_bake_map)
     bake_auto: bpy.props.BoolProperty(default=False)
     bake_signature: bpy.props.StringProperty()
     cage_map: bpy.props.PointerProperty(type=bpy.types.Image)
@@ -287,8 +302,9 @@ class DEVIL_PAINTER_PG_project(bpy.types.PropertyGroup):
     post_contrast: bpy.props.FloatProperty(default=1.0, min=0.0, max=2.0)
 
 
-CLASSES = (DEVIL_PAINTER_PG_slot, DEVIL_PAINTER_PG_channel, DEVIL_PAINTER_PG_map, DEVIL_PAINTER_PG_tile, DEVIL_PAINTER_PG_tile_image,
-           DEVIL_PAINTER_PG_id_color, DEVIL_PAINTER_PG_effect, DEVIL_PAINTER_PG_channel_blend, DEVIL_PAINTER_PG_layer, DEVIL_PAINTER_PG_texture_set, DEVIL_PAINTER_PG_project)
+CLASSES = (DEVIL_PAINTER_PG_slot, DEVIL_PAINTER_PG_channel, DEVIL_PAINTER_PG_map, DEVIL_PAINTER_PG_bake_map, DEVIL_PAINTER_PG_tile,
+           DEVIL_PAINTER_PG_tile_image, DEVIL_PAINTER_PG_id_color, DEVIL_PAINTER_PG_effect, DEVIL_PAINTER_PG_channel_blend,
+           DEVIL_PAINTER_PG_layer, DEVIL_PAINTER_PG_texture_set, DEVIL_PAINTER_PG_project)
 
 
 def project_of(obj):
@@ -315,6 +331,24 @@ def set_channels(data):
 
 def channel_depth(data, key):
     return data.channels[key].depth if key in data.channels else '8'
+
+
+def map_samples(data, key):
+    item = data.bake_maps.get(key)
+    return item.samples if item is not None and item.samples > 0 else data.bake_samples
+
+
+def map_extrusion(data, key):
+    item = data.bake_maps.get(key)
+    return item.extrusion if item is not None and item.extrusion > 0.0 else data.bake_extrusion
+
+
+def bake_map_settings(data, key):
+    item = data.bake_maps.get(key)
+    if item is None:
+        item = data.bake_maps.add()
+        item.name = key
+    return item
 
 
 def add_set_channels(data):

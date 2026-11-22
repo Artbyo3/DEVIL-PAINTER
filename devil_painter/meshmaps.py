@@ -8,7 +8,7 @@ import numpy
 from mathutils import Vector
 from .baking import BAKE_SAMPLES, bake_pass, emission_tree, read_pixels
 from .caches import touch
-from .document import BAKE_ANTIALIAS
+from .document import (BAKE_ANTIALIAS, BAKE_AO_DISTANCE, BAKE_AO_SPREAD, BAKE_CURVATURES, BAKE_THICKNESS_RANGE, map_extrusion, map_samples)
 from .sets import uv_island_labels
 from .signals import map_signal
 from .tiles import create, variant
@@ -24,6 +24,8 @@ FULL_REACH = .999
 BAKE_PAINT_FILL = {'CAGE': (1.0, 1.0, 1.0, 1.0), 'SKEW': (0.0, 0.0, 0.0, 1.0)}
 ISLAND_ATTRIBUTE = 'dp_uv_islands'
 RAY_TRACED = {'ao', 'thickness', 'curvature'}
+PER_MAP_BAKE = ('ao', 'curvature', 'thickness', 'id', 'normal', 'height')
+EXTRUSION_MAPS = {'id', 'normal', 'height'}
 
 
 @dataclass(frozen=True)
@@ -405,8 +407,35 @@ def border_pixels(coverage):
     return result
 
 
+def uses_samples(data, key):
+    return key in PER_MAP_BAKE and not (key == 'curvature' and data.bake_curvature == 'PER_VERTEX')
+
+
+def uses_extrusion(data, key):
+    return key in EXTRUSION_MAPS or (key == 'curvature' and data.bake_curvature == 'NORMAL')
+
+
+def normal_results(context, obj, project, wanted, sources, samples, distance, scale, size):
+    if sources.high:
+        return bake_normal(context, obj, project, wanted, sources, samples, distance, scale)
+    return bake_pass(context, obj, project, wanted, lambda item: rounded_shader(item.material.node_tree, EDGE_ROUNDING * size), 'NORMAL',
+                     samples, scale=scale, normal_space='TANGENT')
+
+
+def curvature_from_normal(pixels):
+    nx = pixels[..., 0] * 2.0 - 1.0
+    ny = pixels[..., 1] * 2.0 - 1.0
+    curvature = numpy.clip(.5 + 2.0 * (numpy.gradient(nx, axis=1) + numpy.gradient(ny, axis=0)), 0.0, 1.0)
+    covered = pixels[..., 3] >= .5
+    curvature = numpy.where(covered, curvature, .5)
+    result = numpy.ones(pixels.shape, dtype=numpy.float32)
+    result[..., :3] = curvature[..., None]
+    result[..., 3] = pixels[..., 3]
+    return result
+
+
 def bake_key(context, obj, project, wanted, key, data, sources, size):
-    samples, distance, scale = data.bake_samples, data.bake_extrusion * size, int(data.bake_antialias)
+    samples, distance, scale = map_samples(data, key), map_extrusion(data, key) * size, int(data.bake_antialias)
     black = lambda item: emission_tree(item.material.node_tree, (0.0, 0.0, 0.0, 1.0))
     if key == 'uv_border':
         coverage = bake_pass(context, obj, project, wanted, lambda item: emission_tree(item.material.node_tree, (1.0, 1.0, 1.0, 1.0)), 'EMIT', 1, margin=0, scale=scale)
@@ -414,10 +443,9 @@ def bake_key(context, obj, project, wanted, key, data, sources, size):
     if key == 'height':
         return bake_height(context, obj, project, wanted, sources, samples, distance, scale)
     if key == 'normal':
-        if sources.high:
-            return bake_normal(context, obj, project, wanted, sources, samples, distance, scale)
-        return bake_pass(context, obj, project, wanted, lambda item: rounded_shader(item.material.node_tree, EDGE_ROUNDING * size), 'NORMAL',
-                         samples, scale=scale, normal_space='TANGENT')
+        return normal_results(context, obj, project, wanted, sources, samples, distance, scale, size)
+    if key == 'curvature' and data.bake_curvature == 'NORMAL':
+        return {item: curvature_from_normal(pixels) for item, pixels in normal_results(context, obj, project, wanted, sources, samples, distance, scale, size).items()}
     if key == 'id':
         if sources.high:
             with island_colors(sources.high if data.bake_id == 'ISLAND' else ()), source_shading(sources.high, id_source_shade(data.bake_id)):
@@ -430,8 +458,9 @@ def bake_key(context, obj, project, wanted, key, data, sources, size):
     def prepare(item):
         tree = item.material.node_tree
         emission_tree(tree, (0.0, 0.0, 0.0, 1.0))
-        tree.links.new(map_signal(tree.nodes, tree.links, key, size), emission_input(tree))
-    return bake_pass(context, obj, project, wanted, prepare, 'EMIT', samples if key in RAY_TRACED else BAKE_SAMPLES, scale=scale)
+        tree.links.new(map_signal(tree.nodes, tree.links, key, size, data.bake_ao_distance, data.bake_ao_spread, data.bake_curvature, data.bake_thickness_range),
+                       emission_input(tree))
+    return bake_pass(context, obj, project, wanted, prepare, 'EMIT', samples if key in RAY_TRACED and uses_samples(data, key) else BAKE_SAMPLES, scale=scale)
 
 
 def bakeable(context, obj, data, keys):
@@ -468,11 +497,45 @@ def geometry_key(item):
     return f'{item.name}:{count}:{float(coords.sum()):.5f}:{float(numpy.abs(coords).sum()):.5f}:{matrix}'
 
 
+def map_customized(data, key):
+    entry = data.bake_maps.get(key)
+    if entry is not None and ((uses_samples(data, key) and entry.samples > 0) or (uses_extrusion(data, key) and entry.extrusion > 0.0)):
+        return True
+    if key == 'ao':
+        return abs(data.bake_ao_distance - BAKE_AO_DISTANCE) > 1e-5 or abs(data.bake_ao_spread - BAKE_AO_SPREAD) > 1e-3
+    if key == 'curvature':
+        return data.bake_curvature != BAKE_CURVATURES[0][0]
+    if key == 'thickness':
+        return abs(data.bake_thickness_range - BAKE_THICKNESS_RANGE) > 1e-5
+    return False
+
+
+def map_signature(data):
+    parts = []
+    if abs(data.bake_ao_distance - BAKE_AO_DISTANCE) > 1e-5:
+        parts.append(f'ao_d:{data.bake_ao_distance:.4f}')
+    if abs(data.bake_ao_spread - BAKE_AO_SPREAD) > 1e-3:
+        parts.append(f'ao_s:{data.bake_ao_spread:.2f}')
+    if data.bake_curvature != BAKE_CURVATURES[0][0]:
+        parts.append(f'curv:{data.bake_curvature}')
+    if abs(data.bake_thickness_range - BAKE_THICKNESS_RANGE) > 1e-5:
+        parts.append(f'thick:{data.bake_thickness_range:.4f}')
+    for item in MESH_MAPS:
+        entry = data.bake_maps.get(item.key)
+        if entry is None:
+            continue
+        if uses_samples(data, item.key) and entry.samples > 0:
+            parts.append(f'{item.key}:s={entry.samples}')
+        if uses_extrusion(data, item.key) and entry.extrusion > 0.0:
+            parts.append(f'{item.key}:e={entry.extrusion:.4f}')
+    return tuple(parts)
+
+
 def signature(context, obj, data):
     sources = bake_sources(context, obj, data)
     objects = (obj, *sources.high, *((sources.cage,) if sources.cage is not None else ()))
     quality = (data.bake_antialias,) if data.bake_antialias != BAKE_ANTIALIAS[0][0] else ()
-    parts = (str(data.bake_samples), data.bake_id, f'{data.bake_extrusion:.4f}', *quality, *(geometry_key(item) for item in objects))
+    parts = (str(data.bake_samples), data.bake_id, f'{data.bake_extrusion:.4f}', *quality, *map_signature(data), *(geometry_key(item) for item in objects))
     return str(zlib.crc32('|'.join(parts).encode()))
 
 

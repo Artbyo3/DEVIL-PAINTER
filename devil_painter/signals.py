@@ -1,3 +1,6 @@
+import math
+
+
 def node(nodes, kind, **inputs):
     item = nodes.new(kind)
     for name, value in inputs.items():
@@ -17,16 +20,26 @@ def operate(nodes, links, operation, first, second):
     return item.outputs[0]
 
 
-def map_signal(nodes, links, key, size):
+def map_signal(nodes, links, key, size, ao_distance=.25, ao_spread=180.0, curvature='PER_PIXEL', thickness_range=.5):
     if key == 'ao':
-        return node(nodes, 'ShaderNodeAmbientOcclusion', Distance=size * .25).outputs['AO']
+        ao = node(nodes, 'ShaderNodeAmbientOcclusion', Distance=size * ao_distance).outputs['AO']
+        if ao_spread >= 179.9:
+            return ao
+        cone = max(math.sin(math.radians(ao_spread * .5)) ** 2, 1e-4)
+        return operate(nodes, links, 'MULTIPLY', ao, 1.0 / cone)
     if key == 'thickness':
         occlusion = nodes.new('ShaderNodeAmbientOcclusion')
         occlusion.inside = True
-        occlusion.inputs['Distance'].default_value = size * .5
+        occlusion.inputs['Distance'].default_value = size * thickness_range
         return operate(nodes, links, 'SUBTRACT', 1.0, occlusion.outputs['AO'])
     if key == 'curvature':
         geometry = nodes.new('ShaderNodeNewGeometry')
+        if curvature == 'PER_VERTEX':
+            ranged = nodes.new('ShaderNodeMapRange')
+            ranged.inputs['From Min'].default_value = .375
+            ranged.inputs['From Max'].default_value = .625
+            links.new(geometry.outputs['Pointiness'], ranged.inputs['Value'])
+            return ranged.outputs['Result']
         bevel = node(nodes, 'ShaderNodeBevel', Radius=size * .02)
         dot = nodes.new('ShaderNodeVectorMath')
         dot.operation = 'DOT_PRODUCT'

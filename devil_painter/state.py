@@ -49,6 +49,7 @@ class WorkspaceState:
     drop: tuple = ()
     geo_pick: str = ''
     bake_keys: set = field(default_factory=lambda: {'ao', 'curvature', 'thickness', 'position', 'world_normal', 'id'})
+    bake_map: str = 'ao'
     bake_found: object = None
     baking: tuple = None
     poly_mode: str = ''
