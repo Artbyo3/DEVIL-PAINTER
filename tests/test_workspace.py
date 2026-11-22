@@ -259,7 +259,8 @@ class ScratchWorkspaceTests(unittest.TestCase):
                 self.assertEqual((passed, run.outcomes[-1].detail), (expected, detail))
 
     def test_full_gate_saves_its_result_and_skips_an_unchanged_tree(self):
-        archive = self.root / 'dist' / 'devil_painter-0.5.0.zip'
+        manifest = workspace.read_manifest(Path(__file__).resolve().parents[1])
+        archive = self.root / 'dist' / f"{manifest['id']}-{manifest['version']}.zip"
         calls = []
 
         def group(name):

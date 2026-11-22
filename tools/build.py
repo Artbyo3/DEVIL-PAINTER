@@ -4,12 +4,12 @@ import argparse
 import re
 import subprocess
 import sys
-import tomllib
 
 root = Path(__file__).resolve().parents[1]
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(root))
-from tools.workspace import extension_archive
+from tools.install_card import VERSION_PLACEHOLDER, VERSIONED_DOCS
+from tools.workspace import extension_archive, read_manifest
 from tools.check_dead_code import check_source_rules
 
 
@@ -51,7 +51,7 @@ def exclude_rule(pattern):
 
 
 def exclude_rules():
-    manifest = tomllib.loads((root / PACKAGE / 'blender_manifest.toml').read_text(encoding='utf-8'))
+    manifest = read_manifest(root)
     return [exclude_rule(pattern) for pattern in manifest['build']['paths_exclude_pattern']]
 
 
@@ -88,9 +88,14 @@ def build_extension(scanned):
         check_source_rules(root)
     output = extension_archive()
     output.parent.mkdir(exist_ok=True)
+    version = read_manifest(root)['version']
     with ZipFile(output, 'w', ZIP_DEFLATED) as archive:
         for source, name in package_files():
-            archive.write(source, name)
+            if name in VERSIONED_DOCS:
+                text = source.read_text(encoding='utf-8').replace(VERSION_PLACEHOLDER, version)
+                archive.writestr(name, text.encode('utf-8'))
+            else:
+                archive.write(source, name)
     print(output)
     return output
 

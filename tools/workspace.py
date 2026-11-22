@@ -12,8 +12,12 @@ DIST = ROOT / 'dist'
 RUN_PREFIX = 'run-'
 
 
+def read_manifest(root=None):
+    return tomllib.loads(((root or ROOT) / 'devil_painter' / 'blender_manifest.toml').read_text(encoding='utf-8'))
+
+
 def extension_archive():
-    manifest = tomllib.loads((ROOT / 'devil_painter' / 'blender_manifest.toml').read_text(encoding='utf-8'))
+    manifest = read_manifest()
     return DIST / f"{manifest['id']}-{manifest['version']}.zip"
 
 
