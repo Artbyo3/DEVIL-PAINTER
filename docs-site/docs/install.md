@@ -2,13 +2,13 @@
 
 ## Before You Install
 
-You need **Blender 5.2 or later**; no external Python packages or external tools are required. The current release is **v0.5.0** (`2026-11-21`), licensed under **GPL-3.0-or-later**.
+You need **Blender 5.2 or later**; no external Python packages or external tools are required. The current release is **v{{VERSION}}** (`2026-11-21`), licensed under **GPL-3.0-or-later**.
 
 Everything needed for painting, baking, and exporting works offline. If you want to browse or download optional free asset packs from the **Packs** shelf tab, also enable **Allow Online Access** in **Edit > Preferences > System**.
 
 ## Install from GitHub Release ZIP
 
-1. Download `devil_painter-0.5.0.zip` (or the latest `devil_painter-*.zip`) from the [GitHub releases page](https://github.com/Artbyo3/DEVIL-PAINTER/releases/download/v0.5.0/devil_painter-0.5.0.zip?repository=https%3A%2F%2Fartbyo3.github.io%2FDEVIL-PAINTER%2Frepo%2Findex.json&blender_version_min=5.2.0).
+1. Download `devil_painter-{{VERSION}}.zip` (or the latest `devil_painter-*.zip`) from the [GitHub releases page](https://github.com/Artbyo3/DEVIL-PAINTER/releases/download/v{{VERSION}}/devil_painter-{{VERSION}}.zip?repository=https%3A%2F%2Fartbyo3.github.io%2FDEVIL-PAINTER%2Frepo%2Findex.json&blender_version_min=5.2.0).
 2. Open Blender and choose **Edit > Preferences**.
 3. Open **Get Extensions** (or **Add-ons**).
 4. Open the top-right menu (`⌄`) and choose **Install from Disk...**.
@@ -28,7 +28,7 @@ If you want to package the extension directly from the repository:
    ```bash
    python tools/build.py
    ```
-3. In Blender, choose **Edit > Preferences > Get Extensions** (or **Add-ons**) **> Install from Disk...** and select `dist/devil_painter-0.5.0.zip`.
+3. In Blender, choose **Edit > Preferences > Get Extensions** (or **Add-ons**) **> Install from Disk...** and select `dist/devil_painter-{{VERSION}}.zip`.
 
 ## Enable Devil Painter
 
