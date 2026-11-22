@@ -174,6 +174,12 @@ def turn(a, b):
     return (b - a + 45.0) % 90.0 - 45.0
 
 
+def path_samples(alpha, start, end):
+    count = max(1, int(math.dist(start, end)))
+    return [float(alpha[int(round(start[1] + (end[1] - start[1]) * index / count)),
+                        int(round(start[0] + (end[0] - start[0]) * index / count))]) for index in range(count + 1)]
+
+
 def journey():
     scratch = prepare_scratch()
     check(library.library_root().resolve().is_relative_to(scratch.resolve()), 'the test library lives in scratch')
@@ -231,6 +237,48 @@ def journey():
           f'flow tracks pressure: dab center coverage {low_flow:.4f} at {LOW} and {high_flow:.4f} at {HIGH} (ratio {low_flow / high_flow:.4f})')
     check(abs(data.brush_flow - 1.0) < 1e-6 and abs(bpy.context.tool_settings.image_paint.brush.strength - 1.0) < 1e-6,
           'the stroke leaves the brush flow at its set value')
+
+    start_uv, end_uv = center_of(cube, data, points[0]), center_of(cube, data, points[3])
+    click(window, region, 'ADD_PAINT')
+    yield from settle()
+    continuity_uid = active_layer(data).uid
+    dab(window, area, region, [(points[0], LOW), (points[3], HIGH)])
+    yield from settle()
+    ramp = path_samples(layer_pixels(find_layer(data, continuity_uid))[..., 3], start_uv, end_uv)
+    check(min(ramp) > EDGE_LEVEL and ramp[-1] >= ramp[0],
+          f'fast pressure-mapped drag stays continuous along the path ({len(ramp)} samples, min {min(ramp):.3f}, {ramp[0]:.3f} to {ramp[-1]:.3f})')
+    yield from card_click(window, region, 'BRUSH_JITTER_SIZE', fx=.3)
+    yield from close_cards(window, middle)
+    click(window, region, 'ADD_PAINT')
+    yield from settle()
+    jitter_uid = active_layer(data).uid
+    dab(window, area, region, [(points[0], 1.0), (points[3], 1.0)])
+    yield from settle()
+    jitter_line = path_samples(layer_pixels(find_layer(data, jitter_uid))[..., 3], start_uv, end_uv)
+    check(min(jitter_line) > EDGE_LEVEL, f'fast jittered drag stays continuous along the path ({len(jitter_line)} samples, min {min(jitter_line):.3f})')
+    yield from card_click(window, region, 'BRUSH_JITTER_SIZE', fx=0.0)
+    yield from card_click(window, region, 'BRUSH_FOLLOW_PATH')
+    yield from close_cards(window, middle)
+    click(window, region, 'ADD_PAINT')
+    yield from settle()
+    follow_uid = active_layer(data).uid
+    dab(window, area, region, [(points[0], 1.0), (points[3], 1.0)])
+    yield from settle()
+    follow_line = path_samples(layer_pixels(find_layer(data, follow_uid))[..., 3], start_uv, end_uv)
+    check(min(follow_line) > EDGE_LEVEL, f'fast Follow path drag stays continuous along the path ({len(follow_line)} samples, min {min(follow_line):.3f})')
+    yield from card_click(window, region, 'BRUSH_FOLLOW_PATH')
+    yield from card_click(window, region, 'BRUSH_SPACING', fx=.98)
+    yield from close_cards(window, middle)
+    click(window, region, 'ADD_PAINT')
+    yield from settle()
+    spaced_uid = active_layer(data).uid
+    dab(window, area, region, [(points[0], 1.0), (points[3], 1.0)])
+    yield from settle()
+    wide_line = path_samples(layer_pixels(find_layer(data, spaced_uid))[..., 3], start_uv, end_uv)
+    check(max(wide_line) > EDGE_LEVEL and min(wide_line) <= EDGE_LEVEL,
+          f'wide spacing ({data.brush_spacing:.0f}%) separates replayed dabs along the path (min {min(wide_line):.3f}, max {max(wide_line):.3f})')
+    yield from card_click(window, region, 'BRUSH_SPACING', fx=10.0 / 200.0)
+    yield from close_cards(window, middle)
 
     click(window, region, 'ADD_PAINT')
     yield from settle()

@@ -220,7 +220,7 @@ def arrow_alpha(scratch):
 
 def install_arrow_preset(scratch):
     preset = dict(name=ARROW, alpha=str(arrow_alpha(scratch)), hardness=.9, flow=1.0, spacing=25.0, smoothing=0.0, jitter=0.0, random_angle=False,
-                  stroke='SPACE', angle=0.0)
+                  stroke='DOTS', angle=0.0)
     brushes.user_presets().append(preset)
     library.save_settings()
 

@@ -857,7 +857,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         return self.finish_message(self.run_gesture(context, points, shaped=False))
 
     def segment(self, data, start, end, pressure):
-        step = max(1.0, painting.brush_value(self.scene, 'size') * data.brush_spacing / 100)
+        step = brushes.spacing_step(data, painting.brush_value(self.scene, 'size'))
         count = int(math.dist(start, end) / step) + 1
         return [((start[0] + (end[0] - start[0]) * index / count, start[1] + (end[1] - start[1]) * index / count), pressure) for index in range(1, count + 1)]
 
@@ -962,8 +962,9 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         return points
 
     def replay(self, context, obj, data, points):
-        radii = (brushes.world_sized(data) and brushes.world_sizes(context, data, self._region, self._area.spaces.active.region_3d, obj, points)
-                 or brushes.screen_sizes(context, data, painting.brush_value(self.scene, 'size'), points))
+        if not points:
+            return
+        points, radii = brushes.spaced_stroke(context, data, self._region, self._area.spaces.active.region_3d, obj, painting.brush_value(self.scene, 'size'), points)
         elements = [dict(name='', location=(0.0, 0.0, 0.0), mouse=point, mouse_event=point, is_start=index == 0, pressure=pressure, size=radius,
                          time=index * .01, x_tilt=0.0, y_tilt=0.0) for index, ((point, pressure), radius) in enumerate(zip(points, radii))]
         mapped = brushes.per_dab(data)
@@ -972,9 +973,14 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             headings = brushes.path_angles(points) if data.brush_follow_path else [0.0] * len(points)
             for element, (size_scale, _, _) in zip(elements, jitter):
                 element['size'] *= size_scale
+                element['is_start'] = True
             dabs = [([element], flow_scale, heading + angle_offset) for element, (_, flow_scale, angle_offset), heading in zip(elements, jitter, headings)]
         elif mapped:
-            dabs = [(list(group), 1.0, 0.0) for _, group in itertools.groupby(elements, key=lambda element: element['pressure'])]
+            dabs = []
+            for _, group in itertools.groupby(elements, key=lambda element: element['pressure']):
+                batch = list(group)
+                batch[0]['is_start'] = True
+                dabs.append((batch, 1.0, 0.0))
         else:
             dabs = [(elements, 1.0, 0.0)]
         original = obj.matrix_world.copy()
