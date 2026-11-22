@@ -169,21 +169,64 @@ def world_radius(region, view, obj, point, world_size):
     return None if near is None or far is None else (far - near).length
 
 
-def world_sizes(context, data, region, view, obj, points):
-    found = [world_radius(region, view, obj, point, data.brush_world_size) for point, _ in points]
-    last = next((radius for radius in found if radius is not None), None)
-    if last is None:
-        return None
-    curve, sizes = context.tool_settings.image_paint.brush.curve_size, []
-    for radius, (_, pressure) in zip(found, points):
-        last = last if radius is None else radius
-        sizes.append(last * pressure_response(curve, pressure, data.brush_pressure_size))
-    return sizes
+def brush_spacing(data):
+    return max(1, round(data.brush_spacing))
 
 
-def screen_sizes(context, data, size, points):
+def spacing_step(data, diameter):
+    return max(1.0, diameter * brush_spacing(data) / 100.0)
+
+
+def spaced_points(points, data, radius_at):
+    if not points:
+        return [], []
+    if len(points) == 1 or data.brush_stroke not in {'SPACE', 'LINE'}:
+        return list(points), [radius_at(point, pressure) for point, pressure in points]
+    first_point, first_pressure = points[0]
+    first_radius = radius_at(first_point, first_pressure)
+    spaced, radii = [(first_point, first_pressure)], [first_radius]
+    step = spacing_step(data, 2.0 * first_radius)
+    traveled = 0.0
+    (prev_x, prev_y), prev_pressure = first_point, first_pressure
+    for (curr_x, curr_y), curr_pressure in points[1:]:
+        dx, dy = curr_x - prev_x, curr_y - prev_y
+        length = math.hypot(dx, dy)
+        if length > 1e-6:
+            offset = 0.0
+            while traveled + (length - offset) >= step - 1e-6:
+                offset += max(0.0, step - traveled)
+                t = min(1.0, offset / length)
+                point = (prev_x + dx * t, prev_y + dy * t)
+                pressure = prev_pressure + (curr_pressure - prev_pressure) * t
+                radius = radius_at(point, pressure)
+                spaced.append((point, pressure))
+                radii.append(radius)
+                step = spacing_step(data, 2.0 * radius)
+                traveled = 0.0
+            traveled += max(0.0, length - offset)
+        prev_x, prev_y, prev_pressure = curr_x, curr_y, curr_pressure
+    return spaced, radii
+
+
+def spaced_stroke(context, data, region, view, obj, size, points):
+    if not points:
+        return [], []
     curve = context.tool_settings.image_paint.brush.curve_size
-    return [size / 2 * pressure_response(curve, pressure, data.brush_pressure_size) for _, pressure in points]
+    world = world_sized(data)
+    first_hit = next((radius for point, _ in points if (radius := world_radius(region, view, obj, point, data.brush_world_size)) is not None), None) if world else None
+    if first_hit is None:
+        world = False
+    last_radius = first_hit if world else size / 2
+
+    def radius_at(point, pressure):
+        nonlocal last_radius
+        if world:
+            found = world_radius(region, view, obj, point, data.brush_world_size)
+            if found is not None:
+                last_radius = found
+        return last_radius * pressure_response(curve, pressure, data.brush_pressure_size)
+
+    return spaced_points(points, data, radius_at)
 
 
 def world_size_text(value):
@@ -248,7 +291,7 @@ def sync(context, data):
     if brush is None or brush.library is not None:
         return
     brush.use_accumulate = active_tool(context) in STROKE_TOOLS and data.brush_flow < 1
-    brush.spacing = max(1, round(data.brush_spacing))
+    brush.spacing = brush_spacing(data)
     brush.use_smooth_stroke = data.brush_smoothing > 0
     brush.smooth_stroke_radius = round(10 + 90 * data.brush_smoothing)
     brush.smooth_stroke_factor = .5 + .49 * data.brush_smoothing
