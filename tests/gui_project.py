@@ -1,7 +1,4 @@
-import os
 import sys
-import time
-import traceback
 from pathlib import Path
 import bpy
 import numpy
@@ -18,64 +15,12 @@ from devil_painter import editor, exporting, library, projects, tiles
 from devil_painter.actions import owned_images
 from devil_painter.document import texture_set
 from tools.workspace import prepare_scratch
-from tests.gui_harness import bake_landed, settle
-
-TIMEOUT = 300
-STARTED = time.time()
-
-
-def check(condition, message):
-    if not condition:
-        raise AssertionError(message)
-    print('PASS:', message)
-
-
-def finish(code):
-    sys.stdout.flush()
-    sys.stderr.flush()
-    os._exit(code)
-
-
-def viewport():
-    window = bpy.context.window_manager.windows[0]
-    area = next(area for area in window.screen.areas if area.type == 'VIEW_3D')
-    region = next(region for region in area.regions if region.type == 'WINDOW')
-    return window, area, region
-
-
-def move(window, x, y):
-    window.event_simulate(type='MOUSEMOVE', value='NOTHING', x=int(x), y=int(y))
-
-
-def press(window, kind, x, y, **modifiers):
-    move(window, x, y)
-    window.event_simulate(type=kind, value='PRESS', x=int(x), y=int(y), **modifiers)
-    window.event_simulate(type=kind, value='RELEASE', x=int(x), y=int(y), **modifiers)
-
-
-def control(key):
-    return next(item for item in reversed(editor._active.workspace.controls) if item.key == key)
-
-
-def has(key):
-    return any(item.key == key for item in editor._active.workspace.controls)
-
-
-def click(window, region, key, kind='LEFTMOUSE', fx=.5):
-    rect = control(key).rect
-    press(window, kind, region.x + rect.x + rect.w * fx, region.y + rect.y + rect.h / 2)
-
-
-def type_text(window, text, x, y):
-    for _ in range(120):
-        window.event_simulate(type='BACK_SPACE', value='PRESS', x=int(x), y=int(y))
-    for character in text:
-        window.event_simulate(type='A', value='PRESS', x=int(x), y=int(y), unicode=character)
-    window.event_simulate(type='RET', value='PRESS', x=int(x), y=int(y))
+from tests.gui_harness import bake_landed, check, click, control, finish, has, move, pixels, press, run_journey, settle, type_text, viewport
 
 
 def field(window, region, key, text):
     click(window, region, key)
+    yield from settle()
     rect = control(key).rect
     type_text(window, text, region.x + rect.x + rect.w / 2, region.y + rect.y + rect.h / 2)
 
@@ -87,12 +32,6 @@ def stroke_at(window, region, point):
     for step in range(1, 6):
         move(window, x + step * 3, y + step * 2)
     window.event_simulate(type='LEFTMOUSE', value='RELEASE', x=int(x + 15), y=int(y + 10))
-
-
-def pixels(image):
-    values = numpy.empty(len(image.pixels), dtype=numpy.float32)
-    image.pixels.foreach_get(values)
-    return values.reshape(-1, 4)
 
 
 def loaded(path):
@@ -325,7 +264,7 @@ def journey():
     yield from settle()
     yield from card()
     check(control('EXPORT_TEMPLATE').text == 'Unreal Engine' and has('OUT_LABEL.1'), 'picking the Unreal Engine template lists its packed outputs')
-    field(window, region, 'EXPORT_DIR', str(export_dir))
+    yield from field(window, region, 'EXPORT_DIR', str(export_dir))
     yield from settle()
     click(window, region, 'EXPORT_RUN')
     yield from settle()
@@ -358,7 +297,7 @@ def journey():
           'outputs take a format, a bit depth, and an extra packed channel')
     click(window, region, 'EXPORT_SET.1')
     yield from settle()
-    field(window, region, 'EXPORT_PATTERN', '{set}-{output}-{udim}')
+    yield from field(window, region, 'EXPORT_PATTERN', '{set}-{output}-{udim}')
     yield from settle()
     yield from card()
     click(window, region, 'EXPORT_DEPTH')
@@ -367,7 +306,7 @@ def journey():
     yield from settle()
     yield from card()
     custom_dir = scratch / 'custom_export'
-    field(window, region, 'EXPORT_DIR', str(custom_dir))
+    yield from field(window, region, 'EXPORT_DIR', str(custom_dir))
     yield from settle()
     click(window, region, 'EXPORT_RUN')
     yield from settle()
@@ -398,7 +337,7 @@ def journey():
         yield from settle()
         yield from card()
     usd_dir = scratch / 'usd_export'
-    field(window, region, 'EXPORT_DIR', str(usd_dir))
+    yield from field(window, region, 'EXPORT_DIR', str(usd_dir))
     yield from settle()
     click(window, region, 'EXPORT_RUN')
     yield from settle()
@@ -493,18 +432,4 @@ def journey():
     finish(0)
 
 
-steps = journey()
-
-
-def advance():
-    try:
-        if time.time() - STARTED > TIMEOUT:
-            raise AssertionError('GUI project test timed out')
-        return next(steps)
-    except Exception:
-        traceback.print_exc()
-        print('GUI TEST FAILED')
-        finish(1)
-
-
-bpy.app.timers.register(advance, first_interval=1.0, persistent=True)
+run_journey(journey(), 'GUI project test')

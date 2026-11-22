@@ -1,7 +1,4 @@
-import os
 import sys
-import time
-import traceback
 from pathlib import Path
 import bpy
 import numpy
@@ -14,66 +11,7 @@ import devil_painter
 from devil_painter import bakejob, editor
 from devil_painter.meshmaps import id_color
 from tools.workspace import prepare_scratch
-from tests.gui_harness import bake_landed, settle, until
-
-TIMEOUT = 600
-STARTED = time.time()
-
-
-def check(condition, message):
-    if not condition:
-        raise AssertionError(message)
-    print('PASS:', message)
-
-
-def finish(code):
-    sys.stdout.flush()
-    sys.stderr.flush()
-    os._exit(code)
-
-
-def viewport():
-    window = bpy.context.window_manager.windows[0]
-    area = next(area for area in window.screen.areas if area.type == 'VIEW_3D')
-    region = next(region for region in area.regions if region.type == 'WINDOW')
-    return window, area, region
-
-
-def move(window, x, y):
-    window.event_simulate(type='MOUSEMOVE', value='NOTHING', x=int(x), y=int(y))
-
-
-def press(window, kind, x, y, **modifiers):
-    move(window, x, y)
-    window.event_simulate(type=kind, value='PRESS', x=int(x), y=int(y), **modifiers)
-    window.event_simulate(type=kind, value='RELEASE', x=int(x), y=int(y), **modifiers)
-
-
-def control(key):
-    return next(item for item in reversed(editor._active.workspace.controls) if item.key == key)
-
-
-def has(key):
-    return any(item.key == key for item in editor._active.workspace.controls)
-
-
-def keys(prefix):
-    return [item.key for item in editor._active.workspace.controls if item.key.startswith(prefix)]
-
-
-def spot(region, key, fx=.5, fy=.5):
-    rect = control(key).rect
-    return region.x + rect.x + rect.w * fx, region.y + rect.y + rect.h * fy
-
-
-def click(window, region, key, kind='LEFTMOUSE', fx=.5, fy=.5, **modifiers):
-    press(window, kind, *spot(region, key, fx, fy), **modifiers)
-
-
-def pixels(image):
-    values = numpy.empty(len(image.pixels), dtype=numpy.float32)
-    image.pixels.foreach_get(values)
-    return values.reshape(-1, 4)
+from tests.gui_harness import bake_landed, check, click, control, finish, has, keys, pixels, press, run_journey, settle, until, viewport
 
 
 def dominant(values, count):
@@ -296,18 +234,4 @@ def journey():
     finish(0)
 
 
-steps = journey()
-
-
-def advance():
-    try:
-        if time.time() - STARTED > TIMEOUT:
-            raise AssertionError('GUI baking test timed out')
-        return next(steps)
-    except Exception:
-        traceback.print_exc()
-        print('GUI TEST FAILED')
-        finish(1)
-
-
-bpy.app.timers.register(advance, first_interval=1.0, persistent=True)
+run_journey(journey(), 'GUI baking test')

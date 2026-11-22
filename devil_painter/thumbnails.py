@@ -1,6 +1,7 @@
 import hashlib
 import json
 import itertools
+import logging
 import os
 import subprocess
 import sys
@@ -18,19 +19,19 @@ from .compositing import Build, Sampler, build_tree, write_values
 from .document import add_slots
 from .library import apply_definition, definition_effects, library_root
 
+LOG = logging.getLogger(__name__)
 SIZE = 96
 PREVIEW_SIZE = 128
 UPLOAD_SECONDS = .006
 SAMPLES = 12
 WORLD_FILE = 'city.exr'
 WORLD_STRENGTH = .7
-JOB_POLL = .1
 LOST_ATTEMPTS = 3
 RENDERERS = 3
-RENDER_SCRIPT = '; '.join(('import sys', 'sys.dont_write_bytecode = True', 'import importlib', 'from pathlib import Path',
-                           "root, name, folder = sys.argv[sys.argv.index('--') + 1:]", 'sys.path.insert(0, root)',
+RENDER_SCRIPT = '; '.join(('import sys', 'sys.dont_write_bytecode = True', 'import importlib',
+                           "root, name = sys.argv[sys.argv.index('--') + 1:]", 'sys.path.insert(0, root)',
                            "importlib.import_module(name + '.document').register()",
-                           "importlib.import_module(name + '.thumbnails').serve(Path(folder))"))
+                           "importlib.import_module(name + '.thumbnails').serve()"))
 _state = dict(worker=None, depth=0, processes=[])
 _lock = threading.Lock()
 _idle = threading.Event()
@@ -42,6 +43,7 @@ _busy = set()
 _ready = []
 _queue = {}
 _jobs = {}
+_assigned = {}
 _failed = set()
 _owned = {}
 
@@ -131,7 +133,8 @@ def work():
         _idle.wait()
         try:
             pixels = decode(source, cached)
-        except Exception:
+        except (OSError, ValueError, RuntimeError, BufferError, AttributeError, IndexError) as error:
+            LOG.warning('Devil Painter could not decode preview %s: %s', source, error)
             pixels = None
         with _lock:
             _busy.discard(key)
@@ -263,10 +266,8 @@ def render(path, definition):
         bpy.data.batch_remove(created)
 
 
-def job_folder():
-    folder = library_root() / 'thumbnail_jobs'
-    folder.mkdir(parents=True, exist_ok=True)
-    return folder
+def failed_marker(path):
+    return path.with_suffix('.failed')
 
 
 def rendering():
@@ -277,60 +278,83 @@ def renderer():
     alive = rendering()
     package = Path(__file__).resolve().parent
     flags = subprocess.CREATE_NO_WINDOW | subprocess.BELOW_NORMAL_PRIORITY_CLASS if sys.platform == 'win32' else 0
-    while len(alive) < min(RENDERERS, len(_jobs)):
+    needed = min(RENDERERS, len({path for path, _, _, _ in _jobs.values()}))
+    while len(alive) < needed:
         alive.append(subprocess.Popen([bpy.app.binary_path, '--background', '--factory-startup', '--python-expr', RENDER_SCRIPT, '--',
-                                       str(package.parent), package.name, str(job_folder())],
+                                       str(package.parent), package.name],
                                       stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=flags))
     _state['processes'] = alive
 
 
-def write_job(job, path, definition):
-    partial = job.with_suffix('.partial')
-    partial.write_text(json.dumps(dict(path=str(path), definition=definition)), encoding='utf-8')
-    os.replace(partial, job)
+def send_job(process, path, definition):
+    payload = (json.dumps(dict(path=str(path), definition=definition)) + '\n').encode('utf-8')
+    try:
+        process.stdin.write(payload)
+        process.stdin.flush()
+        return True
+    except OSError:
+        return False
+
+
+def clear_assigned(path):
+    for process in [item for item, target in _assigned.items() if target == path]:
+        del _assigned[process]
+
+
+def record_attempt(lost):
+    for key, (path, definition, attempts, order) in list(_jobs.items()):
+        if path != lost:
+            continue
+        if attempts + 1 >= LOST_ATTEMPTS:
+            _failed.add(path)
+            del _jobs[key]
+        else:
+            _jobs[key] = (path, definition, attempts + 1, order)
 
 
 def dispatch():
     for key, (path, definition) in _queue.items():
-        shared = next((job for job, rendered, _, _ in _jobs.values() if rendered == path), None)
-        if key not in _jobs and shared is not None:
-            _jobs[key] = (shared, path, definition, 0)
+        if key in _jobs and _jobs[key][0] == path:
+            _jobs[key] = (path, definition, _jobs[key][2], next(_order))
             continue
-        if key in _jobs and _jobs[key][1] == path:
-            try:
-                os.utime(_jobs[key][0])
-            except OSError:
-                pass
-            continue
-        if key in _jobs and not any(other != key and entry[0] == _jobs[key][0] for other, entry in _jobs.items()):
-            _jobs[key][0].unlink(missing_ok=True)
-        job = job_folder() / f'{path.stem}.json'
-        write_job(job, path, definition)
-        _jobs[key] = (job, path, definition, 0)
+        _jobs[key] = (path, definition, 0, next(_order))
     _queue.clear()
-    for key, (job, path, definition, attempts) in list(_jobs.items()):
-        failed = job.with_suffix('.failed')
+    for key, (path, definition, attempts, _) in list(_jobs.items()):
+        failed = failed_marker(path)
         if path.is_file():
             del _jobs[key]
+            clear_assigned(path)
         elif failed.exists() or attempts >= LOST_ATTEMPTS:
-            failed.unlink(missing_ok=True)
+            discard(failed)
             _failed.add(path)
             del _jobs[key]
-        elif not job.exists() and not job.with_suffix('.taken').exists() and not path.is_file():
-            write_job(job, path, definition)
-            _jobs[key] = (job, path, definition, attempts + 1)
-    if _jobs:
-        renderer()
-
-
-def newest_job(folder):
-    stamped = []
-    for job in folder.glob('*.json'):
-        try:
-            stamped.append((job.stat().st_mtime_ns, job))
-        except OSError:
+            clear_assigned(path)
+    for process in list(_assigned):
+        if process.poll() is not None:
+            record_attempt(_assigned.pop(process))
+    _state['processes'] = rendering()
+    if not _jobs:
+        return
+    renderer()
+    busy_paths = set(_assigned.values())
+    for process in list(_state['processes']):
+        if process in _assigned:
             continue
-    return max(stamped)[1] if stamped else None
+        candidates = [(order, path, definition) for path, definition, _, order in _jobs.values() if path not in busy_paths]
+        if not candidates:
+            break
+        _, path, definition = max(candidates, key=lambda item: item[0])
+        discard(failed_marker(path))
+        if send_job(process, path, definition):
+            _assigned[process] = path
+            busy_paths.add(path)
+        else:
+            try:
+                process.stdin.close()
+            except OSError:
+                pass
+            _state['processes'] = [item for item in _state['processes'] if item is not process]
+            record_attempt(path)
 
 
 def leave_with_parent():
@@ -345,31 +369,32 @@ def discard(path):
         pass
 
 
-def claim(job):
-    taken = job.with_suffix('.taken')
-    try:
-        os.replace(job, taken)
-    except OSError:
-        return None, None
-    try:
-        return taken, json.loads(taken.read_text(encoding='utf-8'))
-    except (OSError, ValueError):
-        discard(taken)
-        return None, None
+def read_jobs(pending, ready):
+    for raw in sys.stdin.buffer:
+        line = raw.decode('utf-8', errors='replace').strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        with ready:
+            pending.append(entry)
+            ready.notify()
+    os._exit(0)
 
 
-def serve(folder):
+def serve():
     if hasattr(os, 'nice'):
         os.nice(10)
-    threading.Thread(target=leave_with_parent, daemon=True).start()
+    pending = []
+    ready = threading.Condition()
+    threading.Thread(target=read_jobs, args=(pending, ready), daemon=True).start()
     while True:
-        job = newest_job(folder)
-        if job is None:
-            time.sleep(JOB_POLL)
-            continue
-        taken, entry = claim(job)
-        if taken is None:
-            continue
+        with ready:
+            while not pending:
+                ready.wait()
+            entry = pending.pop()
         target = Path(entry['path'])
         partial = target.with_name(f'{target.stem}.{os.getpid()}.partial.png')
         try:
@@ -379,8 +404,8 @@ def serve(folder):
         except Exception:
             discard(partial)
             if not target.is_file():
-                taken.with_suffix('.failed').write_text(target.name, encoding='utf-8')
-        discard(taken)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                failed_marker(target).write_text(target.name, encoding='utf-8')
 
 
 def release():
@@ -391,8 +416,12 @@ def release():
     _textures.clear()
     _queue.clear()
     _jobs.clear()
+    _assigned.clear()
     _failed.clear()
     _owned.clear()
     for process in rendering():
-        process.stdin.close()
+        try:
+            process.stdin.close()
+        except OSError:
+            pass
     _state['processes'] = []

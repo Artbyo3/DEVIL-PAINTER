@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+import time
 from pathlib import Path
 from contextlib import nullcontext
 import tempfile
@@ -227,19 +228,40 @@ class ScratchWorkspaceTests(unittest.TestCase):
         run = dev.Run('test', workspace.prepare_scratch(self.scratch / 'run-test'))
         exports = {'blender_api.py': [['a.png', '0' * 64]]}
         with patch.object(dev, 'run_journeys', return_value=(exports, ['gui_editor.py'])), \
-                patch.object(dev.gate, 'read_golden', return_value=exports), patch('builtins.print'):
+                patch.object(dev.gate, 'read_golden', return_value=exports), \
+                patch.object(dev.gate, 'EXPECTED_EXPORTS', {'blender_api.py': (1, '')}), patch('builtins.print'):
             self.assertTrue(dev.do_journeys(run, 'compare'))
         self.assertEqual([outcome.name for outcome in run.outcomes], ['Golden compare'])
 
     def test_journey_timeout_kills_the_process_and_keeps_the_partial_log(self):
         run = dev.Run('test', workspace.prepare_scratch(self.scratch / 'run-test'))
         run.logs.mkdir()
-        command = [sys.executable, '-c', 'import time; print("partial", flush=True); time.sleep(60)']
+        pid_file = run.folder / 'hung.pid'
+        finished_file = run.folder / 'hung.finished'
+        script = (
+            'import os, pathlib, time; '
+            f'pathlib.Path({str(pid_file)!r}).write_text(str(os.getpid()), encoding="utf-8"); '
+            'print("partial", flush=True); '
+            'time.sleep(60); '
+            f'pathlib.Path({str(finished_file)!r}).write_text("finished", encoding="utf-8")'
+        )
+        command = [sys.executable, '-c', script]
+        started = time.monotonic()
         with patch('builtins.print'):
             passed = dev.step(run, 'Journey 99 hung.py', command, workspace.child_environment(run.folder), timeout=3, echo=False, failure_record=run.folder / 'hung.failures')
+        elapsed = time.monotonic() - started
+        outcome = run.outcomes[0]
         self.assertFalse(passed)
-        self.assertIn('timed out', run.outcomes[0].detail)
-        self.assertIn('partial', run.outcomes[0].log.read_text(encoding='utf-8'))
+        self.assertFalse(outcome.passed)
+        self.assertEqual(outcome.detail, 'timed out after 3s and was killed')
+        self.assertLess(elapsed, 20.0)
+        self.assertLess(outcome.seconds, 20.0)
+        self.assertTrue(pid_file.is_file())
+        self.assertFalse(dev.gate_state.process_alive(int(pid_file.read_text(encoding='utf-8'))))
+        self.assertFalse(finished_file.exists())
+        log_text = outcome.log.read_text(encoding='utf-8')
+        self.assertIn('partial', log_text)
+        self.assertIn('[gate] killed after 3s without finishing', log_text)
 
     def test_journey_fails_when_the_editor_recorded_a_failure_despite_exit_zero(self):
         run = dev.Run('test', workspace.prepare_scratch(self.scratch / 'run-test'))

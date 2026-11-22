@@ -1,9 +1,7 @@
 import io
 import json
-import os
 import sys
 import time
-import traceback
 from pathlib import Path
 import bpy
 
@@ -15,23 +13,9 @@ import devil_painter
 from devil_painter import editor, library
 from devil_painter.editor import HIDDEN_REGIONS
 from tools.workspace import prepare_scratch
-from tests.gui_harness import expected_failures, settle, until
+from tests.gui_harness import check, expected_failures, finish, run_journey, settle, until
 
-TIMEOUT = 600
-STARTED = time.time()
 TOGGLES = dict(fullscreen=dict(ctrl=True, alt=True), maximize=dict(ctrl=True))
-
-
-def check(condition, message):
-    if not condition:
-        raise AssertionError(message)
-    print('PASS:', message)
-
-
-def finish(code):
-    sys.stdout.flush()
-    sys.stderr.flush()
-    os._exit(code)
 
 
 def view(window):
@@ -226,18 +210,4 @@ def journey():
     finish(0)
 
 
-steps = journey()
-
-
-def advance():
-    try:
-        if time.time() - STARTED > TIMEOUT:
-            raise AssertionError('GUI reopen test timed out')
-        return next(steps)
-    except Exception:
-        traceback.print_exc()
-        print('GUI TEST FAILED')
-        finish(1)
-
-
-bpy.app.timers.register(advance, first_interval=1.0, persistent=True)
+run_journey(journey(), 'GUI reopen test')
