@@ -1406,6 +1406,9 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             items = tuple((f'SET_FXCOMPONENT.{mode}', label, mode == effect.levels_component) for mode, label in LEVEL_COMPONENTS)
         elif key == 'FX_PROJECTION':
             items = tuple((f'SET_FXPROJECTION.{mode}', label, mode == effect.projection) for mode, label in FILL_PROJECTIONS)
+        elif key in {'FX_WRAP', 'FX_FILTERING'}:
+            field = key.removeprefix('FX_').lower()
+            items = tuple((f'SET_FX{field.upper()}.{mode}', label, mode == getattr(effect, field)) for mode, label, _ in TEXTURE_SAMPLING[field])
         elif key == 'FX_OTHER':
             items = tuple((f'SET_FXOTHER.{layer.uid}', layer.name, layer.uid == effect.other) for layer in data.layers
                           if layer.uid != data.active_uid and layer.kind != 'INSTANCE') or (('NO_LAYER', 'No other layer', False),)
@@ -1441,7 +1444,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.message = actions.move_effect(context, obj, data, layer.uid, effect.uid, index + (1 if key == 'FX_UP' else -1))
         elif key == 'FX_DELETE':
             self.message = actions.delete_effect(context, obj, data)
-        elif key in {'FX_BLEND', 'FX_FILTER', 'FX_SOURCE', 'FX_OTHER', 'FX_CHANNEL', 'FX_COMPONENT', 'FX_PROJECTION', 'FX_ANCHOR', 'FX_ANCHOR_CHANNEL'}:
+        elif key in {'FX_BLEND', 'FX_FILTER', 'FX_SOURCE', 'FX_OTHER', 'FX_CHANNEL', 'FX_COMPONENT', 'FX_PROJECTION', 'FX_WRAP', 'FX_FILTERING', 'FX_ANCHOR', 'FX_ANCHOR_CHANNEL'}:
             self.open_effect_menu(key, control, data)
         elif key.startswith('SET_FXPATTERN.'):
             actions.edit_effect(context, obj, data, 'source', 'PATTERN', False)
@@ -1461,10 +1464,10 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         elif key.startswith('FXCOLOR.'):
             self.open_color(control, 'fx:' + key.removeprefix('FXCOLOR.'))
         elif key.startswith(('SET_FXBLEND.', 'SET_FXFILTER.', 'SET_FXSOURCE.', 'SET_FXOTHER.', 'SET_FXCHANNEL.', 'SET_FXCOMPONENT.', 'SET_FXPROJECTION.',
-                             'SET_FXANCHOR.', 'SET_FXANCHORCHANNEL.')):
+                             'SET_FXWRAP.', 'SET_FXFILTERING.', 'SET_FXANCHOR.', 'SET_FXANCHORCHANNEL.')):
             prefix, value = key.split('.', 1)
             field = {'SET_FXBLEND': 'blend', 'SET_FXFILTER': 'filter', 'SET_FXSOURCE': 'source', 'SET_FXOTHER': 'other', 'SET_FXCHANNEL': 'channel',
-                     'SET_FXCOMPONENT': 'levels_component', 'SET_FXPROJECTION': 'projection', 'SET_FXANCHOR': 'anchor',
+                     'SET_FXCOMPONENT': 'levels_component', 'SET_FXPROJECTION': 'projection', 'SET_FXWRAP': 'wrap', 'SET_FXFILTERING': 'filtering', 'SET_FXANCHOR': 'anchor',
                      'SET_FXANCHORCHANNEL': 'anchor_channel'}[prefix]
             self.message = actions.edit_effect(context, obj, data, field, value, True)
         elif control.kind == 'ROW' and key.startswith('FX_'):
@@ -1687,6 +1690,11 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             if layer is None:
                 return None
             return format_number(1.0 - layer.triplanar_blend), lambda text: parse_number(text, 0.0, 1.0), lambda context, value: setattr(self, 'message', actions.set_projector(context, obj, data, dict(triplanar_blend=1.0 - value), True) or self.message)
+        if key == 'FX_TRIPLANAR_HARDNESS' and data is not None:
+            effect = active_effect(data)
+            if effect is None:
+                return None
+            return format_number(1.0 - effect.triplanar_blend), lambda text: parse_number(text, 0.0, 1.0), lambda context, value: setattr(self, 'message', actions.edit_effect(context, obj, data, 'triplanar_blend', 1.0 - value, True))
         if key == 'RADIAL' and data is not None:
             return format_number(data.brush_radial, integer=True), lambda text: parse_number(text, 1, 16, integer=True), lambda context, value: setattr(data, 'brush_radial', value)
         if key in DRAG_FIELDS and data is not None:
@@ -2020,6 +2028,10 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             actions.set_uv_projection(context, obj, data, dict(uv_rotation=math.radians(x * 360)), release)
         elif key == 'TRIPLANAR_HARDNESS' and data is not None:
             actions.set_projector(context, obj, data, dict(triplanar_blend=1.0 - x), release)
+        elif key == 'FX_TRIPLANAR_HARDNESS' and data is not None:
+            actions.edit_effect(context, obj, data, 'triplanar_blend', 1.0 - x, False)
+            if release:
+                self.message = actions.edit_effect(context, obj, data, 'triplanar_blend', 1.0 - x, True)
         elif key == 'RADIAL' and data is not None:
             data.brush_radial = 1 + round(x * 15)
         elif key in DRAG_FIELDS and data is not None:

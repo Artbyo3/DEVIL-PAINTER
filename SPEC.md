@@ -180,7 +180,9 @@ cylindrical mapping with tiling and an interactive 3D gizmo. Each projection
 carries the controls an artist expects from it: UV offset and spin with an
 option to repeat identically on every UDIM tile, tri-planar edge hardness, and
 planar bend, corner warp, and snap to surface. Fill effects in the effect
-stacks project by UV or tri-planar mapping with tiling and offset.
+stacks project by UV or tri-planar mapping with tiling, offset, and the same
+tri-planar edge hardness, and their textures take the same Wrap and Filtering
+choices as Fill layer textures.
 
 ### Painting
 

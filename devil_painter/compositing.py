@@ -1,7 +1,7 @@
 import math
 import bpy
 from .blending import MIX_NODE_BLENDS
-from .document import PROJECTORS, TRIPLANAR_BLEND, active_tile, children, descendants, find_layer, folder_mode, geometry_attribute, linked_layer, linked_set, set_channels, shown_layers, slot_value, uses_coordinates
+from .document import PROJECTORS, active_tile, children, descendants, find_layer, folder_mode, geometry_attribute, linked_layer, linked_set, set_channels, shown_layers, slot_value, uses_coordinates
 from .effects import COMPONENT_FIELDS, CONTENT_KINDS, EFFECT_FIELDS
 from .caches import revision, tile, tile_variant
 from .filters import FILTER, HEIGHT_FILTERS, filter_color, filter_value, height_normal, slope_blur, slope_weight, wrap_sampling
@@ -417,9 +417,10 @@ def combine_mask(build, value, other, blend, factor):
 def fill_texture(build, effect):
     node = build.nodes.new('ShaderNodeTexImage')
     node.image = effect.texture
+    node.extension, node.interpolation = effect.wrap, effect.filtering
     if fill_projection(effect) == 'TRIPLANAR':
         node.projection = 'BOX'
-        node.projection_blend = TRIPLANAR_BLEND
+        node.projection_blend = effect.triplanar_blend
     build.links.new(fill_vector(build, effect), node.inputs['Vector'])
     return node.outputs['Color']
 
