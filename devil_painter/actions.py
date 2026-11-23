@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 import bpy
 import numpy
-from . import bakejob, baking, bridge, brushes, compositing, exporting, library, meshmaps, painting, projects, sets, smart, strokes, tiles
+from . import bakejob, baking, bridge, brushes, compositing, exporting, history, library, meshmaps, painting, projects, sets, smart, strokes, tiles
 from .blending import linear_to_srgb
 from .compositing import ensure_material
 from .effects import EFFECT_LABEL, copy_effect, find_effect, level_target, mask_effects
@@ -33,8 +33,7 @@ def refresh(context, obj, data, message):
     for item in obj.devil_painter.sets:
         compositing.sync(item)
     painting.update_canvas(context, data)
-    bpy.ops.ed.undo_push(message='Devil Painter: ' + message)
-    strokes.record(None)
+    history.push(message)
     return message
 
 
@@ -116,8 +115,7 @@ def toggle_set_visible(context, obj, project, index):
     data.visible = not data.visible
     data.export = data.visible
     compositing.sync(data)
-    bpy.ops.ed.undo_push(message='Devil Painter: texture set visibility')
-    strokes.record(None)
+    history.push('Texture set visibility')
     return f'{data.name} {"enabled" if data.visible else "disabled"}.'
 
 
@@ -495,8 +493,7 @@ def pick_geometry(context, obj, data, face, island):
     faces = sets.island_of(obj.data, face) if island else [face]
     values[faces] = 0.0 if values[face] > .5 else 1.0
     set_geometry(obj, data, layer, values)
-    bpy.ops.ed.undo_push(message='Devil Painter: geometry mask')
-    strokes.record(None)
+    history.push('Geometry mask')
     return f'{int(values.sum())} faces in the geometry mask of {layer.name}.'
 
 
@@ -1003,7 +1000,7 @@ def rebake(context, obj, data):
 
 def set_bake(context, obj, data, name, value, message):
     setattr(data, name, value)
-    bpy.ops.ed.undo_push(message='Devil Painter: ' + message)
+    history.push(message)
     return message
 
 
@@ -1019,7 +1016,7 @@ def reset_bake_map(context, obj, data, key, field):
         setattr(entry, field, 0 if field == 'samples' else 0.0)
     noun = 'samples' if field == 'samples' else 'ray distance'
     message = f'{MESH_MAP[key].label} uses the shared {noun}.'
-    bpy.ops.ed.undo_push(message='Devil Painter: ' + message)
+    history.push(message)
     return message
 
 

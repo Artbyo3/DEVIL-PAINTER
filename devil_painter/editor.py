@@ -8,7 +8,7 @@ import numpy
 import math
 import gpu
 from gpu_extras.batch import batch_for_shader
-from . import actions, autosave, bakejob, baking, bridge, brushes, caches, compositing, dynamics, packs, tiles, exporting, library, meshmaps, painting, polyfill, post, projection, vectors, projects, sets, shelf, shortcuts, smart, strokes, thumbnails
+from . import actions, autosave, bakejob, baking, bridge, brushes, caches, compositing, dynamics, history, packs, tiles, exporting, library, meshmaps, painting, polyfill, post, projection, vectors, projects, sets, shelf, shortcuts, smart, strokes, thumbnails
 from .blending import BLEND_MODES, CHANNEL, FOLDER_BLENDS, linear_to_srgb, srgb_to_linear
 from .ui_system import ACCENT
 from .canvas import Rect
@@ -109,6 +109,13 @@ def close_active():
         _active.cleanup()
 
 
+def sync_history(redo):
+    if _active is None or _active._closed:
+        return
+    if history.sync_external(redo):
+        _active.after_history(bpy.context)
+
+
 def accepts_drop(context):
     return (_active is not None and not _active._closed and context.area is not None
             and context.region is not None and context.region.type == 'WINDOW'
@@ -176,6 +183,8 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         obj = context.view_layer.objects.active
         data = texture_set(obj)
         self.stroke_pending = False
+        self.direct_stroke = None
+        self.stroke_label_pending = ''
         self.stencil_pending = False
         self.line_anchor = None
         self.below_pending, self.below_since = (), 0.0
@@ -569,7 +578,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
                 self._area.tag_redraw()
                 if not over:
                     if event.type == 'LEFTMOUSE':
-                        self.native_stroke(context)
+                        self.native_stroke(context, event)
                     return {'PASS_THROUGH'}
                 if event.type == 'LEFTMOUSE':
                     return {'RUNNING_MODAL'}
@@ -585,9 +594,9 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
                 self._area.tag_redraw()
             return {'RUNNING_MODAL'}
         self.update_highlight(event, control)
-        if press and event.type == 'Z' and event.ctrl:
-            self.history_step(context, redo=event.shift)
-            return {'PASS_THROUGH'}
+        if press and event.type == 'Z' and event.ctrl and not event.alt:
+            self.message = self.history_step(context, redo=event.shift)
+            return {'RUNNING_MODAL'}
         if press and not pointer_event and (self.state.popover is None or self.state.popover.kind == 'SHORTCUTS'):
             result = self.key_event(context, event)
             if result is not None:
@@ -619,7 +628,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             return {'RUNNING_MODAL'}
         if not over or not pointer_event:
             if press and event.type == 'LEFTMOUSE' and not event.alt:
-                self.native_stroke(context)
+                self.native_stroke(context, event)
             return {'PASS_THROUGH'}
         if control is not None and press and event.type == 'RIGHTMOUSE' and control.key.startswith('ROW_'):
             obj, data = self.painted()
@@ -859,14 +868,12 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             face, location = sets.hit_under(self._region, self._area.spaces.active.region_3d, obj, self.pointer)
             self.state.clone_source = None if face < 0 else (self.surface_point(obj, data, face, location)[0], location)
             return self.finish_message('Clone source set. Paint to copy from it.' if face >= 0 else 'Ctrl+click on the model to set the clone source.')
-        self.begin_stroke(context)
-        self.stroke_pending = False
+        self.prepare_stroke(context)
         self.state.gesture = [(self.pointer, max(event.pressure, .01))]
         return {'RUNNING_MODAL'}
 
     def shift_line(self, context, event):
-        self.begin_stroke(context)
-        self.stroke_pending = False
+        self.prepare_stroke(context)
         obj, data = self.painted()
         pressure = max(event.pressure, .01)
         start = self.anchor_point(obj)
@@ -898,8 +905,8 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         spot = view3d_utils.location_3d_to_region_2d(self._region, self._area.spaces.active.region_3d, obj.matrix_world @ self.line_anchor[1])
         return None if spot is None else (spot.x, spot.y)
 
-    def native_stroke(self, context):
-        self.begin_stroke(context)
+    def native_stroke(self, context, event):
+        self.begin_stroke(context, event)
         if not self.brushing():
             return
         self.remember_anchor(self.pointer)
@@ -1038,6 +1045,8 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
                     project.active_tile = tile
                     sets.mask_faces(obj, project)
                     painting.update_canvas(context, data)
+                direct = None if buffered else variant(data, paint_target(data), tile)
+                snapshot = strokes.read(direct).copy() if direct is not None else None
                 for trail in trails:
                     self.replay(context, obj, data, trail)
                 if buffered:
@@ -1046,13 +1055,18 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
                     if entry is not None:
                         before += entry.before
                         after += entry.after
+                elif direct is not None:
+                    entry = strokes.diff(direct, snapshot)
+                    if entry is not None:
+                        before += entry.before
+                        after += entry.after
         finally:
             if crossing and project.active_tile != home:
                 project.active_tile = home
                 sets.mask_faces(obj, project)
                 painting.update_canvas(context, data)
-        bpy.ops.ed.undo_push(message='Devil Painter: stroke')
-        strokes.record(strokes.Fill(before, after) if before else None)
+        if before:
+            history.push(self.stroke_label(data), strokes.Fill(before, after))
         self.remember_anchor(points[-1][0])
         message = next((note for note in notes if note), '')
         if len(touched) > 1 and not message:
@@ -1080,11 +1094,35 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         start = next((location for face, location in hits if face >= 0 and self.surface_point(obj, data, face, location)[0] == tile), None)
         return None if start is None else source - start
 
-    def begin_stroke(self, context):
+    def stroke_label(self, data):
+        tool = painting.active_tool(self.scene)
+        verb = next((label for key, label, _, _ in painting.TOOLS if key == tool), 'Paint')
+        if data.quick_mask is not None:
+            return 'Quick mask stroke'
+        if data.bake_paint:
+            return f'{data.bake_paint.title()} map stroke'
+        effect = active_effect(data)
+        if effect is not None and effect.kind == 'PAINT':
+            return 'Paint effect stroke'
+        if editing_mask(data):
+            return 'Mask stroke'
+        return f'{verb} stroke'
+
+    def flat_target(self, event):
+        if event is None or self.flat_space() is None:
+            return None
+        flat_region = next((item for item in self.flat_area.regions if item.type == 'WINDOW'), None)
+        if flat_region is None:
+            return None
+        if not (flat_region.x <= event.mouse_x < flat_region.x + flat_region.width and flat_region.y <= event.mouse_y < flat_region.y + flat_region.height):
+            return None
+        return self.flat_space().image
+
+    def prepare_stroke(self, context):
         caches.touch()
         obj, data = self.painted()
         if data is None or obj.mode != 'TEXTURE_PAINT':
-            return
+            return obj, None, False
         inside = 0 <= self.pointer[0] < self._region.width and 0 <= self.pointer[1] < self._region.height
         if inside:
             face = sets.face_under(self._region, self._area.spaces.active.region_3d, obj, self.pointer)
@@ -1095,29 +1133,69 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
                     data = texture_set(obj)
         if inside and data.material is None:
             compositing.sync(data)
+        return obj, data, inside
+
+    def begin_stroke(self, context, event=None):
+        _, data, inside = self.prepare_stroke(context)
+        if data is None:
+            return
         if inside and painting.uses_stroke_buffer(context, data):
             self.stroke_pending = True
-        else:
-            strokes.record(None)
+            self.direct_stroke = None
+            self.stroke_label_pending = self.stroke_label(data)
+            return
+        target = variant(data, paint_target(data), active_tile(data)) if inside else self.flat_target(event)
+        if target is not None:
+            self.stroke_pending = True
+            self.direct_stroke = (target.name, strokes.read(target).copy(), self.stroke_label(data))
 
     def finish_stroke(self, context):
         if any(operator.bl_idname.startswith('PAINT_OT') for operator in self._window.modal_operators):
             return
         self.stroke_pending = False
+        direct, self.direct_stroke = self.direct_stroke, None
+        label, self.stroke_label_pending = self.stroke_label_pending, ''
         obj, data = self.painted()
+        if direct is not None:
+            name, before, direct_label = direct
+            entry = strokes.diff(bpy.data.images.get(name), before)
+            if entry is not None:
+                history.attach(direct_label, entry)
+                caches.touch()
+                self._area.tag_redraw()
+            return
         entry = strokes.merge(obj, data) if data is not None else None
         if entry is not None:
-            strokes.record(entry.before)
+            history.attach(label or 'Paint stroke', entry, buffered=True)
             self._area.tag_redraw()
 
+    def after_history(self, context):
+        obj, data = self.painted()
+        if data is not None:
+            if len(obj.devil_painter.sets) > 1 or len(tiles.numbers(data)) > 1:
+                sets.mask_faces(obj, obj.devil_painter)
+            painting.update_canvas(context, data)
+        self._area.tag_redraw()
+
     def history_step(self, context, redo):
-        caches.touch()
+        if self.stroke_pending:
+            self.finish_stroke(context)
         self.state.popover = None
-        if redo:
-            strokes.redo()
-            self.stroke_pending = True
-        else:
-            strokes.undo()
+        if history.step(redo):
+            self.after_history(context)
+            return 'Redid.' if redo else 'Undid.'
+        return 'Nothing to redo.' if redo else 'Nothing to undo.'
+
+    def history_jump(self, context, target):
+        if self.stroke_pending:
+            self.finish_stroke(context)
+        self.state.popover = None
+        if history.jump(target):
+            self.after_history(context)
+            current = history.cursor()
+            label = 'Initial state' if current == 0 else history.entries()[current - 1].label
+            return f'History: {label}.'
+        return ''
 
     def chosen(self, data):
         self.state.multi &= {layer.uid for layer in data.layers}
@@ -1859,11 +1937,11 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             brushes.sync(context, data)
             self.message = control.label + ' tool.'
         elif key == 'UNDO':
-            self.history_step(context, redo=False)
-            bpy.ops.ed.undo()
+            self.message = self.history_step(context, redo=False)
         elif key == 'REDO':
-            self.history_step(context, redo=True)
-            bpy.ops.ed.redo()
+            self.message = self.history_step(context, redo=True)
+        elif key.startswith('HISTORY.'):
+            self.message = self.history_jump(context, int(key.removeprefix('HISTORY.')))
         elif key == 'GENERATOR':
             current = active_effect(data).generator
             self.state.popover = Popover('MENU', control.rect, items=tuple(

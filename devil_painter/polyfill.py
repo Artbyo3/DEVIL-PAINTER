@@ -1,6 +1,5 @@
-import bpy
 import numpy
-from . import compositing, strokes
+from . import compositing, history, strokes
 from .document import active_layer, editing_mask, paint_target, set_channels, slot_value
 from .sets import island_of, triangle_at, uv_island_labels
 from .tiles import FIRST_TILE, variant
@@ -153,6 +152,5 @@ def polygon_fill(obj, data, mode, face, location, color, erase):
     compositing.sync(data)
     faces = len({triangle.polygon_index for triangle in triangles})
     message = f'{"Erased" if erase else "Filled"} {POLY_NOUN[mode]}: {faces} face{"s" if faces != 1 else ""}.'
-    bpy.ops.ed.undo_push(message='Devil Painter: ' + message)
-    strokes.record(strokes.Fill(before, after))
+    history.push(message, strokes.Fill(before, after))
     return message

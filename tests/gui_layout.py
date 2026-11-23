@@ -16,7 +16,7 @@ from tests.gui_harness import check, finish, move, press, run_journey, settle, t
 
 EXEMPT_KINDS = {'GRIP', 'GHOST'}
 NAMES = dict(BAR='workspace bar', STRIP='tool strip', DOCK='tool dock', SHELF='asset browser', SETS='Texture sets panel',
-             LAYERS='Layers panel', PROPERTIES='Properties panel', MAPS='Mesh maps panel')
+             LAYERS='Layers panel', PROPERTIES='Properties panel', MAPS='Mesh maps panel', HISTORY='History panel')
 GROW = dict(TOP=(0, -1), BOTTOM=(0, 1), LEFT=(1, 0), RIGHT=(-1, 0))
 EXEMPT_KEYS = {'DROP_LINE', 'DRAG_GHOST'}
 
@@ -172,7 +172,7 @@ def journey():
     check('LAYERS' in workspace().scroll_areas, 'the layer rows scroll inside the fixed Layers shell')
     check(not escaped(), f'a long layer stack stays inside its shell {escaped()}')
     column = editor._active.state.strips['RIGHT'][0]['items']
-    check(column == list(PANELS), f'the right column holds the four panels in the default order {column}')
+    check(column == list(PANELS), f'the right column holds the {len(PANELS)} panels in the default order {column}')
 
     before = rect('LAYERS').h
     drag(window, region, 'SIZE.LAYERS', 0, -70)
@@ -219,7 +219,7 @@ def journey():
     yield from settle()
     check(len(editor._active.state.strips['RIGHT']) == 2 and editor._active.state.strips['RIGHT'][0]['items'] == ['PROPERTIES'] and not escaped(),
           f'dropping Properties on the outer edge of the column splits it into its own column {editor._active.state.strips["RIGHT"]} {escaped()}')
-    targets = dict(SHELF='LEFT', SETS='LEFT', LAYERS='LEFT', PROPERTIES='RIGHT', MAPS='RIGHT')
+    targets = dict(SHELF='LEFT', SETS='LEFT', LAYERS='LEFT', PROPERTIES='RIGHT', MAPS='RIGHT', HISTORY='RIGHT')
     for key in targets:
         before = strip_of(key)[0]
         move_section(window, region, key, *stage_point(region, targets[key]))

@@ -3,7 +3,7 @@ from dataclasses import dataclass
 import json
 import math
 import numpy
-from . import autosave, packs, shelf, thumbnails
+from . import autosave, history, packs, shelf, thumbnails
 from .post import POST_SLIDERS
 from .bridge import command as bridge_command
 from .brushes import world_size_text
@@ -31,6 +31,7 @@ from .ui_system import ACCENT, MinimalMetrics
 MAX_BRUSH_SIZE = 500
 MAX_WORLD_SIZE = 1.0
 ROW_HEIGHT = 42
+HISTORY_ROW = 24
 LINE_HEIGHT = 28
 MENU_ROW = 26
 MENU_WIDTH = 196
@@ -1085,6 +1086,36 @@ def sets_panel(layout, state, data):
     return ColumnPanel('SETS', 'Texture sets', (lines + 8) * s, fill_sets, 4 * s)
 
 
+def fill_history(layout, state, data, flow):
+    s = layout.scale
+    entries = history.entries()
+    if not entries:
+        x, y, h = flow.field()
+        flow.add('HISTORY_EMPTY', Rect(x, y, flow.viewport.w - 2 * flow.pad, h), 'NOTE', label='No history yet')
+        return
+    current = history.cursor()
+    items = [('Initial state', 0)] + [(entry.label, index) for index, entry in enumerate(entries, 1)]
+    for label, index in items:
+        line = flow.line(HISTORY_ROW * s)
+        if not flow.visible(line):
+            continue
+        row = Rect(line.x + 2 * s, line.y + 1 * s, line.w - 4 * s, line.h - 2 * s)
+        delta = index - current
+        tip = 'Current state' if not delta else f'{"Redo" if delta > 0 else "Undo"} {abs(delta)} {"step" if abs(delta) == 1 else "steps"} to this state'
+        flow.add(f'HISTORY.{index}', row, 'HISTORY', label=label, active=index == current, value=1.0 if index <= current else 0.0, tip=tip)
+
+
+def history_panel(layout, state, data):
+    s = layout.scale
+    version = history.version()
+    if state.history_version != version:
+        state.history_version = version
+        state.scroll['HISTORY'] = 1e9
+    count = len(history.entries())
+    body = ((count + 1) * HISTORY_ROW + 8) * s if count else (LINE_HEIGHT + 12) * s
+    return ColumnPanel('HISTORY', 'History', body, fill_history, 4 * s)
+
+
 def tab_rows(zone, s):
     tab_w = max(64 * s, min(76 * s, (zone.w - 46 * s) / len(shelf.TABS) - 4 * s))
     per_row = max(1, int((zone.w - 38 * s) // (tab_w + 4 * s)))
@@ -1835,7 +1866,7 @@ def gizmo_layout(layout, gizmo):
 
 
 SECTION_NAMES = dict(BAR='workspace bar', STRIP='tool strip', DOCK='tool dock', SHELF='asset browser', SETS='Texture sets panel',
-                     LAYERS='Layers panel', PROPERTIES='Properties panel', MAPS='Mesh maps panel')
+                     LAYERS='Layers panel', PROPERTIES='Properties panel', MAPS='Mesh maps panel', HISTORY='History panel')
 
 
 def shown_sections(data):
@@ -1858,7 +1889,7 @@ def strip_grip(side, rect, s):
 
 def sections_layout(layout, state, data, bounds, obj_name, tool, brush):
     s, found = layout.scale, layout.zones
-    builders = dict(SETS=sets_panel, LAYERS=layers_panel, PROPERTIES=properties_panel)
+    builders = dict(SETS=sets_panel, LAYERS=layers_panel, PROPERTIES=properties_panel, HISTORY=history_panel)
     for key, rect in found.rects.items():
         if key == 'BAR':
             workspace_bar(layout, rect, data, obj_name, state.view_2d, state.baking)

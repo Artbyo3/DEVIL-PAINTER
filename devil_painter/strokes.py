@@ -7,14 +7,10 @@ from . import caches, compositing
 from .document import active_tile, channel_depth, find_layer, set_channels, slot_value
 from .tiles import FIRST_TILE, blank, conform, create, face_slots, variant
 
-HISTORY_LIMIT = 80
 SMEAR_STRENGTH = .85
 TRACE_STEP = .5
 BLEED_TEXELS = 2.0
 MERGE_TOOLS = {'PAINT', 'FILL', 'ERASE', 'BLUR', 'SMEAR', 'CLONE'}
-_history = []
-_future = []
-_state = dict(redoing=False)
 
 
 @dataclass
@@ -326,12 +322,27 @@ def merge(obj, data, gesture=None, tool=None):
     return Fill(before, after)
 
 
-def record(entry):
-    _history.append(entry)
-    del _history[:-HISTORY_LIMIT]
-    if not _state['redoing']:
-        _future.clear()
-    _state['redoing'] = False
+def clear_buffer(data):
+    if data is None or data.stroke is None:
+        return
+    stroke = read(data.stroke)
+    if stroke[..., 3].any():
+        stroke[...] = 0.0
+        write(data.stroke, stroke)
+
+
+def diff(image, before):
+    if image is None or before is None:
+        return None
+    after = read(image)
+    if after.shape != before.shape:
+        return None
+    changed = (after != before).any(axis=2)
+    rows, columns = numpy.flatnonzero(changed.any(1)), numpy.flatnonzero(changed.any(0))
+    if not rows.size:
+        return None
+    region = (slice(int(rows[0]), int(rows[-1]) + 1), slice(int(columns[0]), int(columns[-1]) + 1))
+    return Fill([(image.name, region, before[region].copy())], [(image.name, region, after[region].copy())])
 
 
 def restore(entry):
@@ -339,34 +350,6 @@ def restore(entry):
         image = bpy.data.images.get(name)
         if image is not None:
             pixels = read(image)
-            pixels[region] = crop
-            write(image, pixels)
-
-
-def undo():
-    if _history:
-        entry = _history.pop()
-        _future.append(entry)
-        if isinstance(entry, Fill):
-            restore(entry.before)
-        elif entry is not None:
-            restore(entry)
-
-
-def redo():
-    if not _future:
-        return
-    entry = _future.pop()
-    if isinstance(entry, Fill):
-        restore(entry.after)
-        _history.append(entry)
-    elif entry is None:
-        _history.append(None)
-    else:
-        _state['redoing'] = True
-
-
-def forget():
-    _history.clear()
-    _future.clear()
-    _state['redoing'] = False
+            if pixels[region].shape == crop.shape:
+                pixels[region] = crop
+                write(image, pixels)

@@ -5,7 +5,7 @@ from tools.workspace import ROOT
 
 GOLDEN = ROOT / 'tools' / 'golden_journey_hashes.json'
 CORE_FILES = frozenset(f'devil_painter/{name}.py' for name in (
-    'bakejob', 'baking', 'blending', 'caches', 'compositing', 'document', 'effects', 'exporting', 'filters', 'masks',
+    'bakejob', 'baking', 'blending', 'caches', 'compositing', 'document', 'effects', 'exporting', 'filters', 'history', 'masks',
     'meshmaps', 'nodes', 'polyfill', 'procedural', 'projection', 'sets', 'strokes', 'tiles',
 ))
 LIGHT_PATTERNS = (
@@ -22,6 +22,7 @@ EXPECTED_EXPORTS = {
     'gui_editor.py': (12, ''),
     'gui_extras.py': (5, ''),
     'gui_follow_path.py': (5, ''),
+    'gui_history.py': (0, 'verifies unified undo/redo across strokes, masks, effects, and the history panel without exporting textures'),
     'gui_jitter.py': (5, ''),
     'gui_layer_delete.py': (0, 'verifies layer deletion, undo/redo, and workspace liveness without exporting textures'),
     'gui_layers.py': (91, ''),
