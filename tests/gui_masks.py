@@ -381,6 +381,27 @@ def journey():
     yield from settle()
     id_map = image_pixels(data.maps['id'].image)
     check(numpy.abs(numpy.array(active_effect(data).color) - id_map[front_pixel][:3]).max() < .02, 'clicking the model picks the baked ID color')
+
+    def live_id(color):
+        return any(numpy.abs(numpy.array(node.inputs[1].default_value) - color).max() < 1e-4
+                   for node in nodes(data) if node.type == 'VECT_MATH' and node.operation == 'DISTANCE')
+
+    def repick(point):
+        yield from reveal(window, region, 'FX_PICK_ID')
+        click(window, region, 'FX_PICK_ID')
+        yield from settle()
+        press(window, 'LEFTMOUSE', *point)
+        yield from settle()
+        return numpy.array(active_effect(data).color)
+
+    front_color = numpy.array(active_effect(data).color)
+    check(live_id(front_color), 'the viewport material selects the picked ID color')
+    top_color = yield from repick(point_toward_corner(region, area, cube, top, 0.0))
+    check(numpy.abs(top_color - id_map[top_pixel][:3]).max() < .02 and live_id(top_color) and not live_id(front_color),
+          're-picking the first ID color refreshes the viewport material with the new color')
+    front_again = yield from repick(front_point)
+    check(numpy.abs(front_again - front_color).max() < 1e-6 and live_id(front_color) and not live_id(top_color),
+          'picking the first ID color back refreshes the viewport material again')
     yield from context_menu(window, region, picked_uid, 'EXPORT_MASK')
     selected = mask_png(export_dir, find_layer(data, picked_uid))
     colors = len(numpy.unique(numpy.round(id_map[id_map[..., 3] > .5][:, :3], 2), axis=0))

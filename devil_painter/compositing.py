@@ -214,9 +214,17 @@ def slot_signature(slot):
     return slot.name + slot.blend + source
 
 
+def effect_value(effect, field):
+    value = getattr(effect, field)
+    if field == 'texture':
+        return value.name if value else ''
+    if isinstance(value, (str, bool, int, float)):
+        return str(value)
+    return ','.join(f'{item:.4f}' for item in value)
+
+
 def effect_signature(effect):
-    values = '/'.join(str(getattr(effect, field)) if field not in {'texture'} else (effect.texture.name if effect.texture else '') for field in EFFECT_FIELDS
-                      if field not in GENERATOR_VALUES)
+    values = '/'.join(effect_value(effect, field) for field in EFFECT_FIELDS if field not in GENERATOR_VALUES)
     components = ','.join(f'{value:.4f}' for field in COMPONENT_FIELDS for value in getattr(effect, field))
     extra = ','.join(f'{value:.4f}' for item in effect.id_colors for value in item.color)
     return f'{effect.uid}={values}={effect.image.name if effect.image else ""}={components}={extra}'
@@ -862,6 +870,10 @@ def channel_mix(nodes, links, name, below, factor, mode, x, y):
 
 def blended(slot):
     return slot.enabled and slot.blend != 'DISABLE'
+
+
+def triplanar_textured(layer, channels):
+    return layer.kind != 'PAINT' and any(blended(slot) and slot.source == 'IMAGE' and slot.image is not None for slot in (layer.slots[channel.key] for channel in channels))
 
 
 def per_component(build, below, above, formula):

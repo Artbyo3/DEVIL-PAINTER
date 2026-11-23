@@ -10,6 +10,7 @@ from .brushes import world_size_text
 from pathlib import Path
 from .blending import BLEND_MODES, CHANNEL, CHANNELS, FOLDER_BLENDS, linear_to_srgb
 from .canvas import Layout, Rect
+from .compositing import triplanar_textured
 from .document import (BAKE_ANTIALIAS_LABELS, BAKE_CURVATURE_LABELS, BAKE_ID_LABELS, DEPTH_LABELS, DISPLACEMENT_SCALE_MAX, DISPLACEMENT_SUBDIVISION_MAX, DYNAMICS, NORMAL_FORMATS, PROJECTORS, STROKE_METHODS, TEXTURE_SAMPLING, TRANSPARENCY, NORMAL_SPACES, PROJECTIONS, RESOLUTIONS, SHADERS, active_effect, active_layer, children, editing_mask, find_layer, isolated_uids,
                        linked_layer, map_extrusion, map_samples, set_channels, slot_value, uses_coordinates)
 from .effects import ANCHORED_KINDS, CONTENT_SOURCES, EFFECT_ICONS, EFFECT_KINDS, FILL_PROJECTIONS, LEVEL_COMPONENTS, MASK_BLEND_LABEL, LevelsView, effect_label
@@ -858,7 +859,7 @@ def projection_section(flow, data, layer, w):
         x, y, h = flow.field()
         flow.add('PROJ_ALIGN', Rect(x, y, half, h), 'CHIP', label='Align to view', tip='Point the projector along the current view')
         flow.add('PROJ_RESET', Rect(x + half + 4 * s, y, half, h), 'CHIP', label='Reset', tip='Center the projector on the mesh again')
-    elif layer.projection == 'TRIPLANAR':
+    elif layer.projection == 'TRIPLANAR' and triplanar_textured(layer, set_channels(data)):
         x, y, h = flow.field()
         flow.add('TRIPLANAR_HARDNESS', Rect(x, y, w, h), 'SLIDER', label='Hardness', value=1.0 - layer.triplanar_blend, text=f'{1.0 - layer.triplanar_blend:.2f}',
                  tip='Sharpen or soften where the three projections meet')
@@ -980,7 +981,7 @@ def projection_lines(data):
     layer = active_layer(data)
     if not (layer.kind == 'FILL' and uses_coordinates(layer)):
         return 0
-    return 5 if layer.projection == 'PLANAR' else 3 if layer.projection in PROJECTORS else 4 if layer.projection == 'UV' else 2
+    return 5 if layer.projection == 'PLANAR' else 3 if layer.projection in PROJECTORS else 4 if layer.projection == 'UV' else 1 + int(triplanar_textured(layer, set_channels(data)))
 
 
 def material_lines(data):

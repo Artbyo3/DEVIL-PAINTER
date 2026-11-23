@@ -13,7 +13,7 @@ from .procedural import PATTERN
 from .document import DEPTH_LABELS, PROJECTIONS, PROJECTORS, SLOT_FIELDS, TEXTURE_SAMPLING,geometry_attribute, active_effect, active_layer, adopt_generator_breakups, adopt_layer_generator, add_set_channels, add_slots, children, descendants, fill_slots, find_layer, layer_index, set_slot_value
 
 KIND_NAMES = {'PAINT': 'Paint', 'FILL': 'Fill', 'FOLDER': 'Folder'}
-LAYER_FIELDS = ('kind', 'visible', 'opacity', 'projection', 'tiling', 'proj_offset', 'proj_rotation', 'proj_size', 'uv_offset', 'uv_rotation', 'triplanar_blend', 'tile_match', 'material', 'folder_blend', 'geo_mask', 'link_set', 'link_uid')
+LAYER_FIELDS = ('kind', 'visible', 'opacity', 'projection', 'tiling', 'proj_offset', 'proj_rotation', 'proj_size', 'proj_bend', 'proj_warp', 'uv_offset', 'uv_rotation', 'triplanar_blend', 'tile_match', 'material', 'folder_blend', 'geo_mask', 'link_set', 'link_uid')
 ID_TOLERANCE = .15
 LAST_LAYER = 'A texture set keeps at least one layer. Add another layer before removing this one.'
 SAME_AS_FOLDER = 'FOLDER'
@@ -840,12 +840,20 @@ def set_projection(context, obj, data, projection):
     return refresh(context, obj, data, f'{layer.name} projects {"by UV" if projection == "UV" else label.lower()}.')
 
 
-def set_projector(context, obj, data, values, commit):
+def move_projection(context, obj, data, values, commit, moved):
     layer = active_layer(data)
     for field, value in values.items():
         setattr(layer, field, value)
     compositing.update_values(data)
-    return refresh(context, obj, data, f'{layer.name} projector moved.') if commit else ''
+    return refresh(context, obj, data, f'{layer.name} {moved} moved.') if commit else ''
+
+
+def set_projector(context, obj, data, values, commit):
+    return move_projection(context, obj, data, values, commit, 'projector')
+
+
+def set_uv_projection(context, obj, data, values, commit):
+    return move_projection(context, obj, data, values, commit, 'UV projection')
 
 
 def use_value(context, obj, data, key):
