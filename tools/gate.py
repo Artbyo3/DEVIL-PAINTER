@@ -34,6 +34,7 @@ EXPECTED_EXPORTS = {
     'gui_masks.py': (24, ''),
     'gui_material_stroke.py': (5, ''),
     'gui_missing_material.py': (0, 'verifies recovering a deleted texture-set material on open and mid-session paint strokes'),
+    'gui_narrow_sections.py': (0, 'verifies the workspace bar, tool strip, and asset browser keep their content inside narrow sections without exporting textures'),
     'gui_numeric_fields.py': (0, 'verifies typed numeric entry, commit, cancel, clamping, decimal entry, and slider sync across workspace fields without exporting textures'),
     'gui_packs.py': (0, 'verifies online/offline asset-pack catalog security, checksum checks, install, and removal'),
     'gui_painting.py': (20, ''),
