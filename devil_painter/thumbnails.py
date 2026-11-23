@@ -296,8 +296,8 @@ def send_job(process, path, definition):
         return False
 
 
-def clear_assigned(path):
-    for process in [item for item, target in _assigned.items() if target == path]:
+def release_finished():
+    for process in [item for item, target in _assigned.items() if target.is_file() or failed_marker(target).exists()]:
         del _assigned[process]
 
 
@@ -313,6 +313,7 @@ def record_attempt(lost):
 
 
 def dispatch():
+    release_finished()
     for key, (path, definition) in _queue.items():
         if key in _jobs and _jobs[key][0] == path:
             _jobs[key] = (path, definition, _jobs[key][2], next(_order))
@@ -323,12 +324,10 @@ def dispatch():
         failed = failed_marker(path)
         if path.is_file():
             del _jobs[key]
-            clear_assigned(path)
         elif failed.exists() or attempts >= LOST_ATTEMPTS:
             discard(failed)
             _failed.add(path)
             del _jobs[key]
-            clear_assigned(path)
     for process in list(_assigned):
         if process.poll() is not None:
             record_attempt(_assigned.pop(process))
