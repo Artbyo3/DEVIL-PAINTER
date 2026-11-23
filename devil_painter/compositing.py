@@ -1207,6 +1207,7 @@ def below_stamp(data):
 
 
 def below_build(data):
+    ensure_material(data.id_data, data)
     tree = data.material.node_tree
     build = set_build(data, tree, raw=True)
     output = build_tree(build, set_channels(data), stack_layers(data, True), None, True)

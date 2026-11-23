@@ -358,6 +358,7 @@ def planned_files(obj, project, template, wanted, folder, pattern, size):
     planned = []
     for index in wanted:
         data = project.sets[index]
+        compositing.ensure_material(obj, data)
         set_tiles = tiles.numbers(data)
         for number in set_tiles:
             ao = ao_image(data, number)
@@ -578,6 +579,7 @@ def write_psd(path, layers, composite):
 
 def export_psd(context, obj, project, index, key, directory, pattern, padding, style):
     data = project.sets[index]
+    compositing.ensure_material(obj, data)
     channel = CHANNEL[key]
     margin = data.resolution if padding == INFINITE_PADDING else padding
     stack = psd_stack(data, key)
