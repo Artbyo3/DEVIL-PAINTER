@@ -254,7 +254,7 @@ def journey():
     yield from bake(window, region)
     curv_normal = pixels(data.maps['curvature'].image)
     covered = curv_normal[curv_normal[:, 3] > .5][:, 0]
-    check(covered.max() > .55 and numpy.abs(curv_normal - curv_vertex).max() > .05, 'from-normal curvature derives convexity from tangent-space normals')
+    check(numpy.median(covered) > .5 and numpy.abs(curv_normal - curv_vertex).max() > .05, 'from-normal curvature derives convexity from tangent-space normals')
     yield from choose(window, region, 'BAKE_CURVATURE', 'SET_BAKE_CURVATURE.PER_PIXEL')
 
     yield from open_card(window, region)

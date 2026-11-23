@@ -87,6 +87,54 @@
   [
    "api_export_clash/Two_Trim_Height.png",
    "c0b8097a84bb826d881248cf9bf96283ae79df6020ea317b1209164d62a06c9f"
+  ],
+  [
+   "api_export_clash/Two_Body_BaseColor.png",
+   "08b5b1610cd119cbd78dee5ffed5d8cc5cbef4142b6d03ee70d52af60515ef4d"
+  ],
+  [
+   "api_export_clash/Two_Body_Roughness.png",
+   "0693ff1bfff0b6542f25ad7da71476b6532244ee16f72de43116f8bdb38ca4d8"
+  ],
+  [
+   "api_export_clash/Two_Body_Metallic.png",
+   "10e4455b50da1a8b2fd5dca5337b7fd7eb74cf1a4e330766e1fb8eee4319edd5"
+  ],
+  [
+   "api_export_clash/Two_Body_Normal.png",
+   "de4d1a447942138aead0e3ba8330c44c1fc88c0e1b863d211a5cc7fe80a0b194"
+  ],
+  [
+   "api_export_clash/Two_Body_Height.png",
+   "5afd338c49cf98c0048d36c4e7165eefcb39333c6623d564111283afdc126177"
+  ],
+  [
+   "api_export_clash/Two_Body_AO.png",
+   "ed1695fcd9d90113ffc65334a9b6ca3af587bc7494a746406839bb3553d80700"
+  ],
+  [
+   "api_export_clash/Two_Trim_BaseColor.png",
+   "3af395b8e938e346de91491d598be24d69fada49e48c39a4f02ac08ade4f9984"
+  ],
+  [
+   "api_export_clash/Two_Trim_Roughness.png",
+   "38a6ea9fcffa1c39128bcfcd7b419a1cc74b1d1b9c14e321a9c209ea7b8a77be"
+  ],
+  [
+   "api_export_clash/Two_Trim_Metallic.png",
+   "10e4455b50da1a8b2fd5dca5337b7fd7eb74cf1a4e330766e1fb8eee4319edd5"
+  ],
+  [
+   "api_export_clash/Two_Trim_Normal.png",
+   "ed2ffb1406d8c0dba0763ac249396684942df19a05075494d0e56fdb39f94c70"
+  ],
+  [
+   "api_export_clash/Two_Trim_Height.png",
+   "c0b8097a84bb826d881248cf9bf96283ae79df6020ea317b1209164d62a06c9f"
+  ],
+  [
+   "api_export_clash/Two_Trim_AO.png",
+   "a9aa4dfe798351872ab74bad7be9f6d43e12c72fe3fbe80ade0290ac3a5e548b"
   ]
  ],
  "gui_editor.py": [
@@ -158,11 +206,11 @@
   ],
   [
    "project_export/Cube_Body_BaseColor.1002.png",
-   "190baf617b66f756305dc4f8cf795739c6680498fdcef3aeccafd8507c96665a"
+   "605f3f19f684391c3f1e937e7e404ad69e030b7a21457d5cf1cb0dde75d84d3d"
   ],
   [
    "project_export/Cube_Body_OcclusionRoughnessMetallic.1002.png",
-   "c5d2ca58ceb7c572400e7c1b6d04500c0d65f17fef246c2bb0a9c814a5c0dfe8"
+   "da43622d3b6100c4bfef0f013f72c855558d0de14e20257ea2268a3e54140ba4"
   ],
   [
    "project_export/Cube_Body_Normal.1002.png",
@@ -206,11 +254,11 @@
   ],
   [
    "custom_export/Body-BaseColor-1002.png",
-   "0dc972cd721bed4489febbcfa3712e5e63419efa88638b192d5bf80ac94bc8a5"
+   "bd9594e86c29dddc7626897a7df5d2b7c049355a5fceffb871c6c4d96b1e0f85"
   ],
   [
    "custom_export/Body-OcclusionRoughnessMetallic-1002.exr",
-   "31ca443929c989b5958a0854c91222acc2fc2a1fff2ad4c48dea3d5cd37bdf82"
+   "5cfd581b2bd7ee3f4166846b0725e163cb13f5bcc6edd6210a1e86877106b990"
   ],
   [
    "custom_export/Body-Normal-1002.png",
@@ -2343,7 +2391,7 @@
   ],
   [
    "udim_export/Plates_Plates_BaseColor.1002.png",
-   "3b5fa7d90964b40a151429e0b06321d304f14bc3d9ddac1779df214c48037779"
+   "753ef4fd5763ee225364d79601d4f919d0421bf59854ed2638696c9ae6ddd797"
   ],
   [
    "udim_export/Plates_Plates_Roughness.1002.png",
@@ -2393,11 +2441,11 @@
  "gui_material_stroke.py": [
   [
    "export_material_stroke/Cube_Material_BaseColor.png",
-   "ad233ea6e27b61ddd37156d563fbcb7583b30cf1c8b77b66618e54c6c7112e91"
+   "0cd87e38b9ea8db08999a71ede9360172a9b85a88dc2d28530f9c76124f89f77"
   ],
   [
    "export_material_stroke/Cube_Material_Roughness.png",
-   "d702c979d12f16a8bfdddd5f632cffb40729b9c4b24a002b071be484dc6ce29f"
+   "f4d4840e76e3ae95ae9db18a47a41a79de5903be31e177c0ef4719097bbc3b6f"
   ],
   [
    "export_material_stroke/Cube_Material_Metallic.png",

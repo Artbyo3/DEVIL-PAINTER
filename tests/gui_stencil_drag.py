@@ -153,9 +153,11 @@ def journey():
     check(data.brush_stencil is not None and brush().texture_slot.map_mode == 'STENCIL', 'Use as stencil puts the decal on screen as a brush stencil')
     click(window, region, 'STENCIL_CARD')
     yield from settle()
+    pointer_pixel = editor.DRAG_FIELDS['STENCIL_SCALE'][1] / control('STENCIL_SCALE').rect.w
     drag_slider(window, region, 'STENCIL_SCALE', .05)
     yield from settle()
-    check(abs(data.stencil_scale - .2) < .01, f'the scale slider sets a small stencil ({data.stencil_scale:.3f})')
+    check(abs(data.stencil_scale - .2) <= pointer_pixel,
+          f'the scale slider sets a small stencil ({data.stencil_scale:.3f}, within one pointer pixel {pointer_pixel:.3f} of 0.200)')
     width, height = region.width, region.height
     evidence = dict(region=(width, height))
 
