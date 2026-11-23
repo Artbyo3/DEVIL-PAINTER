@@ -557,20 +557,6 @@ def journey():
           'folder instance properties name the source folder and set')
     click(window, region, 'SET.0')
     yield from settle()
-    click(window, region, 'ADD_FILL')
-    yield from settle()
-    orphan_source = body.active_uid
-    yield from context_menu(window, region, orphan_source, 'INSTANCE_INTO.0')
-    orphan_uid = body.active_uid
-    yield from context_menu(window, region, orphan_source, 'DELETE')
-    check(find_layer(body, orphan_source) is None and find_layer(body, orphan_uid) is not None,
-          'deleting a layer leaves its instance without a source')
-    yield from reveal(window, region, 'ROW_' + orphan_uid, 'LAYERS')
-    orphan_row = control('ROW_' + orphan_uid)
-    check(orphan_row.icon == '' and orphan_row.preview is None and orphan_row.color is not None and tuple(orphan_row.color) == BG_WELL,
-          'an instance whose source was deleted draws a placeholder thumbnail in the Layers row')
-    yield from context_menu(window, region, orphan_uid, 'DELETE')
-    check(find_layer(body, orphan_uid) is None, 'the instance without a source can be deleted')
     yield from select_row(window, region, fill_uid)
 
     click(window, region, 'ADD_PAINT')
@@ -741,6 +727,21 @@ def journey():
     yield from settle()
     check(not levels.clamp and not control('FX_CLAMP').active and any(node.bl_idname == 'ShaderNodeMapRange' and not node.clamp for node in nodes(body)),
           'turning clamp off lets the levels ranges extend past their limits')
+
+    click(window, region, 'ADD_FILL')
+    yield from settle()
+    orphan_source = body.active_uid
+    yield from context_menu(window, region, orphan_source, 'INSTANCE_INTO.0')
+    orphan_uid = body.active_uid
+    yield from context_menu(window, region, orphan_source, 'DELETE')
+    check(find_layer(body, orphan_source) is None and find_layer(body, orphan_uid) is not None,
+          'deleting a layer leaves its instance without a source')
+    yield from reveal(window, region, 'ROW_' + orphan_uid, 'LAYERS')
+    orphan_row = control('ROW_' + orphan_uid)
+    check(orphan_row.icon == '' and orphan_row.preview is None and orphan_row.color is not None and tuple(orphan_row.color) == BG_WELL,
+          'an instance whose source was deleted draws a placeholder thumbnail in the Layers row')
+    yield from context_menu(window, region, orphan_uid, 'DELETE')
+    check(find_layer(body, orphan_uid) is None, 'the instance without a source can be deleted')
 
     click(window, region, 'CLOSE')
     yield from settle()

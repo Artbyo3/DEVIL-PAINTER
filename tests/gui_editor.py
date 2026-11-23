@@ -532,6 +532,7 @@ def journey():
           and nodes[rust.uid + ':uv_transform'].inputs['Vector'].links[0].from_socket.name == 'UV',
           'the projection dropdown switches the layer to UV mapping')
 
+    yield from reveal(window, region, 'SOURCE.roughness')
     click(window, region, 'SOURCE.roughness')
     yield from settle()
     click(window, region, 'PICK_PATTERN.roughness')
