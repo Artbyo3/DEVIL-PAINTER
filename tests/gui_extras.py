@@ -10,10 +10,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(ROOT))
 import devil_painter
-from devil_painter import autosave, bridge, editor, library
+from devil_painter import autosave, bridge, editor, history, library
 from devil_painter.document import active_layer, find_layer
 from tools.workspace import prepare_scratch
-from tests.gui_harness import bake_landed, check, click, control, drag_slider, finish, has, keys, move, nodes, pixels, press, reveal, run_journey, set_hex, settle, spot, type_text, until, viewport
+from tests.gui_harness import bake_landed, check, click, context_menu, control, drag_slider, finish, has, keys, move, nodes, pixels, press, reveal, run_journey, select_row, set_hex, settle, spot, type_text, until, viewport
 
 
 def spot_of(region, key, fx=.5, fy=.5):
@@ -293,6 +293,16 @@ def journey():
     drag_slider(window, region, 'PROJ_BEND', .6)
     yield from settle()
     check(abs(find_layer(data, wood_uid).proj_bend - .6) < .05, 'the bend slider wraps the projection around a curve')
+    check(history.entries()[history.cursor() - 1].label == 'Wood projector moved', 'dragging Bend keeps the projector status message')
+    wood = find_layer(data, wood_uid)
+    shaped = (wood.proj_bend, tuple(wood.proj_warp))
+    yield from context_menu(window, region, wood_uid, 'DUPLICATE')
+    copy_uid = active_layer(data).uid
+    copy = find_layer(data, copy_uid)
+    check(copy_uid != wood_uid and (copy.proj_bend, tuple(copy.proj_warp)) == shaped, f'duplicating a Planar layer keeps its bend and corner warp {shaped}')
+    yield from context_menu(window, region, copy_uid, 'DELETE')
+    yield from select_row(window, region, wood_uid)
+    check(find_layer(data, copy_uid) is None and active_layer(data).uid == wood_uid, 'deleting the copy leaves the Wood layer selected')
     yield from reveal(window, region, 'PROJ_SNAP')
     click(window, region, 'PROJ_SNAP')
     yield from settle()

@@ -1674,14 +1674,14 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             def write_uv_offset(context, value):
                 offset = list(active_layer(data).uv_offset)
                 offset[axis] = value
-                self.message = actions.set_projector(context, obj, data, dict(uv_offset=tuple(offset)), True) or self.message
+                self.message = actions.set_uv_projection(context, obj, data, dict(uv_offset=tuple(offset)), True) or self.message
             return format_number(layer.uv_offset[axis] % 1.0), lambda text: parse_number(text, 0.0, 1.0), write_uv_offset
         if key == 'UV_SPIN' and data is not None:
             layer = active_layer(data)
             if layer is None:
                 return None
             return (format_number(math.degrees(layer.uv_rotation) % 360, decimals=2), lambda text: parse_number(text, 0.0, 360.0, units=('°', 'deg')),
-                    lambda context, value: setattr(self, 'message', actions.set_projector(context, obj, data, dict(uv_rotation=math.radians(value)), True) or self.message))
+                    lambda context, value: setattr(self, 'message', actions.set_uv_projection(context, obj, data, dict(uv_rotation=math.radians(value)), True) or self.message))
         if key == 'TRIPLANAR_HARDNESS' and data is not None:
             layer = active_layer(data)
             if layer is None:
@@ -2015,9 +2015,9 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         elif key in {'UV_OFFSET_X', 'UV_OFFSET_Y'} and data is not None:
             offset = list(active_layer(data).uv_offset)
             offset['XY'.index(key[-1])] = x
-            actions.set_projector(context, obj, data, dict(uv_offset=tuple(offset)), release)
+            actions.set_uv_projection(context, obj, data, dict(uv_offset=tuple(offset)), release)
         elif key == 'UV_SPIN' and data is not None:
-            actions.set_projector(context, obj, data, dict(uv_rotation=math.radians(x * 360)), release)
+            actions.set_uv_projection(context, obj, data, dict(uv_rotation=math.radians(x * 360)), release)
         elif key == 'TRIPLANAR_HARDNESS' and data is not None:
             actions.set_projector(context, obj, data, dict(triplanar_blend=1.0 - x), release)
         elif key == 'RADIAL' and data is not None:

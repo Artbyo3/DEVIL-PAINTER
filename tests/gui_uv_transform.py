@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(ROOT))
 import devil_painter
-from devil_painter import editor, library
+from devil_painter import editor, history, library
 from devil_painter.document import active_layer, find_layer
 from tools.workspace import prepare_scratch
 from tests.gui_harness import check, click, control, finish, press, reveal, run_journey, settle, shelf_index, slide, spot, type_text, viewport
@@ -130,6 +130,7 @@ def journey():
     yield from slide(window, region, 'UV_OFFSET_X', .25)
     check(abs(layer().uv_offset[0] - .25) < .02 and layer().uv_offset[1] == 0.0 and control('UV_OFFSET_X').text == f'{layer().uv_offset[0]:.2f}',
           f'the Offset X slider slides the projection ({layer().uv_offset[0]:.4f})')
+    check(history.entries()[history.cursor() - 1].label == f'{layer().name} UV projection moved', 'dragging Offset X names the UV projection in the status message')
     check(tuple(transform().inputs['Location'].default_value)[:2] == tuple(numpy.float32(value) for value in layer().uv_offset),
           'the offset reaches the UV transform')
     shifted = yield from exported()
@@ -144,6 +145,7 @@ def journey():
     yield from slide(window, region, 'UV_SPIN', .25)
     degrees = math.degrees(layer().uv_rotation)
     check(abs(degrees - 90) < 3 and control('UV_SPIN').text == f'{degrees % 360:.0f}°', f'the Spin slider turns the projection ({degrees:.2f}°)')
+    check(history.entries()[history.cursor() - 1].label == f'{layer().name} UV projection moved', 'dragging Spin names the UV projection in the status message')
     check(abs(transform().inputs['Rotation'].default_value[2] - layer().uv_rotation) < 1e-6, 'the rotation reaches the UV transform')
     turned = yield from exported()
     turn_evidence = measured('the rotated export', turned)

@@ -212,6 +212,18 @@ def journey():
                                               band_degrees_per_seam={key: round(value, 2) for key, value in widths.items()}, reopened_gap=gap,
                                               default_sha256=default_digest))
 
+    yield from reveal(window, region, 'SOURCE.base_color')
+    click(window, region, 'SOURCE.base_color')
+    yield from settle()
+    click(window, region, 'PICK_PATTERN.base_color')
+    yield from settle()
+    click(window, region, f'ITEM.{next(index for index, item in enumerate(shelf.items(editor._active.state.shelf_tab)) if item.label == "Noise")}')
+    yield from settle()
+    check(layer().projection == 'TRIPLANAR' and all(slot.source != 'IMAGE' for slot in layer().slots) and layer().slots['base_color'].source == 'PATTERN',
+          'the tri-planar Fill layer now drives its channels with patterns only')
+    yield from reveal(window, region, 'PROJECTION')
+    check(not has('TRIPLANAR_HARDNESS'), 'a pattern-only tri-planar layer hides the Hardness slider it cannot affect')
+
     click(window, region, 'CLOSE')
     yield from settle()
     check(editor._active is None, 'Devil Painter closes')
