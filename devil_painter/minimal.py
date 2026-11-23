@@ -29,7 +29,7 @@ from .privacy import masked, masked_path
 from .shell import COLUMNS, HEADER, SECTIONS, arrange, flexible
 from .ui_system import ACCENT, BG_WELL, MinimalMetrics
 
-MAX_BRUSH_SIZE = 500
+MAX_BRUSH_SIZE = 1000
 MAX_WORLD_SIZE = 1.0
 ROW_HEIGHT = 42
 HISTORY_ROW = 24
@@ -364,7 +364,7 @@ def tool_strip(layout, zone, tool, brush, data, state, room):
                    text=world_size_text(data.brush_world_size), tip='Brush size on the model, in scene units', shortcut='F')
     else:
         layout.add('BRUSH_SIZE', Rect(x, y, slider, h), 'SLIDER', label='Size', value=size / MAX_BRUSH_SIZE, text=f'{size} px',
-                   tip='Brush radius', shortcut='F')
+                   tip='Brush diameter', shortcut='F')
     x += slider + 6 * s
     layout.add('BRUSH_STRENGTH', Rect(x, y, slider, h), 'SLIDER', label='Opacity', value=data.brush_opacity,
                text=f'{data.brush_opacity * 100:.0f}%', tip='Most a single stroke can cover', shortcut='Shift F')

@@ -40,7 +40,7 @@ def splatter(points, size, seed):
     trails = []
     for point, pressure in points[::SPLAT_EVERY]:
         for _ in range(SPLAT_COUNT):
-            angle, reach = random.uniform(0, math.tau), random.uniform(.3, SPLAT_REACH) * size
+            angle, reach = random.uniform(0, math.tau), random.uniform(.3, SPLAT_REACH) * size / 2
             spot = (point[0] + math.cos(angle) * reach, point[1] + math.sin(angle) * reach)
             trails.append([(spot, pressure * random.uniform(.2, .8))])
     return trails

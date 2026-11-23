@@ -17,7 +17,7 @@ from devil_painter import brushes, editor, library, painting
 from devil_painter.document import find_layer
 from devil_painter.minimal import MAX_WORLD_SIZE
 from tools.workspace import prepare_scratch
-from tests.gui_harness import check, click, close_cards, control, drag_slider, finish, has, move, new_layer, press, run_journey, settle, shelf_index, spot, type_text, viewport
+from tests.gui_harness import check, click, close_cards, control, drag_slider, finish, has, move, new_layer, press, run_journey, settle, shelf_index, spot, type_text, until, viewport
 
 WORLD_SIZE = .2
 NEAR, FAR = 3.0, 9.0
@@ -143,7 +143,7 @@ def journey():
     check(control('SIZE_SPACE.SCREEN').active and not control('SIZE_SPACE.WORLD').active, 'Screen size is the active choice')
     yield from close_cards(window, middle)
 
-    drag_slider(window, region, 'BRUSH_SIZE', .2)
+    drag_slider(window, region, 'BRUSH_SIZE', .1)
     yield from settle()
     screen_px = native_size()
     screen = []
@@ -182,6 +182,22 @@ def journey():
         expected = world * item['pixels_per_unit']
         check(abs(item['cursor_px'] / expected - 1) < .05, f'{item["view"]} at {item["distance"]}: the cursor is {item["cursor_px"]} px for {expected:.1f} px of world size')
     evidence['world'] = dict(world_size=round(world, 5), measurements=[near, far, ortho, ortho_far], spread=round(spread, 5))
+
+    aim(area, 'PERSP', FAR)
+    yield from settle()
+    yield from hover(window, area, region)
+    still_px = native_size()
+    x, y = screen_point(area, region, 0.0, 0.0)
+    for _ in range(3):
+        window.event_simulate(type='WHEELUPMOUSE', value='PRESS', x=int(region.x + x + 2), y=int(region.y + y))
+        yield from settle()
+    yield from until(lambda: native_size() != still_px, 'the brush cursor to follow the wheel zoom')
+    zoomed = world * pixels_per_unit(area, region)
+    check(abs(native_size() / zoomed - 1) < .05, f'a wheel zoom with the pointer still resizes the cursor from {still_px} px to {native_size()} px for {zoomed:.1f} px of world size')
+    view = area.spaces.active.region_3d
+    stroke = brushes.stroke_size(data, region, view, cube, [(screen_point(area, region, 0.0, 0.0), 1.0)], 7)
+    check(abs(stroke / zoomed - 1) < .05, f'dynamics and the merge pass size a World stroke from its footprint ({stroke:.1f} px), not the native 7 px')
+    evidence['wheel_zoom'] = dict(before_px=still_px, after_px=native_size(), expected_px=round(zoomed, 2), stroke_px=round(stroke, 2))
 
     aim(area, 'PERSP', NEAR)
     yield from settle()

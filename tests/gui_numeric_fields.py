@@ -56,14 +56,15 @@ def journey():
     yield from type_number(window, region, 'BRUSH_SIZE', '77')
     check(painting.brush_value(bpy.context.scene, 'size') == 77 and control('BRUSH_SIZE').text == '77 px',
           'typing into Size sets brush size and syncs the slider text')
+    check(control('BRUSH_SIZE').tip == 'Brush diameter', 'the Size slider tooltip calls the size a diameter')
     yield from type_number(window, region, 'BRUSH_SIZE', '9999')
-    check(painting.brush_value(bpy.context.scene, 'size') == 500, 'typing above max clamps brush size to the slider max')
+    check(painting.brush_value(bpy.context.scene, 'size') == 1000, 'typing above max clamps brush size to the slider max')
     yield from type_number(window, region, 'BRUSH_SIZE', '0')
     check(painting.brush_value(bpy.context.scene, 'size') == 1, 'typing below min clamps brush size to the slider min')
     yield from type_number(window, region, 'BRUSH_SIZE', '123', commit='ESC')
     check(editor._active.state.text is None and painting.brush_value(bpy.context.scene, 'size') == 1,
           'pressing Esc cancels typed entry and preserves the original brush size')
-    drag_slider(window, region, 'BRUSH_SIZE', .2)
+    drag_slider(window, region, 'BRUSH_SIZE', .1)
     yield from settle()
     dragged_size = painting.brush_value(bpy.context.scene, 'size')
     click(window, region, 'BRUSH_SIZE')

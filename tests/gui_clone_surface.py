@@ -237,7 +237,7 @@ def journey():
     hard = next(index for index, item in enumerate(shelf.items('BRUSHES')) if item.label == 'Hard Round')
     click(window, region, f'ITEM.{hard}')
     yield from settle()
-    drag_slider(window, region, 'BRUSH_SIZE', .06)
+    drag_slider(window, region, 'BRUSH_SIZE', .03)
     yield from settle()
     click(window, region, 'CLONE')
     yield from settle()

@@ -156,7 +156,7 @@ def journey():
     yield from settle()
     check(data.brush_stroke == 'DOTS', 'Dots stroke keeps the measured grid dabs separate')
     yield from close_cards(window, middle)
-    drag_slider(window, region, 'BRUSH_SIZE', .1)
+    drag_slider(window, region, 'BRUSH_SIZE', .05)
     yield from settle()
     points = [screen_point(area, region, x, y) for x, y in GRID]
     evidence = {}
@@ -182,6 +182,8 @@ def journey():
     plain = yield from paint_plain(window, region, cube, data, points, coverage)
     yield from card_click(window, region, 'BRUSH_JITTER_FLOW', fx=AMOUNT)
     amount = data.brush_jitter_flow
+    check(brushes.per_point(data, 'PAINT') and not any(brushes.per_point(data, tool) for tool in ('ERASE', 'BLUR', 'SMEAR', 'CLONE')),
+          'Flow jitter alone sends Paint through the per-dab replay but not Erase, Blur, Smear or Clone, which do not use flow')
     yield from close_cards(window, middle)
     varied, predicted, first_uid = yield from paint_jittered(window, area, region, cube, data, points, 1.0, coverage)
     errors = [abs(value - scale) for value, (_, scale, _) in zip(varied, predicted)]
