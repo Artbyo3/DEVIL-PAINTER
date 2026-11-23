@@ -27,7 +27,7 @@ from .painting import TOOLS
 from .polyfill import POLY_MODES
 from .privacy import masked, masked_path
 from .shell import COLUMNS, HEADER, SECTIONS, arrange, flexible
-from .ui_system import ACCENT, MinimalMetrics
+from .ui_system import ACCENT, BG_WELL, MinimalMetrics
 
 MAX_BRUSH_SIZE = 500
 MAX_WORLD_SIZE = 1.0
@@ -459,7 +459,9 @@ def layer_preview(layer):
 def layer_color(layer):
     if layer.kind == 'INSTANCE':
         layer = linked_layer(layer)
-    return slot_display(layer.slots['base_color']) if layer is not None and layer.kind != 'FOLDER' else None
+        if layer is None:
+            return BG_WELL
+    return slot_display(layer.slots['base_color']) if layer.kind != 'FOLDER' else None
 
 
 def effect_preview(effect):
