@@ -55,8 +55,11 @@ MAP_TILE = 56
 INDENT = 14
 CHANNEL_OPACITY_WIDTH = 44
 BLEND_WIDTH = 78
+VALUE_MINIMUM = 36
+HEADER_TITLE = 40
 TOGGLE_WIDTH = 100
 BAR_MENU_WIDTH = 150
+BAR_PINNED_WIDTH = 202
 SHELF_TILE = 72
 SHELF_LABEL = 18
 SHELF_GAP = 8
@@ -113,6 +116,10 @@ class ColumnPanel:
 class Section:
     lines: object
     build: object
+    stacked_lines: object = None
+
+    def count(self, data, stacked):
+        return self.lines(data) + (self.stacked_lines(data) if stacked and self.stacked_lines is not None else 0)
 
 
 class Flow:
@@ -142,10 +149,17 @@ def panel(layout, state, spec, x, top, width, view):
     collapsed = spec.key in state.collapsed
     card = Rect(x, header.y - view, width, header.h + view)
     layout.cards.append((card, ''))
-    layout.add('PANEL_' + spec.key, header, 'HEADER', label=spec.title, active=not collapsed,
+    shown, reserved = [], 0.0
+    for action in reversed(spec.actions):
+        taken = (action[2] + 4) * s
+        if width - 34 * s - reserved - taken < HEADER_TITLE * s:
+            break
+        shown.insert(0, action)
+        reserved += taken
+    layout.add('PANEL_' + spec.key, header, 'HEADER', label=spec.title, active=not collapsed, second=reserved,
                tip=('Collapse' if not collapsed else 'Expand') + '. Drag to move the panel')
     right = header.x + header.w - 6 * s
-    for action_key, label, width_units, tip, icon in spec.actions:
+    for action_key, label, width_units, tip, icon in shown:
         w = width_units * s
         right -= w
         layout.add(action_key, Rect(right, header.y + 4 * s, w, header.h - 8 * s), 'CHIP', label=label, icon=icon, tip=tip)
@@ -223,30 +237,36 @@ def view_label(data):
     return CHANNEL[data.solo].label if data.solo else 'Material'
 
 
-def scrolled_row(layout, state, key, zone, build):
+def scrolled_row(layout, state, key, zone, build, pinned=0.0):
     layout.cards.append((zone, ''))
+    view = Rect(zone.x, zone.y, zone.w - pinned, zone.h)
     start = len(layout.controls)
-    overflow = max(0.0, build(zone) - zone.w)
+    overflow = max(0.0, build(view) - view.w)
     scroll = min(max(0.0, state.scroll.get(key, 0.0)), overflow)
     state.scroll[key] = scroll
     if overflow > 0:
         del layout.controls[start:]
-        layout.scroll_areas[key] = (zone, overflow)
-        build(Rect(zone.x - scroll, zone.y, zone.w + overflow, zone.h))
+        layout.scroll_areas[key] = (view, overflow)
+        build(Rect(view.x - scroll, view.y, view.w + overflow, view.h))
     for control in layout.controls[start:]:
-        control.clip = zone
+        control.clip = view
+
+
+def bar_pins(layout, zone):
+    s = layout.scale
+    h = min(zone.h - 12 * s, 24 * s)
+    y = zone.y + (zone.h - h) / 2
+    right = zone.x + zone.w - 8 * s
+    layout.add('CLOSE', Rect(right - 24 * s, y, 24 * s, h), 'ICON', icon='CLOSE', tip='Close Devil Painter', shortcut='Ctrl Alt P')
+    layout.add('EXPORT', Rect(right - 186 * s, y, 150 * s, h), 'PRIMARY', icon='SAVE', label='Export textures', tip='Choose a folder and write the textures')
 
 
 def workspace_bar(layout, zone, data, obj_name, view_2d, baking):
     s = layout.scale
     h = min(zone.h - 12 * s, 24 * s)
     y = zone.y + (zone.h - h) / 2
-    right = zone.x + zone.w - 8 * s
-    layout.add('CLOSE', Rect(right - 24 * s, y, 24 * s, h), 'ICON', icon='CLOSE', tip='Close Devil Painter', shortcut='Ctrl Alt P')
-    export = Rect(right - 186 * s, y, 150 * s, h)
-    layout.add('EXPORT', export, 'PRIMARY', icon='SAVE', label='Export textures', tip='Choose a folder and write the textures')
     menu_w = BAR_MENU_WIDTH * s
-    view = Rect(export.x - 8 * s - menu_w, y, menu_w, h)
+    view = Rect(zone.x + zone.w - menu_w, y, menu_w, h)
     layout.add('VIEW', view, 'DROPDOWN', label='View', text=view_label(data), tip='Show the full material, one channel, or a mesh map')
     channels = Rect(view.x - 6 * s - menu_w, y, menu_w, h)
     bake = Rect(channels.x - 6 * s - 110 * s, y, 110 * s, h)
@@ -524,7 +544,7 @@ def fill_layers(layout, state, data, flow):
                  active=selected, second=1.0 if uid == data.active_uid and target in {'LAYER', 'INSTANCE'} else 0.0,
                  preview=layer_preview(layer), mask=layer.mask if layer.kind != 'INSTANCE' else None,
                  icon='FOLDER' if is_folder else '', color=layer_color(layer),
-                 caret=state.text.cursor if editing else -1,
+                 caret=state.text.cursor if editing else -1, value=94 * s if len(layer.effects) or layer.kind in {'FOLDER', 'INSTANCE'} else 0.0,
                  tip='Click to select, Ctrl or Shift-click to select several, drag to reorder, double-click to rename, right-click for more')
         drop_marker(flow, state, f'ROW_{uid}', row)
         if layer.kind == 'INSTANCE':
@@ -830,24 +850,39 @@ def sampling_line(flow, prefix, suffix, holder, w):
         flow.add(f'{prefix}{field.upper()}{suffix}', Rect(x + index * (half + 4 * s), y, half, h), 'DROPDOWN', label=label, text=options[getattr(holder, field)], tip=tip)
 
 
+def channels_stacked(w, fill, s):
+    return w < (TOGGLE_WIDTH + 6 + (30 if fill else 0) + VALUE_MINIMUM + 10 + CHANNEL_OPACITY_WIDTH + BLEND_WIDTH) * s
+
+
+def channel_stack_lines(data):
+    return len(set_channels(data))
+
+
 def channels_section(flow, data, layer, w):
     s = flow.layout.scale
     toggle, blend = TOGGLE_WIDTH * s, BLEND_WIDTH * s
     fill = layer.kind == 'FILL'
+    stacked = channels_stacked(w, fill, s)
     for channel in set_channels(data):
         key, slot = channel.key, layer.slots[channel.key]
         x, y, h = flow.field()
-        flow.add('USE.' + key, Rect(x, y, toggle, h), 'TOGGLE', label=channel.label, active=slot.enabled,
-                 tip=f'Let this layer affect {channel.label.lower()}')
-        left = x + toggle + 6 * s
+        top = y + h
+        use = Rect(x, y, w - blend - 4 * s if stacked else toggle, h)
+        flow.add('USE.' + key, use, 'TOGGLE', label=channel.label, active=slot.enabled, tip=f'Let this layer affect {channel.label.lower()}')
+        flow.add('BLEND.' + key, Rect(x + w - blend, y, blend, h), 'DROPDOWN', text=dict(BLEND_MODES)[slot.blend],
+                 tip=f'How {channel.label.lower()} mixes with the layers below')
+        if stacked:
+            x, y, h = flow.field()
+        left = x if stacked else x + toggle + 6 * s
         if fill:
             flow.add('SOURCE.' + key, Rect(left, y, h, h), 'SOURCE', icon='GRID', preview=source_preview(slot),
                      tip='Use a plain value, a texture, or a pattern')
             left += h + 6 * s
         opacity = CHANNEL_OPACITY_WIDTH * s
-        flow.add('CHOPACITY.' + key, Rect(x + w - blend - 4 * s - opacity, y, opacity, h), 'SLIDER', value=slot.opacity,
+        edge = x + w if stacked else x + w - blend - 4 * s
+        flow.add('CHOPACITY.' + key, Rect(edge - opacity, y, opacity, h), 'SLIDER', value=slot.opacity,
                  text=f'{slot.opacity * 100:.0f}%', tip=f'Opacity of {channel.label.lower()} on this layer')
-        value = Rect(left, y, x + w - blend - opacity - 10 * s - left, h)
+        value = Rect(left, y, edge - opacity - 6 * s - left, h)
         if key == 'base_color' and not fill:
             flow.add('PAINTED', value, 'NOTE', label='Brush color')
         elif slot.source == 'IMAGE' and slot.image is not None:
@@ -858,10 +893,8 @@ def channels_section(flow, data, layer, w):
             value_control(flow, channel, slot, Rect(value.x + half + 4 * s, y, half, h), True)
         else:
             value_control(flow, channel, slot, value, False)
-        flow.add('BLEND.' + key, Rect(x + w - blend, y, blend, h), 'DROPDOWN', text=dict(BLEND_MODES)[slot.blend],
-                 tip=f'How {channel.label.lower()} mixes with the layers below')
         if fill and flow.state.drop == ('SLOT', key):
-            flow.add('DROP_SLOT', Rect(x, y, w, h), 'GHOST')
+            flow.add('DROP_SLOT', Rect(x, y, w, top - y), 'GHOST')
         if fill and slot.source == 'PATTERN':
             pattern_line(flow, channel, slot, w)
         elif fill and slot.source == 'IMAGE' and slot.image is not None:
@@ -1023,7 +1056,7 @@ def material_lines(data):
 
 
 PROPERTY_SECTIONS = {'LAYER': (Section(one_line, opacity_section), Section(material_lines, material_section), Section(projection_lines, projection_section),
-                               Section(channel_lines, channels_section), Section(one_line, layer_mask_section),
+                               Section(channel_lines, channels_section, channel_stack_lines), Section(one_line, layer_mask_section),
                                Section(geometry_lines, geometry_section),
                                Section(one_line, effects_add_section)),
                      'FOLDER': (Section(one_line, opacity_section), Section(one_line, folder_blend_section),
@@ -1050,7 +1083,8 @@ def properties_panel(layout, state, data):
     target = selection(data)
     suffix = {'MASK': ' · Mask', 'EFFECT': ' · Effect'}.get(target, '')
     title = 'Properties · ' + active_layer(data).name + suffix
-    lines = sum(section.lines(data) for section in PROPERTY_SECTIONS[target])
+    stacked = channels_stacked(layout.zones.rects['PROPERTIES'].w - 24 * s, active_layer(data).kind == 'FILL', s)
+    lines = sum(section.count(data, stacked) for section in PROPERTY_SECTIONS[target])
     return ColumnPanel('PROPERTIES', title, lines * LINE_HEIGHT * s + 16 * s, fill_properties, 12 * s)
 
 
@@ -1954,7 +1988,8 @@ def sections_layout(layout, state, data, bounds, obj_name, tool, brush):
     builders = dict(SETS=sets_panel, LAYERS=layers_panel, PROPERTIES=properties_panel, HISTORY=history_panel)
     for key, rect in found.rects.items():
         if key == 'BAR':
-            scrolled_row(layout, state, key, rect, lambda area: workspace_bar(layout, area, data, obj_name, state.view_2d, state.baking))
+            scrolled_row(layout, state, key, rect, lambda area: workspace_bar(layout, area, data, obj_name, state.view_2d, state.baking), BAR_PINNED_WIDTH * s)
+            bar_pins(layout, rect)
         elif key == 'STRIP':
             scrolled_row(layout, state, key, rect, lambda area: tool_strip(layout, area, tool, brush, data, state, rect.w))
         elif key == 'DOCK':

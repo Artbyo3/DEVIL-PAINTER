@@ -251,6 +251,27 @@ def journey():
         bomb.unlink(missing_ok=True)
     check(not exploded and not target.exists() and not target.with_name(target.name + '.partial').exists(),
           'a pack that unpacks past the size cap is refused and leaves nothing behind')
+    update = staging / 'update.zip'
+    with zipfile.ZipFile(update, 'w') as archive:
+        archive.writestr('Held_Test/Textures/a.png', b'new-a')
+        archive.writestr('Held_Test/Textures/b.png', b'new-b')
+    held = library.library_root() / 'packs' / 'Held_Test'
+    (held / 'Textures').mkdir(parents=True)
+    (held / 'Textures' / 'a.png').write_bytes(b'old-a')
+    (held / 'Textures' / 'b.png').write_bytes(b'old-b')
+    with open(held / 'Textures' / 'b.png', 'rb'):
+        try:
+            packs.unpack(update, held)
+        except OSError:
+            pass
+        whole = {(held / 'Textures' / 'a.png').read_bytes(), (held / 'Textures' / 'b.png').read_bytes()} in ({b'old-a', b'old-b'}, {b'new-a', b'new-b'})
+        clean = not held.with_name('Held_Test.partial').exists()
+    check(whole and clean, 'reinstalling a pack while one of its files is in use replaces it completely or leaves it untouched')
+    packs.unpack(update, held)
+    check((held / 'Textures' / 'a.png').read_bytes() == b'new-a' and not held.with_name('Held_Test.old').exists(),
+          'reinstalling a pack that nothing holds replaces it completely and leaves no leftover folder')
+    shutil.rmtree(held)
+    update.unlink(missing_ok=True)
     listed = packs._state['catalog']
     twin = dict(entry, name=TEXTURE_PACK.replace(' ', '-'))
     packs._state['catalog'] = listed + [twin]

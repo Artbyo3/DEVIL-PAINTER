@@ -14,6 +14,7 @@ from .ui_system import (ACCENT, ACCENT_BG, ACCENT_BORDER, ACCENT_HOVER, BG_ELEVA
 
 TOAST_SECONDS = 3
 COMPACT_SLIDER = 104
+LABEL_MINIMUM = 28
 CHECKER = ((0.32, 0.32, 0.32, 1.0), (0.22, 0.22, 0.22, 1.0))
 
 
@@ -137,22 +138,35 @@ class Renderer:
         sh.uniform_float("color", color)
         batch.draw(sh)
 
+    def fitted(self, label, size, max_width):
+        blf.size(0, size * self.s)
+        original = label
+        while label and blf.dimensions(0, label)[0] > max_width:
+            original = original[:-1]
+            label = original + "..." if original else ""
+        return label
+
+    def text_width(self, label, size):
+        blf.size(0, size * self.s)
+        return blf.dimensions(0, label)[0]
+
     def text(self, x, y, label, size=11, color=TEXT_PRIMARY, center=False, max_width=None):
         blf.size(0, size * self.s)
         if max_width is not None:
-            original = label
-            while label and blf.dimensions(0, label)[0] > max_width:
-                original = original[:-1]
-                label = original + "..." if original else ""
+            label = self.fitted(label, size, max_width)
         if center:
             x -= blf.dimensions(0, label)[0] / 2
         blf.color(0, *color)
         blf.position(0, round(x), round(y), 0)
         blf.draw(0, label)
 
-    def text_right(self, right, y, label, size, color):
-        blf.size(0, size * self.s)
-        self.text(right - blf.dimensions(0, label)[0], y, label, size, color)
+    def text_right(self, right, y, label, size, color, max_width=None):
+        if max_width is not None:
+            label = self.fitted(label, size, max_width)
+        self.text(right - self.text_width(label, size), y, label, size, color)
+
+    def label_room(self, rect, value, size, right_reserve):
+        return rect.w - 8 * self.s - right_reserve - self.text_width(value, size) - 6 * self.s
 
     def draw_icon(self, name, cx, cy, size, color):
         spans = icon_spans(name)
@@ -229,6 +243,7 @@ class Renderer:
         gpu.state.depth_test_set('NONE')
         split = layout.popover_start if layout.popover_start >= 0 else len(layout.controls)
         try:
+            self.toast(ed, metrics)
             for rect, title in layout.cards:
                 self.round_rect(rect, SURFACE_FLOATING, radius=metrics.menu_back)
                 self.round_rect_outline(rect, SURFACE_OUTLINE, radius=metrics.menu_back)
@@ -244,7 +259,6 @@ class Renderer:
                 self.round_rect_outline(layout.popover, SURFACE_OUTLINE, radius=metrics.menu_back)
                 inside = layout.popover.contains(*ed.pointer)
                 hovered = self.controls(ed, layout.controls[split:], metrics) or (None if inside else hovered)
-            self.toast(ed, metrics)
             if hovered is not None:
                 rect = hovered.rect
                 if hovered.kind == 'TOOL':
@@ -306,7 +320,7 @@ class Renderer:
         self.round_rect(rect, ACCENT_HOVER if hover else ACCENT, radius=metrics.regular)
         self.round_rect_outline(rect, ACCENT_BORDER, radius=metrics.regular)
         self.draw_icon(control.icon, rect.x + 18 * s, rect.y + rect.h / 2, 16, TEXT_ON_ACCENT)
-        self.text(rect.x + 34 * s, rect.y + (rect.h - 11 * s) / 2, control.label, 11, TEXT_ON_ACCENT)
+        self.text(rect.x + 34 * s, rect.y + (rect.h - 11 * s) / 2, control.label, 11, TEXT_ON_ACCENT, max_width=rect.w - 42 * s)
 
     def slider(self, control, hover, metrics):
         rect, s = control.rect, self.s
@@ -330,9 +344,10 @@ class Renderer:
             self.round_rect(Rect(rect.x, rect.y, filled, rect.h), ACCENT_BG, radius=metrics.regular)
         self.round_rect_outline(rect, ACCENT_BORDER if hover else BORDER, radius=metrics.regular)
         baseline = rect.y + (rect.h - 10 * s) / 2
-        if control.label and rect.w > COMPACT_SLIDER * s:
-            self.text(rect.x + 8 * s, baseline, control.label, 10, TEXT_SECONDARY)
-        self.text_right(rect.x + rect.w - 8 * s, baseline, control.text, 10, TEXT_PRIMARY)
+        room = self.label_room(rect, control.text, 10, 8 * s)
+        if control.label and room >= LABEL_MINIMUM * s:
+            self.text(rect.x + 8 * s, baseline, control.label, 10, TEXT_SECONDARY, max_width=room)
+        self.text_right(rect.x + rect.w - 8 * s, baseline, control.text, 10, TEXT_PRIMARY, max_width=rect.w - 16 * s)
 
     def swatch(self, control, hover, metrics):
         rect = control.rect
@@ -344,7 +359,7 @@ class Renderer:
         self.round_rect(rect, BG_ELEVATED if hover else BG_WELL, radius=metrics.regular)
         if control.active:
             self.draw_icon('CHECK', rect.x + 12 * s, rect.y + rect.h / 2, 12, ACCENT)
-        self.text(rect.x + 24 * s, rect.y + (rect.h - 10 * s) / 2, control.label, 10, TEXT_PRIMARY if control.active else TEXT_MUTED)
+        self.text(rect.x + 24 * s, rect.y + (rect.h - 10 * s) / 2, control.label, 10, TEXT_PRIMARY if control.active else TEXT_MUTED, max_width=rect.w - 28 * s)
 
     def checker(self, rect):
         cells = 4
@@ -395,7 +410,7 @@ class Renderer:
             self.text(x, baseline, control.label, 11, TEXT_PRIMARY)
             self.caret(x, baseline, control.label, control.caret, 11)
         else:
-            self.text(x, baseline, control.label, 11, TEXT_PRIMARY, max_width=rect.x + rect.w - x - 44 * s)
+            self.text(x, baseline, control.label, 11, TEXT_PRIMARY, max_width=rect.x + rect.w - x - max(44 * s, control.value))
         self.text_right(rect.x + rect.w - 8 * s, baseline + s, control.text, 9, TEXT_MUTED)
 
     def thumb(self, control, hover, metrics):
@@ -452,14 +467,16 @@ class Renderer:
         if hover:
             self.round_rect(rect, BG_ELEVATED, radius=metrics.menu_back)
         self.draw_icon('DOWN' if control.active else 'DISCLOSURE', rect.x + 14 * s, rect.y + rect.h / 2, 10, TEXT_SECONDARY)
-        self.text(rect.x + 26 * s, rect.y + (rect.h - 12 * s) / 2, control.label, 12, TEXT_PRIMARY, max_width=rect.w - 160 * s)
+        self.text(rect.x + 26 * s, rect.y + (rect.h - 12 * s) / 2, control.label, 12, TEXT_PRIMARY, max_width=rect.w - 34 * s - control.second)
 
     def dropdown(self, control, hover, metrics):
         rect, s = control.rect, self.s
         self.round_rect(rect, BG_ELEVATED if hover else BG_WELL, radius=metrics.regular)
         baseline = rect.y + (rect.h - 10 * s) / 2
-        self.text(rect.x + 8 * s, baseline, control.label, 10, TEXT_SECONDARY)
-        self.text_right(rect.x + rect.w - 24 * s, baseline, control.text, 10, TEXT_PRIMARY)
+        room = self.label_room(rect, control.text, 10, 24 * s)
+        if control.label and room >= LABEL_MINIMUM * s:
+            self.text(rect.x + 8 * s, baseline, control.label, 10, TEXT_SECONDARY, max_width=room)
+        self.text_right(rect.x + rect.w - 24 * s, baseline, control.text, 10, TEXT_PRIMARY, max_width=rect.w - 32 * s)
         self.draw_icon('DOWN', rect.x + rect.w - 12 * s, rect.y + rect.h / 2, 10, TEXT_SECONDARY)
 
     def field(self, control, hover, metrics):

@@ -12,9 +12,15 @@ from .masks import GENERATOR_FIELDS
 
 IMAGE_SUFFIXES = {'.png', '.jpg', '.jpeg', '.tga', '.tif', '.tiff', '.bmp', '.webp'}
 MAX_FILES = 600
-CHANNEL_WORDS = {'base_color': {'basecolor', 'albedo', 'diffuse', 'diff', 'color', 'col'}, 'roughness': {'roughness', 'rough'},
+CHANNEL_WORDS = {'base_color': {'basecolor', 'albedo', 'color', 'col'}, 'roughness': {'roughness', 'rough'},
                  'metallic': {'metallic', 'metalness', 'metal'}, 'normal': {'normal', 'normalgl', 'nor', 'nrm'},
-                 'height': {'height', 'displacement', 'disp', 'bump'}, 'emission': {'emission', 'emissive'}, 'opacity': {'opacity', 'alpha'}}
+                 'height': {'height', 'bump'}, 'emission': {'emission', 'emissive'}, 'opacity': {'opacity', 'alpha'},
+                 'diffuse': {'diffuse', 'diff'}, 'specular': {'specular', 'spec'}, 'glossiness': {'glossiness', 'gloss', 'glossy'},
+                 'displacement': {'displacement', 'disp'}, 'anisotropy_level': {'anisotropy', 'aniso', 'anisotropylevel', 'anisolevel'},
+                 'anisotropy_angle': {'anisotropyangle', 'anisoangle'}, 'transmission': {'transmission', 'transmissive'},
+                 'scattering': {'scattering', 'sss', 'subsurface'}, 'sheen': {'sheen'}, 'coat': {'coat', 'clearcoat'}, 'ior': {'ior'}}
+FALLBACK_CHANNELS = (('diffuse', 'base_color'), ('displacement', 'height'))
+JOINED_WORDS = re.compile(r'(anisotropy|aniso)[\s_\-.]+(level|angle)')
 DIRECTX_WORDS = {'dx', 'normaldx'}
 SETTINGS_FILE = 'library.json'
 DAMAGED_SUFFIX = '.damaged'
@@ -151,7 +157,7 @@ def set_texture_folder(folder):
 
 
 def tokens(stem):
-    return [token for token in re.split(r'[\s_\-.]+', stem.lower()) if token]
+    return [token for token in re.split(r'[\s_\-.]+', JOINED_WORDS.sub(lambda found: found.group(1) + found.group(2), stem.lower())) if token]
 
 
 def channel_of(words):
@@ -176,6 +182,9 @@ def texture_sets(files):
             group[key] = path
     result = []
     for (_, name), maps in sorted(sets.items()):
+        for source, target in FALLBACK_CHANNELS:
+            if source in maps and target not in maps:
+                maps[target] = maps[source]
         if 'base_color' in maps and len(maps) > 1:
             result.append(material(name.title() or maps['base_color'].stem, **{key: texture(path) for key, path in maps.items()}))
     return result
