@@ -50,6 +50,7 @@ class Layout:
     controls: list = field(default_factory=list)
     cards: list = field(default_factory=list)
     tool_groups: list = field(default_factory=list)
+    dock: Optional[Rect] = None
     popover: Optional[Rect] = None
     popover_start: int = -1
     scroll_areas: dict = field(default_factory=dict)
@@ -64,7 +65,7 @@ class Layout:
 
     def covers(self, x, y):
         return ((self.popover is not None and self.popover.contains(x, y)) or any(rect.contains(x, y) for rect, _ in self.cards)
-                or any(rect.contains(x, y) for rect in self.tool_groups))
+                or any(rect.contains(x, y) for rect in self.tool_groups) or (self.dock is not None and self.dock.contains(x, y)))
 
     def scroll_area(self, x, y):
         return next((key for key, (rect, _) in self.scroll_areas.items() if rect.contains(x, y)), None)
