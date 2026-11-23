@@ -2415,5 +2415,6 @@
  "gui_clone_surface.py": [],
  "gui_missing_material.py": [],
  "gui_history.py": [],
- "gui_displacement.py": []
+ "gui_displacement.py": [],
+ "gui_env_rotate.py": []
 }
