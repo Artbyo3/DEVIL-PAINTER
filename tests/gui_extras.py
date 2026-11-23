@@ -13,7 +13,7 @@ import devil_painter
 from devil_painter import autosave, bridge, editor, library
 from devil_painter.document import active_layer, find_layer
 from tools.workspace import prepare_scratch
-from tests.gui_harness import bake_landed, check, click, control, finish, has, keys, move, nodes, pixels, press, reveal, run_journey, set_hex, settle, spot, type_text, until, viewport
+from tests.gui_harness import bake_landed, check, click, control, drag_slider, finish, has, keys, move, nodes, pixels, press, reveal, run_journey, set_hex, settle, spot, type_text, until, viewport
 
 
 def spot_of(region, key, fx=.5, fy=.5):
@@ -62,7 +62,10 @@ def card(window, region, opener, key, kind):
 
 def card_click(window, region, opener, key, kind, fx=.5):
     yield from card(window, region, opener, key, kind)
-    click(window, region, key, fx=fx)
+    if control(key).kind == 'SLIDER':
+        drag_slider(window, region, key, fx)
+    else:
+        click(window, region, key, fx=fx)
     yield from settle()
 
 
@@ -114,7 +117,7 @@ def journey():
     resolution = data.resolution
     right, front, top = (face_of(cube, normal) for normal in ((1, 0, 0), (0, -1, 0), (0, 0, 1)))
     spot = {face: face_center_pixel(cube, face, resolution) for face in (right, front, top)}
-    click(window, region, 'BRUSH_SIZE', fx=.05)
+    drag_slider(window, region, 'BRUSH_SIZE', .05)
     yield from settle()
 
     yield from card_click(window, region, 'PROJECT', 'TRANSP.DITHERED', 'PROJECT')
@@ -287,7 +290,7 @@ def journey():
     check(any(abs(value) > .02 for value in wood.proj_warp) and sum(1 for node in nodes(data) if node.type == 'MATH' and node.operation == 'MULTIPLY') > 20,
           f'dragging a corner warps the projection {tuple(round(v, 3) for v in wood.proj_warp)} {sum(1 for node in nodes(data) if node.type == "MATH" and node.operation == "MULTIPLY")} {editor._active.state.drag} {editor._active.message}')
     yield from reveal(window, region, 'PROJ_BEND')
-    click(window, region, 'PROJ_BEND', fx=.6)
+    drag_slider(window, region, 'PROJ_BEND', .6)
     yield from settle()
     check(abs(find_layer(data, wood_uid).proj_bend - .6) < .05, 'the bend slider wraps the projection around a curve')
     yield from reveal(window, region, 'PROJ_SNAP')
@@ -319,7 +322,7 @@ def journey():
         if control(key).active != (key.removeprefix('BAKEMAP.') in {'normal', 'height'}):
             click(window, region, key)
             yield from settle()
-    click(window, region, 'BAKE_SAMPLES', fx=.02)
+    drag_slider(window, region, 'BAKE_SAMPLES', .02)
     yield from settle()
     click(window, region, 'BAKE_RUN')
     yield from settle()

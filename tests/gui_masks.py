@@ -16,7 +16,7 @@ from devil_painter.effects import copy_effect
 from devil_painter.procedural import PATTERN
 from devil_painter.masks import BREAKUPS, GENERATOR_VALUES, LAYER_GENERATOR_FIELDS
 from tools.workspace import prepare_scratch
-from tests.gui_harness import bake_landed, check, click, context_menu, control, finish, has, keys, move, nodes, pixels, png, press, reveal, run_journey, set_hex, settle, slide, spot, type_text, until, viewport
+from tests.gui_harness import bake_landed, check, click, context_menu, control, drag_slider, finish, has, keys, move, nodes, pixels, png, press, reveal, run_journey, set_hex, settle, slide, spot, type_text, until, viewport
 
 
 def menu(window, region, opener, item):
@@ -170,8 +170,7 @@ def journey():
     click(window, region, 'BAKE')
     yield from settle()
     yield from toggle_maps(window, region, {'ao', 'curvature', 'thickness', 'position', 'world_normal', 'id', 'uv_border'})
-    rect = control('BAKE_SAMPLES').rect
-    press(window, 'LEFTMOUSE', region.x + rect.x + rect.w * .03, region.y + rect.y + rect.h / 2)
+    drag_slider(window, region, 'BAKE_SAMPLES', .03)
     yield from settle()
     click(window, region, 'BAKE_RUN')
     yield from settle()

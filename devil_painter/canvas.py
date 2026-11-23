@@ -36,6 +36,7 @@ class Control:
     clip: Optional[Rect] = None
     caret: int = -1
     points: tuple = ()
+    selected: bool = False
 
     def hit(self, x, y):
         return self.rect.contains(x, y) and (self.clip is None or self.clip.contains(x, y))

@@ -14,7 +14,7 @@ import devil_painter
 from devil_painter import editor, library, shelf
 from devil_painter.document import active_layer, find_layer
 from tools.workspace import prepare_scratch
-from tests.gui_harness import check, click, control, finish, has, move, press, reveal, run_journey, settle, spot, type_text, until, viewport
+from tests.gui_harness import check, click, control, drag_slider, finish, has, press, reveal, run_journey, settle, spot, type_text, until, viewport
 
 TEXELS = 16
 SIDE = 1024
@@ -207,11 +207,7 @@ def journey():
 
     yield from choose('filtering', 'Closest', FILTERS)
     yield from reveal(window, region, 'UV_OFFSET_X')
-    start = spot(region, 'UV_OFFSET_X', .5)
-    move(window, *start)
-    window.event_simulate(type='LEFTMOUSE', value='PRESS', x=int(start[0]), y=int(start[1]))
-    yield from settle()
-    window.event_simulate(type='LEFTMOUSE', value='RELEASE', x=int(start[0]), y=int(start[1]))
+    drag_slider(window, region, 'UV_OFFSET_X', .5)
     yield from settle()
     offset = float(find_layer(data, layer_uid).uv_offset[0])
     check(.3 < offset < .7, f'the Offset X slider moves the texture across the UV border ({offset:.4f})')

@@ -15,7 +15,7 @@ import devil_painter
 from devil_painter import editor, library, painting, shelf
 from devil_painter.document import find_layer
 from tools.workspace import prepare_scratch
-from tests.gui_harness import check, click, close_cards, finish, has, move, new_layer, press, run_journey, settle, spot, top_view, type_text, viewport
+from tests.gui_harness import check, click, close_cards, control, drag_slider, finish, has, move, new_layer, press, run_journey, settle, spot, top_view, type_text, viewport
 
 RESOLUTION = 1024
 TEXTURE_SIZE = 256
@@ -44,7 +44,10 @@ def card_click(window, region, opener, key, popover, fx=.5):
         click(window, region, opener)
         yield from settle()
     check(has(key), f'{opener} shows {key}')
-    click(window, region, key, fx=fx)
+    if control(key).kind == 'SLIDER':
+        drag_slider(window, region, key, fx)
+    else:
+        click(window, region, key, fx=fx)
     yield from settle()
 
 
@@ -229,7 +232,7 @@ def journey():
     hard = next(index for index, item in enumerate(shelf.items('BRUSHES')) if item.label == 'Hard Round')
     click(window, region, f'ITEM.{hard}')
     yield from settle()
-    click(window, region, 'BRUSH_SIZE', fx=.06)
+    drag_slider(window, region, 'BRUSH_SIZE', .06)
     yield from settle()
     click(window, region, 'SHELF_TAB.MATERIALS')
     yield from settle()

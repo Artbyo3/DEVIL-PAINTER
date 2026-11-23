@@ -11,7 +11,7 @@ sys.path.insert(0, str(ROOT))
 import devil_painter
 from devil_painter import editor, library
 from tools.workspace import prepare_scratch
-from tests.gui_harness import POLL, check, click, control, finish, keys, press, run_journey, settle, spot, type_text, until, viewport
+from tests.gui_harness import POLL, check, click, control, drag_slider, finish, keys, press, run_journey, settle, spot, type_text, until, viewport
 
 STEPS = 8
 
@@ -140,7 +140,7 @@ def journey():
 
     click(window, region, 'VIEWPORT')
     yield from settle()
-    click(window, region, 'ENV_ROTATION', fx=.5)
+    drag_slider(window, region, 'ENV_ROTATION', .5)
     yield from settle()
     check(abs(shading.studiolight_rotate_z) < .05, 'dragging the Rotation slider still works after viewport drag')
     press(window, 'ESC', *middle)
@@ -159,7 +159,7 @@ def journey():
     yield from settle()
     click(window, region, 'STENCIL_CARD')
     yield from settle()
-    click(window, region, 'STENCIL_SCALE', fx=.05)
+    drag_slider(window, region, 'STENCIL_SCALE', .05)
     yield from settle()
     press(window, 'ESC', *middle)
     yield from settle()

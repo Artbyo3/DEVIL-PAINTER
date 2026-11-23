@@ -13,7 +13,7 @@ import devil_painter
 from devil_painter import editor, tiles
 from devil_painter.document import active_layer, find_layer
 from tools.workspace import prepare_scratch
-from tests.gui_harness import check, click, control, finish, has, move, pixels, png, press, run_journey, set_hex, settle, spot, type_text, viewport
+from tests.gui_harness import check, click, control, drag_slider, finish, has, move, pixels, png, press, run_journey, set_hex, settle, spot, type_text, viewport
 
 
 def build_plates():
@@ -93,7 +93,7 @@ def journey():
     check(has('CROSS_TILES') and control('CROSS_TILES').active and project.cross_tiles, 'strokes cross UV tiles by default')
     press(window, 'ESC', *middle)
     yield from settle()
-    click(window, region, 'BRUSH_SIZE', fx=.04)
+    drag_slider(window, region, 'BRUSH_SIZE', .04)
     yield from settle()
     yield from set_hex(window, region, 'BRUSH_COLOR', 'FF0000')
     roughness = lambda number: tile_image(data, layer().slots['roughness'].image, number)

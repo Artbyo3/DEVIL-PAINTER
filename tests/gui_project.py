@@ -15,7 +15,7 @@ from devil_painter import bakejob, editor, exporting, library, projects, tiles
 from devil_painter.actions import owned_images
 from devil_painter.document import active_layer, texture_set
 from tools.workspace import prepare_scratch
-from tests.gui_harness import bake_landed, check, click, control, finish, has, move, pixels, press, run_journey, settle, spot, type_text, viewport
+from tests.gui_harness import bake_landed, check, click, control, drag_slider, finish, has, move, pixels, press, run_journey, settle, spot, type_text, viewport
 
 
 def field(window, region, key, text):
@@ -145,8 +145,7 @@ def journey():
     check(tiles.variant(body, body_paint.image, 1002) is not body_paint.image and len(trim_set.layers) == 1,
           'paint layers hold one image per UDIM tile')
 
-    rect = control('BRUSHVAL.roughness').rect
-    press(window, 'LEFTMOUSE', region.x + rect.x + rect.w * .9, region.y + rect.y + rect.h / 2)
+    drag_slider(window, region, 'BRUSHVAL.roughness', .9)
     yield from settle()
     stroke_at(window, region, screen_point(region, area, cube, body_high))
     yield from settle()
@@ -226,8 +225,7 @@ def journey():
     for key in ('curvature', 'thickness', 'position', 'world_normal', 'id'):
         click(window, region, 'BAKEMAP.' + key)
         yield from settle()
-    rect = control('BAKE_SAMPLES').rect
-    press(window, 'LEFTMOUSE', region.x + rect.x + rect.w * .03, region.y + rect.y + rect.h / 2)
+    drag_slider(window, region, 'BAKE_SAMPLES', .03)
     yield from settle()
     click(window, region, 'BAKE_RUN')
     yield from settle()

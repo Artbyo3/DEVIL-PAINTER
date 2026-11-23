@@ -16,7 +16,7 @@ import devil_painter
 from devil_painter import brushes, editor, library
 from devil_painter.document import find_layer
 from tools.workspace import prepare_scratch
-from tests.gui_harness import check, click, close_cards, control, finish, has, native_dab, new_layer, press, run_journey, settle, shelf_index, spot, top_view, type_text, viewport
+from tests.gui_harness import check, click, close_cards, control, drag_slider, finish, has, native_dab, new_layer, press, run_journey, settle, shelf_index, spot, top_view, type_text, viewport
 
 GRID = tuple((x, y) for y in (-.5, 0.0, .5) for x in (-.6, -.2, .2, .6))
 LOW = .5
@@ -30,7 +30,10 @@ def card_click(window, region, key, fx=.5):
         click(window, region, 'BRUSH_CARD')
         yield from settle()
     check(has(key), f'the Brush card shows {key}')
-    click(window, region, key, fx=fx)
+    if control(key).kind == 'SLIDER':
+        drag_slider(window, region, key, fx)
+    else:
+        click(window, region, key, fx=fx)
     yield from settle()
 
 
@@ -153,7 +156,7 @@ def journey():
     yield from settle()
     check(data.brush_stroke == 'DOTS', 'Dots stroke keeps the measured grid dabs separate')
     yield from close_cards(window, middle)
-    click(window, region, 'BRUSH_SIZE', fx=.1)
+    drag_slider(window, region, 'BRUSH_SIZE', .1)
     yield from settle()
     points = [screen_point(area, region, x, y) for x, y in GRID]
     evidence = {}

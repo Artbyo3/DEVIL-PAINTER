@@ -265,9 +265,23 @@ def set_hex(window, region, opener, text):
     yield from settle()
 
 
+def drag_slider(window, region, key, fx):
+    rect = control(key).rect
+    end_x = int(region.x + rect.x + rect.w * fx)
+    y = int(region.y + rect.y + rect.h / 2)
+    left = int(region.x + rect.x) + 1
+    right = int(region.x + rect.x + rect.w) - 1
+    step = max(6, round(editor._active.workspace.scale * 10))
+    start_x = max(left, min(right, end_x - step if end_x >= (left + right) / 2 else end_x + step))
+    move(window, start_x, y)
+    window.event_simulate(type='LEFTMOUSE', value='PRESS', x=start_x, y=y)
+    move(window, end_x, y)
+    window.event_simulate(type='LEFTMOUSE', value='RELEASE', x=end_x, y=y)
+
+
 def slide(window, region, key, fx):
     yield from reveal(window, region, key)
-    click(window, region, key, fx=fx)
+    drag_slider(window, region, key, fx)
     yield from settle()
 
 

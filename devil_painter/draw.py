@@ -306,6 +306,20 @@ class Renderer:
 
     def slider(self, control, hover, metrics):
         rect, s = control.rect, self.s
+        if control.caret >= 0:
+            self.round_rect(rect, BG_WELL, radius=metrics.text)
+            self.round_rect_outline(rect, ACCENT_BORDER, radius=metrics.text)
+            baseline = rect.y + (rect.h - 10 * s) / 2
+            pad = 4 * s if rect.w <= COMPACT_SLIDER * s else 8 * s
+            tx = rect.x + pad
+            if control.selected and control.text:
+                blf.size(0, 10 * s)
+                width = min(rect.w - 2 * pad + 2 * s, blf.dimensions(0, control.text)[0] + 2 * s)
+                self.rect(Rect(tx - 1 * s, baseline - 2 * s, max(0.0, width), 14 * s), ACCENT_BG)
+            self.text(tx, baseline, control.text, 10, TEXT_PRIMARY)
+            if not control.selected:
+                self.caret(tx, baseline, control.text, control.caret, 10)
+            return
         self.round_rect(rect, BG_WELL, radius=metrics.regular)
         filled = max(0.0, min(1.0, control.value)) * rect.w
         if filled >= 1:
