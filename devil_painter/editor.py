@@ -2772,7 +2772,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.message = actions.reset_material(context, obj, data)
         elif key in {'ADD_PAINT', 'ADD_FILL', 'ADD_FOLDER'}:
             self.message = actions.add_layer(context, obj, data, key.removeprefix('ADD_'))
-        elif key == 'DELETE':
+        elif key in {'DELETE', 'DELETE_LAYER'}:
             self.message = actions.delete_layer(context, obj, data)
         elif key in MOVES:
             self.message = actions.move_layer(context, obj, data, MOVES[key])

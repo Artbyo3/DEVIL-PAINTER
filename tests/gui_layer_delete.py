@@ -140,6 +140,25 @@ def journey():
     first = body.layers[0].uid
     check(len(body.layers) == 1 and body.active_uid == first, 'a new texture set starts with one default layer')
 
+    folder_btn, delete_btn = control('ADD_FOLDER'), control('DELETE_LAYER')
+    check(folder_btn.kind == 'ICON' and folder_btn.icon == 'FOLDER' and folder_btn.tip == 'New folder above the selected layer',
+          'the Layers header folder button is an icon-only button with its existing tooltip')
+    check(delete_btn.kind == 'ICON' and delete_btn.icon == 'DELETE' and delete_btn.tip == 'Delete Layer'
+          and control('ADD_PAINT').rect.x < control('ADD_FILL').rect.x < folder_btn.rect.x < delete_btn.rect.x,
+          'the Layers header delete button sits immediately to the right of the folder icon button')
+    click(window, region, 'DELETE_LAYER')
+    yield from settle()
+    check(uids(body) == [first] and editor._active.message == LAST_LAYER,
+          'clicking the header delete button on the only layer is refused with the same message')
+    click(window, region, 'ADD_FOLDER')
+    yield from settle()
+    header_folder = body.active_uid
+    check(len(body.layers) == 2 and active_layer(body).kind == 'FOLDER', 'clicking the header folder icon button adds a folder')
+    click(window, region, 'DELETE_LAYER')
+    yield from settle()
+    check(uids(body) == [first] and body.active_uid == first and header_folder not in uids(body),
+          'clicking the header delete icon button deletes the active layer')
+
     yield from layer_menu(window, region, first, 'DELETE')
     check(uids(body) == [first] and body.active_uid == first and editor._active.message == LAST_LAYER,
           f'deleting the default layer first is refused with a plain message: {editor._active.message!r}')

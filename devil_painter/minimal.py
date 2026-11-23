@@ -145,10 +145,10 @@ def panel(layout, state, spec, x, top, width, view):
     layout.add('PANEL_' + spec.key, header, 'HEADER', label=spec.title, active=not collapsed,
                tip=('Collapse' if not collapsed else 'Expand') + '. Drag to move the panel')
     right = header.x + header.w - 6 * s
-    for action_key, label, width_units, tip in spec.actions:
+    for action_key, label, width_units, tip, icon in spec.actions:
         w = width_units * s
         right -= w
-        layout.add(action_key, Rect(right, header.y + 4 * s, w, header.h - 8 * s), 'CHIP', label=label, tip=tip)
+        layout.add(action_key, Rect(right, header.y + 4 * s, w, header.h - 8 * s), 'ICON' if icon else 'CHIP', label=label, icon=icon, tip=tip)
         right -= 4 * s
     viewport = Rect(x, card.y, width, view)
     overflow = max(0.0, spec.body - view)
@@ -550,9 +550,10 @@ def fill_layers(layout, state, data, flow):
 
 def layers_panel(layout, state, data):
     s = layout.scale
-    actions = (('ADD_FOLDER', '+ Folder', 66, 'New folder above the selected layer'),
-               ('ADD_FILL', '+ Fill', 52, 'New fill layer above the selected one'),
-               ('ADD_PAINT', '+ Paint', 64, 'New paint layer above the selected one'))
+    actions = (('DELETE_LAYER', '', HEADER - 8, 'Delete Layer', 'DELETE'),
+               ('ADD_FOLDER', '', HEADER - 8, 'New folder above the selected layer', 'FOLDER'),
+               ('ADD_FILL', '+ Fill', 52, 'New fill layer above the selected one', ''),
+               ('ADD_PAINT', '+ Paint', 64, 'New paint layer above the selected one', ''))
     return ColumnPanel('LAYERS', 'Layers', len(layer_rows(data, state.collapsed)) * ROW_HEIGHT * s + 8 * s, fill_layers, 4 * s, actions)
 
 
