@@ -17,9 +17,15 @@ def texture_set_of(obj, set_index=None):
     project = obj.devil_painter
     if not project.sets:
         raise ValueError(f'{obj.name} has no Devil Painter project. Call start() first.')
-    index = project.active_set if set_index is None else set_index
-    project.active_set = index
-    return project.sets[index]
+    return project.sets[project.active_set if set_index is None else set_index]
+
+
+def edited_set(obj, set_index=None):
+    data = texture_set_of(obj, set_index)
+    if set_index is not None:
+        project = obj.devil_painter
+        actions.activate(bpy.context, obj, project, set_index, project.active_tile)
+    return data
 
 
 def start(obj, resolution=2048, template='PBR Metal Rough', udim=False, normal_format='OPENGL', normal_space='TANGENT', unwrap='SMART'):
@@ -46,25 +52,28 @@ def layers(obj, set_index=None):
 
 
 def add_fill(obj, definition, set_index=None):
-    data = texture_set_of(obj, set_index)
+    data = edited_set(obj, set_index)
     actions.add_material(bpy.context, obj, data, content(definition))
     return data.active_uid
 
 
 def add_paint(obj, set_index=None):
-    data = texture_set_of(obj, set_index)
+    data = edited_set(obj, set_index)
     actions.add_layer(bpy.context, obj, data, 'PAINT')
     return data.active_uid
 
 
 def add_smart_material(obj, definition, set_index=None):
-    data = texture_set_of(obj, set_index)
+    data = edited_set(obj, set_index)
     actions.add_smart_material(bpy.context, obj, data, content(definition))
     return data.active_uid
 
 
 def chosen(obj, uid, set_index):
-    data = texture_set_of(obj, set_index)
+    return picked(edited_set(obj, set_index), uid)
+
+
+def picked(data, uid):
     layer = find_layer(data, uid)
     if layer is None:
         raise KeyError(f'No layer {uid} in {data.name}.')
@@ -91,7 +100,7 @@ def remove_layer(obj, uid, set_index=None):
 
 
 def bake(obj, maps=('ao', 'curvature', 'position', 'world_normal'), set_index=None):
-    data = texture_set_of(obj, set_index)
+    data = edited_set(obj, set_index)
     return actions.bake_mesh_maps(bpy.context, obj, data, list(maps))
 
 
@@ -112,7 +121,7 @@ def smart_materials():
 
 
 def material_of(obj, uid, set_index=None):
-    _, layer = chosen(obj, uid, set_index)
+    _, layer = picked(texture_set_of(obj, set_index), uid)
     return json.dumps(library.capture(layer))
 
 
