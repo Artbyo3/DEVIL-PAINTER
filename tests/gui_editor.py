@@ -15,7 +15,7 @@ from devil_painter.compositing import SIGNATURE_KEY, socket
 from devil_painter.document import active_effect, texture_set
 from devil_painter.ui_system import SURFACE_FLOATING
 from tools.workspace import prepare_scratch
-from tests.gui_harness import bake_landed, check, click, control, drag_slider, finish, has, move, press, run_journey, settle, shelf_index, shown, spot, type_text, until, viewport
+from tests.gui_harness import bake_landed, check, click, control, drag_slider, finish, has, move, press, reveal, run_journey, settle, shelf_index, shown, spot, type_text, until, viewport
 
 HIDDEN = ('show_region_header', 'show_region_tool_header', 'show_region_toolbar', 'show_gizmo_navigate')
 
@@ -1109,6 +1109,7 @@ def journey():
     check(data.channels['user1'].enabled and not any('user1' in link.from_node.name for link in shader.inputs['Base Color'].links),
           'user channels stay out of the shader')
 
+    yield from reveal(window, region, 'CLOSE', 'BAR')
     click(window, region, 'CLOSE')
     yield from settle()
     check(editor._active is None, 'the close button closes Devil Painter')
