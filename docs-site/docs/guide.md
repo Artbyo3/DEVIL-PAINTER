@@ -43,7 +43,7 @@ Select **High-poly** and **Cage** objects manually or enable **Match high-poly a
 
 ## Shelf & Custom Libraries
 
-- **Materials & Smart:** Click or drag built-in presets onto layers, right-click a material to **Paint with this material**, or save your own fill layers and folder subtrees from the layer context menu.
+- **Materials & Smart:** Click or drag built-in presets onto layers or directly onto the mesh in the viewport (highlighting and targeting the texture set under the pointer), right-click a material to **Paint with this material**, or save your own fill layers and folder subtrees from the layer context menu.
 - **Textures & Libraries:** Import images and `.blend` materials or manage folders in **Libraries**. Suffixed PBR texture sets in library folders appear in **Materials**, `.svg` files appear as vector stencils, and right-clicking a texture lets you create a fill layer, assign it to a channel, **Use as brush alpha**, or **Use as stencil**.
 - **Patterns, Masks, Generators & Filters:** Apply procedural patterns, **13** smart mask presets, **22** generators, or **67** filters by clicking or dragging onto layers.
 - **Brushes, Alphas & Lighting:** Pick brush presets and stamp alphas, or switch viewport HDRIs in **Lighting**.

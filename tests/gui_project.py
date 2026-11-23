@@ -13,9 +13,9 @@ import devil_painter
 import bmesh
 from devil_painter import bakejob, editor, exporting, library, projects, tiles
 from devil_painter.actions import owned_images
-from devil_painter.document import texture_set
+from devil_painter.document import active_layer, texture_set
 from tools.workspace import prepare_scratch
-from tests.gui_harness import bake_landed, check, click, control, finish, has, move, pixels, press, run_journey, settle, type_text, viewport
+from tests.gui_harness import bake_landed, check, click, control, finish, has, move, pixels, press, run_journey, settle, spot, type_text, viewport
 
 
 def field(window, region, key, text):
@@ -398,6 +398,29 @@ def journey():
     press(window, 'P', *middle, ctrl=True, alt=True)
     yield from settle()
     check(editor._active is not None and has('SET.1') and has('TILE.1002'), 'Devil Painter reopens on the saved project')
+
+    click(window, region, 'SET.0')
+    yield from settle()
+    click(window, region, 'SHELF_TAB.MATERIALS')
+    yield from settle()
+    trim_set = project.sets[1]
+    body_before, trim_before = len(body.layers), len(trim_set.layers)
+    material_label = control('ITEM.1').label
+    sx, sy = screen_point(region, area, cube, trim)
+    trim_drop = (region.x + sx, region.y + sy)
+    start = spot(region, 'ITEM.1')
+    move(window, *start)
+    window.event_simulate(type='LEFTMOUSE', value='PRESS', x=int(start[0]), y=int(start[1]))
+    for step in range(1, 11):
+        move(window, start[0] + (trim_drop[0] - start[0]) * step / 10, start[1] + (trim_drop[1] - start[1]) * step / 10)
+    yield from settle()
+    check(editor._active.highlight == 1 and editor._active.state.drop[:2] == ('MESH', 1),
+          'dragging a material over a Trim face highlights only the Trim texture set')
+    window.event_simulate(type='LEFTMOUSE', value='RELEASE', x=int(trim_drop[0]), y=int(trim_drop[1]))
+    yield from settle()
+    check(project.active_set == 1 and editor._active.highlight is None and len(trim_set.layers) == trim_before + 1
+          and len(body.layers) == body_before and active_layer(trim_set).name == material_label,
+          'dropping a material onto a Trim face switches to Trim and adds the material to its stack')
 
     detail = cube.data.copy()
     detail.name = 'Cube v2'
