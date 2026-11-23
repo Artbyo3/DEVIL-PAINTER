@@ -36,7 +36,7 @@ def read(image):
 def write(image, pixels):
     image.pixels.foreach_set(pixels.ravel())
     image.update()
-    caches.touch()
+    caches.touch(image)
 
 
 def rgb(value):

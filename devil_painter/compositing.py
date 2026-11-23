@@ -1197,13 +1197,42 @@ def has_positional(data):
     return any(positional(effect) for layer in resolved(data.layers) for effect in layer.effects)
 
 
+def composed(layers, parent=''):
+    for layer in children(layers, parent):
+        yield layer
+        yield from composed(layers, layer.uid)
+
+
+def below_inputs(data):
+    order = list(composed(resolved(data.layers)))
+    reach = max((index + 1 for index, layer in enumerate(order) if any(positional(effect) for effect in layer.effects)), default=0)
+    inputs = order[:reach]
+    known = {layer.uid: layer for layer in order}
+    for layer in inputs:
+        for effect in layer.effects:
+            if effect.kind != 'COMPARE':
+                continue
+            target = known.get(scoped_uid(layer, effect.other)) or known.get(effect.other)
+            if target is not None and target not in inputs:
+                inputs.append(target)
+    return inputs
+
+
+def input_images(data, layers):
+    images = {image for layer in layers for image in (layer.image, layer.mask, *(slot.image for slot in layer.slots), *(effect.image for effect in layer.effects))
+              if image is not None}
+    tiled = {item.image for stack in data.id_data.devil_painter.sets for item in stack.tile_images if item.key in images and item.image is not None}
+    return sorted(images | tiled, key=lambda image: image.name_full)
+
+
 def below_stamp(data):
     project = data.id_data.devil_painter
-    layers = '|'.join(rna_values(layer) for item in project.sets for layer in item.layers)
+    inputs = below_inputs(data)
+    layers = '|'.join(rna_values(layer) for layer in inputs)
     channels = ','.join(channel.key for channel in set_channels(data))
     maps = ','.join(item.image.name_full for item in data.maps if item.image is not None)
     tiles = ','.join(str(number) for number in numbers(data))
-    return f'{revision()};{data.visible};{data.resolution};{project.uv_map};{channels};{maps};{tiles};{layers}'
+    return f'{revision(input_images(data, inputs))};{data.visible};{data.resolution};{project.uv_map};{channels};{maps};{tiles};{layers}'
 
 
 def below_build(data):

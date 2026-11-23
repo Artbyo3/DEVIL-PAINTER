@@ -9,7 +9,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(ROOT))
 import devil_painter
-from devil_painter import api
+from devil_painter import api, compositing, strokes
+from devil_painter.actions import new_effect
+from devil_painter.document import find_layer
 from tools.workspace import prepare_scratch
 
 
@@ -131,6 +133,22 @@ body_slots = numpy.array([polygon.material_index for polygon in two.data.polygon
 check(two.devil_painter.active_set == 0 and numpy.array_equal(body_faces, body_slots),
       'an edit on another texture set switches face masking to that set the way the UI does')
 check(api.selected(two, 1) == trim_layer and api.selected(two, 0) == body_layer, 'each texture set keeps its own selected layer')
+two_body = two.devil_painter.sets[0]
+under_uid = api.add_paint(two, set_index=0)
+blurred_uid = api.add_fill(two, json.dumps(gold), set_index=0)
+new_effect(two_body, find_layer(two_body, blurred_uid), 'FILTER', 'CONTENT').filter = 'BLUR'
+over_uid = api.add_paint(two, set_index=0)
+fresh_stamp = compositing.below_stamp(two_body)
+api.set_channel(two, over_uid, 'roughness', .3, set_index=0)
+over_image = find_layer(two_body, over_uid).image
+strokes.write(over_image, strokes.read(over_image))
+check(compositing.below_stamp(two_body) == fresh_stamp, 'an edit and a stroke on a layer above a Blur keep the texture under the Blur fresh, so nothing rebakes')
+under_image = find_layer(two_body, under_uid).image
+strokes.write(under_image, strokes.read(under_image))
+painted_stamp = compositing.below_stamp(two_body)
+check(painted_stamp != fresh_stamp, 'a stroke on a layer under a Blur marks the texture under the Blur stale')
+api.set_channel(two, blurred_uid, 'roughness', .3, set_index=0)
+check(compositing.below_stamp(two_body) != painted_stamp, 'an edit on the blurred layer marks the texture under the Blur stale')
 try:
     api.layers(bpy.data.objects.new('Empty', bpy.data.meshes.new('Empty')))
     check(False, 'an object without a project is refused')

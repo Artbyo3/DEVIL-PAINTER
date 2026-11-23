@@ -1157,7 +1157,6 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         return self.flat_space().image
 
     def prepare_stroke(self, context):
-        caches.touch()
         obj, data = self.painted()
         if data is None or obj.mode != 'TEXTURE_PAINT':
             return obj, None, False
@@ -1196,10 +1195,11 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         obj, data = self.painted()
         if direct is not None:
             name, before, direct_label = direct
-            entry = strokes.diff(bpy.data.images.get(name), before)
+            image = bpy.data.images.get(name)
+            entry = strokes.diff(image, before)
             if entry is not None:
                 history.attach(direct_label, entry)
-                caches.touch()
+                caches.touch(image)
                 self._area.tag_redraw()
             return
         entry = strokes.merge(obj, data) if data is not None else None
