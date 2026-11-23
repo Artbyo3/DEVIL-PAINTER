@@ -1,6 +1,6 @@
 from pathlib import Path
 import bpy
-from . import actions, library, projects
+from . import actions, editor, library, projects
 from .document import project_of, texture_set
 
 
@@ -59,20 +59,42 @@ class DEVIL_PAINTER_OT_import_textures(bpy.types.Operator):
     bl_idname = 'devil_painter.import_textures'
     bl_label = 'Import Resources'
     bl_description = 'Copy images and .blend files into the Devil Painter library'
-    directory: bpy.props.StringProperty(subtype='DIR_PATH')
-    files: bpy.props.CollectionProperty(type=bpy.types.OperatorFileListElement)
+    filepath: bpy.props.StringProperty(subtype='FILE_PATH', options={'HIDDEN', 'SKIP_SAVE'})
+    directory: bpy.props.StringProperty(subtype='DIR_PATH', options={'HIDDEN', 'SKIP_SAVE'})
+    files: bpy.props.CollectionProperty(type=bpy.types.OperatorFileListElement, options={'HIDDEN', 'SKIP_SAVE'})
     filter_image: bpy.props.BoolProperty(default=True, options={'HIDDEN'})
     filter_blender: bpy.props.BoolProperty(default=True, options={'HIDDEN'})
     filter_folder: bpy.props.BoolProperty(default=True, options={'HIDDEN'})
 
+    def selected_paths(self):
+        directory = Path(bpy.path.abspath(self.directory)) if self.directory else Path()
+        items = [directory / item.name for item in self.files if item.name]
+        return items or ([Path(bpy.path.abspath(self.filepath))] if self.filepath else [])
+
     def invoke(self, context, event):
+        if self.selected_paths():
+            return self.execute(context)
         context.window_manager.fileselect_add(self)
         return {'RUNNING_MODAL'}
 
     def execute(self, context):
-        count = library.import_textures(Path(self.directory) / item.name for item in self.files)
-        self.report({'INFO'}, f'Imported {count} files into the library.')
+        count = library.import_textures(self.selected_paths())
+        noun = 'file' if count == 1 else 'files'
+        message = f'Imported {count} {noun} into the library.' if count else 'No supported files to import.'
+        self.report({'INFO'}, message)
+        editor.notify(message)
         return {'FINISHED'}
+
+
+class DEVIL_PAINTER_FH_import_textures(bpy.types.FileHandler):
+    bl_idname = 'DEVIL_PAINTER_FH_import_textures'
+    bl_label = 'Import into Devil Painter Library'
+    bl_import_operator = DEVIL_PAINTER_OT_import_textures.bl_idname
+    bl_file_extensions = ';'.join(sorted(library.IMPORT_SUFFIXES))
+
+    @classmethod
+    def poll_drop(cls, context):
+        return editor.accepts_drop(context)
 
 
 class DEVIL_PAINTER_OT_reimport_mesh(bpy.types.Operator):
@@ -98,4 +120,4 @@ class DEVIL_PAINTER_OT_reimport_mesh(bpy.types.Operator):
 
 
 CLASSES = (DEVIL_PAINTER_OT_choose_export_folder, DEVIL_PAINTER_OT_choose_texture_folder, DEVIL_PAINTER_OT_choose_library_folder, DEVIL_PAINTER_OT_import_textures,
-           DEVIL_PAINTER_OT_reimport_mesh)
+           DEVIL_PAINTER_FH_import_textures, DEVIL_PAINTER_OT_reimport_mesh)

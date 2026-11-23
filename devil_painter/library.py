@@ -22,6 +22,7 @@ PACK_MARKER = '.installed'
 PACK_KINDS = ('Textures', 'Alphas', 'Materials', 'Brushes', 'Generators')
 BLEND_SUFFIX = '.blend'
 VECTOR_SUFFIX = '.svg'
+IMPORT_SUFFIXES = IMAGE_SUFFIXES | {BLEND_SUFFIX, VECTOR_SUFFIX}
 BLEND_INPUTS = (('base_color', 'Base Color'), ('roughness', 'Roughness'), ('metallic', 'Metallic'), ('normal', 'Normal'),
                 ('emission', 'Emission Color'), ('opacity', 'Alpha'))
 _cache = {}
@@ -238,7 +239,7 @@ def import_textures(paths):
     imported = 0
     for source in paths:
         source = Path(source)
-        if source.suffix.lower() not in IMAGE_SUFFIXES | {BLEND_SUFFIX, VECTOR_SUFFIX} or not source.is_file():
+        if source.suffix.lower() not in IMPORT_SUFFIXES or not source.is_file():
             continue
         target, number = folder / source.name, 1
         while target.exists():
