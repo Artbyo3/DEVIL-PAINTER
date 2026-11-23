@@ -427,9 +427,41 @@ def journey():
           and len(data.layers) == before_mesh + 1,
           'releasing a texture over a paint layer channel leaves it unchanged')
 
+    drop_handler = bpy.types.DEVIL_PAINTER_FH_import_textures
+    check(drop_handler.bl_import_operator == 'devil_painter.import_textures'
+          and set(drop_handler.bl_file_extensions.split(';')) == library.IMPORT_SUFFIXES,
+          'the OS file drop handler targets import_textures for every supported library format')
+    with bpy.context.temp_override(window=window, area=area, region=region):
+        check(drop_handler.poll_drop(bpy.context), 'the OS file drop handler accepts drops over the open workspace')
+    drop_dir = scratch / 'os_drop'
+    drop_dir.mkdir(parents=True, exist_ok=True)
+    for stem in ('dropped_tex', 'dropped_single'):
+        dropped_image = bpy.data.images.new(stem, 16, 16, alpha=True)
+        dropped_image.pixels.foreach_set(numpy.tile(numpy.array((.2, .6, .8, 1.0), dtype=numpy.float32), 16 * 16))
+        dropped_image.filepath_raw = str(drop_dir / f'{stem}.png')
+        dropped_image.file_format = 'PNG'
+        dropped_image.save()
+        bpy.data.images.remove(dropped_image)
+    (drop_dir / 'dropped_vec.svg').write_text('<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="#fff"/></svg>', encoding='utf-8')
+    (drop_dir / 'ignored.txt').write_text('ignored', encoding='utf-8')
+    with bpy.context.temp_override(window=window, area=area, region=region):
+        result = bpy.ops.devil_painter.import_textures('INVOKE_DEFAULT', directory=str(drop_dir),
+                                                       files=[dict(name='dropped_tex.png'), dict(name='dropped_vec.svg'), dict(name='ignored.txt')])
+    yield from settle()
+    check(result == {'FINISHED'} and editor._active.message == 'Imported 2 files into the library.'
+          and 'dropped_tex' in labels() and 'dropped_vec' in labels() and 'ignored' not in labels(),
+          'dropping multiple files via INVOKE_DEFAULT imports supported formats directly and refreshes the shelf')
+    with bpy.context.temp_override(window=window, area=area, region=region):
+        result = bpy.ops.devil_painter.import_textures('INVOKE_DEFAULT', filepath=str(drop_dir / 'dropped_single.png'))
+    yield from settle()
+    check(result == {'FINISHED'} and editor._active.message == 'Imported 1 file into the library.' and 'dropped_single' in labels(),
+          'dropping a single file via filepath imports it into the library and refreshes the shelf')
+
     click(window, region, 'CLOSE')
     yield from settle()
     check(editor._active is None, 'Devil Painter closes')
+    with bpy.context.temp_override(window=window, area=area, region=region):
+        check(not drop_handler.poll_drop(bpy.context), 'the OS file drop handler stays inactive after Devil Painter closes')
     devil_painter.unregister()
     check(not hasattr(bpy.types.Object, 'devil_painter'), 'Devil Painter unregisters cleanly')
     print('ALL GUI SHELF CHECKS PASSED', bpy.app.version_string)

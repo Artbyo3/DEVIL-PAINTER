@@ -31,12 +31,14 @@ def check_registered(label):
     check(not any(name.startswith('DEVIL_PAINTER_PT') for name in dir(bpy.types)), label + ' adds no sidebar panel')
     check(hasattr(bpy.types.Object, 'devil_painter'), label + ' layer stack property registered')
     check(hasattr(bpy.types, 'DEVIL_PAINTER_OT_choose_export_folder'), label + ' export folder picker registered')
+    check(hasattr(bpy.types, 'DEVIL_PAINTER_FH_import_textures'), label + ' OS file drop handler registered')
 
 
 def check_unregistered(label):
     check(not hasattr(bpy.types, 'DEVIL_PAINTER_OT_editor'), label + ' editor operator unregistered cleanly')
     check(not launcher_entries(), label + ' View menu launcher removed')
     check(not hasattr(bpy.types.Object, 'devil_painter'), label + ' layer stack property removed')
+    check(not hasattr(bpy.types, 'DEVIL_PAINTER_FH_import_textures'), label + ' OS file drop handler unregistered cleanly')
 
 
 pkg_dir = ROOT / 'devil_painter'

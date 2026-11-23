@@ -109,6 +109,21 @@ def close_active():
         _active.cleanup()
 
 
+def accepts_drop(context):
+    return (_active is not None and not _active._closed and context.area is not None
+            and context.region is not None and context.region.type == 'WINDOW'
+            and context.area in {_active._area, _active.flat_area})
+
+
+def notify(message):
+    if _active is None or _active._closed:
+        return
+    _active.message = message
+    _active.toast_text = None
+    if _active._area in list(_active._window.screen.areas):
+        _active._area.tag_redraw()
+
+
 def default_directory(obj):
     if bpy.data.filepath:
         return bpy.path.abspath('//textures')
@@ -506,6 +521,8 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
                 self._area.tag_redraw()
             elif time.monotonic() < self.toast_until + TIMER_INTERVAL:
                 self._area.tag_redraw()
+            return {'PASS_THROUGH'}
+        if event.type == 'EVT_DROP':
             return {'PASS_THROUGH'}
         self.sync_flat()
         self.drop_stale_anchor()
