@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT))
 import devil_painter
 from devil_painter import editor, library, shelf
 from devil_painter.document import active_layer, find_layer
+from devil_painter.minimal import EFFECT_TARGET, REPLACE_TARGET
 from tools.workspace import prepare_scratch
 from tests.gui_harness import bake_landed, check, click, context_menu, control, finish, has, keys, move, nodes, png, press, reveal, run_journey, select_row, settle, shown, spot, type_text, until, viewport
 
@@ -341,6 +342,90 @@ def journey():
     yield from release(window, mesh_hit)
     check(not generators(gold) and len(data.layers) == before_mesh + 1,
           'releasing a mask over the mesh leaves the layers unchanged')
+
+    yield from open_tab(window, region, 'TEXTURES')
+    yield from reveal(window, region, 'SOURCE.roughness')
+    rough_spot = spot(region, 'SOURCE.roughness')
+    yield from drag_to(window, spot(region, labels()['rust_plate']), rough_spot)
+    check(has('DRAG_GHOST') and has('DROP_SLOT') and editor._active.state.drop == ('SLOT', 'roughness'),
+          'dragging a texture over a channel slot highlights the slot')
+    yield from release(window, rough_spot)
+    check(gold.slots['roughness'].source == 'IMAGE' and gold.slots['roughness'].image is not None
+          and gold.slots['roughness'].image.name.startswith('rust_plate')
+          and gold.slots['roughness'].image.colorspace_settings.is_data
+          and not has('DROP_SLOT') and not has('DRAG_GHOST') and len(data.layers) == before_mesh + 1,
+          'dropping a texture onto a channel slot assigns it to that channel without adding a layer')
+
+    yield from open_tab(window, region, 'PATTERNS')
+    yield from reveal(window, region, 'VALUE.metallic')
+    metal_spot = spot(region, 'VALUE.metallic')
+    yield from drag_to(window, spot(region, labels()['Cells']), metal_spot)
+    check(has('DROP_SLOT') and editor._active.state.drop == ('SLOT', 'metallic'),
+          'dragging a pattern over a channel value highlights the channel slot')
+    yield from release(window, metal_spot)
+    check(gold.slots['metallic'].source == 'PATTERN' and gold.slots['metallic'].pattern == 'CELLS'
+          and not has('DROP_SLOT') and len(data.layers) == before_mesh + 1,
+          'dropping a pattern onto a channel slot assigns it to that channel')
+
+    yield from open_tab(window, region, 'MATERIALS')
+    yield from reveal(window, region, 'SOURCE.roughness')
+    rough_spot = spot(region, 'SOURCE.roughness')
+    yield from drag_to(window, spot(region, labels()['Steel']), rough_spot)
+    check(not has('DROP_SLOT') and not editor._active.state.drop,
+          'dragging a material over a channel slot does not target the channel')
+    yield from release(window, rough_spot)
+    check(gold.slots['roughness'].source == 'IMAGE' and len(data.layers) == before_mesh + 1,
+          'releasing a material over a channel slot leaves the slot and layers unchanged')
+
+    yield from reveal(window, region, 'MATERIAL_THUMB')
+    material_spot = spot(region, 'MATERIAL_THUMB')
+    yield from drag_to(window, spot(region, labels()['Steel']), material_spot)
+    check(has('DROP_SLOT') and editor._active.state.drop == ('SLOT', REPLACE_TARGET),
+          'dragging a material over the material slot highlights it')
+    yield from release(window, material_spot)
+    check(gold.name == 'Steel' and gold.slots['roughness'].source == 'VALUE'
+          and not has('DROP_SLOT') and len(data.layers) == before_mesh + 1,
+          'dropping a material onto the material slot replaces the layer material in place')
+
+    yield from reveal(window, region, 'ADD_FX_MASK')
+    click(window, region, 'ADD_FX_MASK')
+    yield from settle()
+    click(window, region, 'NEW_FX.MASK.FILL')
+    yield from settle()
+    yield from open_tab(window, region, 'TEXTURES')
+    yield from reveal(window, region, 'FX_SOURCE')
+    fx_spot = spot(region, 'FX_SOURCE')
+    yield from drag_to(window, spot(region, labels()['rust_plate']), fx_spot)
+    check(has('DROP_SLOT') and editor._active.state.drop == ('SLOT', EFFECT_TARGET),
+          'dragging a texture over a fill effect source highlights it')
+    yield from release(window, fx_spot)
+    effect = gold.effects[-1]
+    check(effect.source == 'IMAGE' and effect.texture is not None and effect.texture.name.startswith('rust_plate')
+          and not has('DROP_SLOT'),
+          'dropping a texture onto a fill effect source assigns it to the effect')
+
+    yield from open_tab(window, region, 'PATTERNS')
+    yield from reveal(window, region, 'FX_SOURCE')
+    fx_spot = spot(region, 'FX_SOURCE')
+    yield from drag_to(window, spot(region, labels()['Cells']), fx_spot)
+    check(has('DROP_SLOT') and editor._active.state.drop == ('SLOT', EFFECT_TARGET),
+          'dragging a pattern over a fill effect source highlights it')
+    yield from release(window, fx_spot)
+    check(effect.source == 'PATTERN' and effect.pattern == 'CELLS' and not has('DROP_SLOT'),
+          'dropping a pattern onto a fill effect source assigns it to the effect')
+
+    yield from select_row(window, region, paint_uid)
+    yield from open_tab(window, region, 'TEXTURES')
+    yield from reveal(window, region, 'USE.roughness')
+    paint_spot = spot(region, 'USE.roughness')
+    yield from drag_to(window, spot(region, labels()['rust_plate']), paint_spot)
+    check(not has('DROP_SLOT') and not editor._active.state.drop,
+          'dragging a texture over a paint layer channel does not target it')
+    yield from release(window, paint_spot)
+    paint_slot = find_layer(data, paint_uid).slots['roughness']
+    check((paint_slot.image is None or not paint_slot.image.name.startswith('rust_plate'))
+          and len(data.layers) == before_mesh + 1,
+          'releasing a texture over a paint layer channel leaves it unchanged')
 
     click(window, region, 'CLOSE')
     yield from settle()

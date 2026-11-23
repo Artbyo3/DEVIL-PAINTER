@@ -662,6 +662,8 @@ def effect_section(flow, data, layer, w):
         flow.add('FX_SOURCE_NAME', Rect(x + h + 6 * s, y, w - h - 6 * s, h), 'NOTE',
                  label=sources[effect.source] + (' · ' + effect.pattern.title() if effect.source == 'PATTERN' else
                                                   ' · ' + effect.texture.name if effect.source == 'IMAGE' and effect.texture is not None else ''))
+        if flow.state.drop == ('SLOT', EFFECT_TARGET):
+            flow.add('DROP_SLOT', Rect(x, y, w, h), 'GHOST')
         if effect.source != 'VALUE':
             x, y, h = flow.field()
             flow.add('FX_PROJECTION', Rect(x, y, w, h), 'DROPDOWN', label='Projection', text=dict(FILL_PROJECTIONS)[effect.projection],
@@ -820,6 +822,8 @@ def channels_section(flow, data, layer, w):
             value_control(flow, channel, slot, value, False)
         flow.add('BLEND.' + key, Rect(x + w - blend, y, blend, h), 'DROPDOWN', text=dict(BLEND_MODES)[slot.blend],
                  tip=f'How {channel.label.lower()} mixes with the layers below')
+        if fill and flow.state.drop == ('SLOT', key):
+            flow.add('DROP_SLOT', Rect(x, y, w, h), 'GHOST')
         if fill and slot.source == 'PATTERN':
             pattern_line(flow, channel, slot, w)
         elif fill and slot.source == 'IMAGE' and slot.image is not None:
@@ -876,6 +880,8 @@ def material_section(flow, data, layer, w):
     flow.add('MATERIAL_NAME', Rect(x + h + 6 * s, y, w - h - 150 * s, h), 'NOTE', label='Material · ' + definition['name'])
     flow.add('REPLACE_MATERIAL', Rect(x + w - 138 * s, y, 70 * s, h), 'CHIP', label='Replace', tip='Click a material in the shelf to swap it in, keeping the mask')
     flow.add('RESET_MATERIAL', Rect(x + w - 64 * s, y, 64 * s, h), 'CHIP', label='Reset', tip='Restore every channel to the material values')
+    if flow.state.drop == ('SLOT', REPLACE_TARGET):
+        flow.add('DROP_SLOT', Rect(x, y, w - 68 * s, h), 'GHOST')
 
 
 def layer_mask_section(flow, data, layer, w):
