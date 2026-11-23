@@ -12,7 +12,7 @@ from devil_painter import bakejob, editor
 from devil_painter.document import map_extrusion, map_samples
 from devil_painter.meshmaps import id_color
 from tools.workspace import prepare_scratch
-from tests.gui_harness import bake_landed, check, click, control, finish, has, keys, pixels, press, run_journey, settle, until, viewport
+from tests.gui_harness import bake_landed, check, click, control, drag_slider, finish, has, keys, pixels, press, run_journey, settle, until, viewport
 
 
 def dominant(values, count):
@@ -103,8 +103,7 @@ def journey():
                                    'BAKE_EXTRUSION', 'BAKE_AUTO')), 'the bake card offers every map and bake setting')
     check('needs high-poly' in control('BAKEMAP.height').label and 'needs' not in control('BAKEMAP.normal').label,
           'height asks for a high-poly while normal also bakes from the mesh itself')
-    rect = control('BAKE_SAMPLES').rect
-    press(window, 'LEFTMOUSE', region.x + rect.x + rect.w * .03, region.y + rect.y + rect.h / 2)
+    drag_slider(window, region, 'BAKE_SAMPLES', .03)
     yield from settle()
     check(data.bake_samples <= 6, 'the samples slider lowers the bake quality')
 
@@ -185,8 +184,7 @@ def journey():
     yield from bake(window, region)
     check(data.bake_cage == cage and 'Baked 1' in editor._active.message, 'the hand-picked cage bakes')
     yield from open_card(window, region)
-    rect = control('BAKE_EXTRUSION').rect
-    press(window, 'LEFTMOUSE', region.x + rect.x + rect.w * .2, region.y + rect.y + rect.h / 2)
+    drag_slider(window, region, 'BAKE_EXTRUSION', .2)
     yield from settle()
     check(abs(data.bake_extrusion - .1) < .02, 'the ray distance slider sets how far rays search')
 
@@ -219,8 +217,7 @@ def journey():
     check(all(has(key) for key in ('BAKE_SELECT.ao', 'BAKE_SELECT.curvature', 'BAKE_SELECT.thickness', 'BAKE_SELECT.normal', 'BAKE_SELECT.height', 'BAKE_SELECT.id'))
           and has('BAKE_AO_DISTANCE') and has('BAKE_AO_SPREAD') and has('BAKE_MAP_SAMPLES'),
           'the bake card shows per-map settings starting on ambient occlusion')
-    rect = control('BAKE_MAP_SAMPLES').rect
-    press(window, 'LEFTMOUSE', region.x + rect.x + rect.w * .5, region.y + rect.y + rect.h / 2)
+    drag_slider(window, region, 'BAKE_MAP_SAMPLES', .5)
     yield from settle()
     check(map_samples(data, 'ao') != data.bake_samples and map_samples(data, 'thickness') == data.bake_samples
           and control('BAKE_SELECT.ao').label == 'Custom' and control('BAKE_MAP_SAMPLES_RESET').label == 'Reset',
@@ -229,11 +226,9 @@ def journey():
     yield from settle()
     check(map_samples(data, 'ao') == data.bake_samples and control('BAKE_MAP_SAMPLES_RESET').label == 'Shared',
           'Reset returns per-map samples to the shared value')
-    rect = control('BAKE_AO_DISTANCE').rect
-    press(window, 'LEFTMOUSE', region.x + rect.x + rect.w * .4, region.y + rect.y + rect.h / 2)
+    drag_slider(window, region, 'BAKE_AO_DISTANCE', .4)
     yield from settle()
-    rect = control('BAKE_AO_SPREAD').rect
-    press(window, 'LEFTMOUSE', region.x + rect.x + rect.w * .45, region.y + rect.y + rect.h / 2)
+    drag_slider(window, region, 'BAKE_AO_SPREAD', .45)
     yield from settle()
     check(data.bake_ao_distance > .5 and data.bake_ao_spread < 120.0 and control('BAKE_SELECT.ao').label == 'Custom',
           'AO distance and spread sliders update the ambient occlusion settings')
@@ -267,15 +262,13 @@ def journey():
     yield from settle()
     check(has('BAKE_THICKNESS_RANGE'), 'thickness settings expose thickness range')
     yield from toggle_maps(window, region, {'thickness'})
-    rect = control('BAKE_THICKNESS_RANGE').rect
-    press(window, 'LEFTMOUSE', region.x + rect.x + rect.w * .03, region.y + rect.y + rect.h / 2)
+    drag_slider(window, region, 'BAKE_THICKNESS_RANGE', .03)
     yield from settle()
     yield from bake(window, region)
     thick_low = pixels(data.maps['thickness'].image)
     low_mean = float(thick_low[thick_low[:, 3] > .5][:, 0].mean())
     yield from open_card(window, region)
-    rect = control('BAKE_THICKNESS_RANGE').rect
-    press(window, 'LEFTMOUSE', region.x + rect.x + rect.w * .9, region.y + rect.y + rect.h / 2)
+    drag_slider(window, region, 'BAKE_THICKNESS_RANGE', .9)
     yield from settle()
     yield from bake(window, region)
     thick_high = pixels(data.maps['thickness'].image)
@@ -286,8 +279,7 @@ def journey():
     click(window, region, 'BAKE_SELECT.height')
     yield from settle()
     check(has('BAKE_MAP_EXTRUSION') and has('BAKE_MAP_EXTRUSION_RESET'), 'height settings expose per-map ray distance')
-    rect = control('BAKE_MAP_EXTRUSION').rect
-    press(window, 'LEFTMOUSE', region.x + rect.x + rect.w * .7, region.y + rect.y + rect.h / 2)
+    drag_slider(window, region, 'BAKE_MAP_EXTRUSION', .7)
     yield from settle()
     check(abs(map_extrusion(data, 'height') - data.bake_extrusion) > .1 and map_extrusion(data, 'normal') == data.bake_extrusion,
           'per-map ray distance overrides only the selected map')

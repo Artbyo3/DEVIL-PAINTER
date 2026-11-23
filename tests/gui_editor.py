@@ -15,7 +15,7 @@ from devil_painter.compositing import SIGNATURE_KEY, socket
 from devil_painter.document import active_effect, texture_set
 from devil_painter.ui_system import SURFACE_FLOATING
 from tools.workspace import prepare_scratch
-from tests.gui_harness import bake_landed, check, click, control, finish, has, move, press, run_journey, settle, shelf_index, shown, spot, type_text, until, viewport
+from tests.gui_harness import bake_landed, check, click, control, drag_slider, finish, has, move, press, run_journey, settle, shelf_index, shown, spot, type_text, until, viewport
 
 HIDDEN = ('show_region_header', 'show_region_tool_header', 'show_region_toolbar', 'show_gizmo_navigate')
 
@@ -180,14 +180,12 @@ def journey():
     yield from settle()
     check(all(has(key) for key in ('BRUSH_FLOW', 'BRUSH_SPACING', 'BRUSH_HARDNESS', 'BRUSH_SMOOTHING', 'BRUSH_JITTER', 'BRUSHUSE.metallic')),
           'the brush card offers flow, spacing, hardness, smoothing, jitter and the painted channels')
-    rect = control('BRUSH_HARDNESS').rect
-    press(window, 'LEFTMOUSE', region.x + rect.x + rect.w * .8, region.y + rect.y + rect.h / 2)
+    drag_slider(window, region, 'BRUSH_HARDNESS', .8)
     yield from settle()
     brush = bpy.context.scene.tool_settings.image_paint.brush
     check(abs(data.brush_hardness - .8) < .05 and brush.curve_distance_falloff_preset == 'CUSTOM' and brush.library is None,
           'hardness shapes the falloff of the Devil Painter brush')
-    rect = control('BRUSH_SMOOTHING').rect
-    press(window, 'LEFTMOUSE', region.x + rect.x + rect.w * .5, region.y + rect.y + rect.h / 2)
+    drag_slider(window, region, 'BRUSH_SMOOTHING', .5)
     yield from settle()
     check(brush.use_smooth_stroke and data.brush_preset == 'Custom', 'smoothing turns on the stroke stabilizer')
     click(window, region, 'BRUSH_PRESSURE_SIZE')
@@ -219,7 +217,7 @@ def journey():
     yield from settle()
 
     rect = control('BRUSHVAL.metallic').rect
-    press(window, 'LEFTMOUSE', region.x + rect.x + rect.w - 1, region.y + rect.y + rect.h / 2)
+    drag_slider(window, region, 'BRUSHVAL.metallic', (rect.w - 1) / rect.w)
     yield from settle()
     check(data.brush_slots['metallic'].value > .95, 'the metallic chip in the tool strip sets what the brush paints')
     stroke(window, region)
@@ -245,7 +243,7 @@ def journey():
     paint_layer = data.layers[0]
     check(channel_max(bpy.data.images[metallic_canvas.name]) > .9 and alpha(data.stroke).max() == 0.0, 'Ctrl+Shift+Z repaints it')
     rect = control('BRUSHVAL.metallic').rect
-    press(window, 'LEFTMOUSE', region.x + rect.x + 1, region.y + rect.y + rect.h / 2)
+    drag_slider(window, region, 'BRUSHVAL.metallic', 1 / rect.w)
     yield from settle()
 
     click(window, region, 'ADD_FILL')
@@ -255,7 +253,7 @@ def journey():
     check(all(has(f'USE.{key}') for key in ('base_color', 'roughness', 'metallic', 'normal', 'height')) and not has('USE.emission'),
           'Properties lists one row per texture set channel')
     rect = control('VALUE.metallic').rect
-    press(window, 'LEFTMOUSE', region.x + rect.x + rect.w - 1, region.y + rect.y + rect.h / 2)
+    drag_slider(window, region, 'VALUE.metallic', (rect.w - 1) / rect.w)
     yield from settle()
     metallic_slot = fill.slots['metallic']
     check(metallic_slot.value > .95, 'dragging the metallic slider sets the fill metallic')
@@ -265,8 +263,7 @@ def journey():
 
     click(window, region, 'USE.height')
     yield from settle()
-    rect = control('VALUE.height').rect
-    press(window, 'LEFTMOUSE', region.x + rect.x + rect.w * .9, region.y + rect.y + rect.h / 2)
+    drag_slider(window, region, 'VALUE.height', .9)
     yield from settle()
     nodes = data.material.node_tree.nodes
     shader = next(node for node in nodes if node.type == 'BSDF_PRINCIPLED')
@@ -521,8 +518,7 @@ def journey():
           'Properties shows the pattern parameters and the tri-planar projection')
     mapping = nodes[rust.uid + ':mapping']
     check(mapping.inputs['Vector'].links[0].from_socket.name == 'Object', 'tri-planar patterns use object coordinates')
-    rect = control('SCALE.base_color').rect
-    press(window, 'LEFTMOUSE', region.x + rect.x + rect.w * .8, region.y + rect.y + rect.h / 2)
+    drag_slider(window, region, 'SCALE.base_color', .8)
     yield from settle()
     nodes = data.material.node_tree.nodes
     check(abs(nodes[rust.uid + '.base_color.texture'].inputs['Scale'].default_value - rust.slots['base_color'].scale) < 1e-4
@@ -620,8 +616,7 @@ def journey():
         return next(layer for layer in data.layers if layer.uid == data.active_uid)
 
     def drag_to(key, fraction):
-        rect = control(key).rect
-        press(window, 'LEFTMOUSE', region.x + rect.x + rect.w * fraction, region.y + rect.y + rect.h / 2)
+        drag_slider(window, region, key, fraction)
 
     click(window, region, 'ADD_FOLDER')
     yield from settle()
@@ -731,8 +726,7 @@ def journey():
     yield from settle()
     check(all(has('BAKEMAP.' + key) for key in ('ao', 'curvature', 'thickness', 'position', 'world_normal', 'id', 'normal'))
           and has('BAKE_RUN') and not control('BAKEMAP.normal').active, 'the bake card lists every mesh map')
-    rect = control('BAKE_SAMPLES').rect
-    press(window, 'LEFTMOUSE', region.x + rect.x + rect.w * .03, region.y + rect.y + rect.h / 2)
+    drag_slider(window, region, 'BAKE_SAMPLES', .03)
     yield from settle()
     check(data.bake_samples <= 6, 'the samples slider sets the bake quality')
     click(window, region, 'BAKE_RUN')
@@ -823,8 +817,7 @@ def journey():
     sampled = [node for node in nodes if node.type == 'TEX_IMAGE' and node.image == data.maps['curvature'].image]
     check(len(sampled) == 1, 'the generator samples the curvature map in the material')
     yield from reveal(window, region, 'GEN_INVERT')
-    rect = control('GEN_LEVEL').rect
-    press(window, 'LEFTMOUSE', region.x + rect.x + rect.w * .5, region.y + rect.y + rect.h / 2)
+    drag_slider(window, region, 'GEN_LEVEL', .5)
     yield from settle()
     wear = active_effect(data)
     ranged = data.material.node_tree.nodes[name + '.gen.range']
@@ -964,8 +957,7 @@ def journey():
     yield from settle()
     check(has('OPACITY'), 'clicking it again expands it')
 
-    rect = control('BRUSH_STRENGTH').rect
-    press(window, 'LEFTMOUSE', region.x + rect.x + rect.w * .25, region.y + rect.y + rect.h / 2)
+    drag_slider(window, region, 'BRUSH_STRENGTH', .25)
     yield from settle()
     nodes = data.material.node_tree.nodes
     check(abs(data.brush_opacity - .25) < .03 and abs(nodes['stroke.opacity'].inputs[1].default_value - data.brush_opacity) < 1e-5,
@@ -1046,8 +1038,7 @@ def journey():
     click(window, region, 'VIEWPORT')
     yield from settle()
     for key, fraction in (('ENV_ROTATION', .75), ('ENV_STRENGTH', .25), ('CAMERA_FOV', .5)):
-        rect = control(key).rect
-        press(window, 'LEFTMOUSE', region.x + rect.x + rect.w * fraction, region.y + rect.y + rect.h / 2)
+        drag_slider(window, region, key, fraction)
         yield from settle()
     check(abs(shading.studiolight_rotate_z - 1.5708) < .1 and abs(shading.studiolight_intensity - .5) < .05 and abs(area.spaces.active.lens - 80) < 3,
           'the viewport card rotates and dims the environment and sets the lens')
@@ -1081,8 +1072,7 @@ def journey():
     check(data.shader == 'UNLIT' and output.inputs['Surface'].links[0].from_node.type == 'EMISSION', 'the project card switches the viewport shader')
     click(window, region, 'SHADER.PRINCIPLED')
     yield from settle()
-    rect = control('NORMAL_STRENGTH').rect
-    press(window, 'LEFTMOUSE', region.x + rect.x + rect.w * .25, region.y + rect.y + rect.h / 2)
+    drag_slider(window, region, 'NORMAL_STRENGTH', .25)
     yield from settle()
     nodes = data.material.node_tree.nodes
     check(abs(nodes['shader.normal_map'].inputs['Strength'].default_value - .5) < .05, 'shader settings drive the normal strength')

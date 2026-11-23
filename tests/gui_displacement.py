@@ -9,7 +9,7 @@ sys.path.insert(0, str(ROOT))
 import devil_painter
 from devil_painter import compositing, editor
 from tools.workspace import prepare_scratch
-from tests.gui_harness import check, click, control, finish, has, press, run_journey, settle, viewport
+from tests.gui_harness import check, click, control, drag_slider, finish, has, press, run_journey, settle, viewport
 
 
 def material_output(data):
@@ -63,32 +63,32 @@ def journey():
           and modifier.show_viewport and not modifier.show_render,
           'enabling Height displacement adds a viewport-only Simple subdivision modifier for tessellation preview')
 
-    click(window, region, 'DISP_SCALE', fx=.6)
+    drag_slider(window, region, 'DISP_SCALE', .6)
     yield from settle()
     check(abs(data.displacement_scale - .3) < .05
           and abs(data.material.node_tree.nodes['shader.displacement'].inputs['Scale'].default_value - data.displacement_scale * data.bump_strength) < 1e-5,
           'dragging Scale updates the displacement node scale live')
 
-    click(window, region, 'DISP_SUBDIV', fx=.5)
+    drag_slider(window, region, 'DISP_SUBDIV', .5)
     yield from settle()
     check(data.displacement_subdivision == 3 and cube.modifiers[compositing.DISPLACEMENT_MODIFIER].levels == 3,
           'dragging Subdivision updates the viewport tessellation level')
 
-    click(window, region, 'DISP_SUBDIV', fx=.02)
+    drag_slider(window, region, 'DISP_SUBDIV', .02)
     yield from settle()
     check(data.displacement_subdivision == 0 and compositing.DISPLACEMENT_MODIFIER not in cube.modifiers and data.material.displacement_method == 'BOTH',
           'setting Subdivision to 0 removes the preview modifier while keeping shader displacement active')
 
-    click(window, region, 'DISP_SUBDIV', fx=2 / 6)
+    drag_slider(window, region, 'DISP_SUBDIV', 2 / 6)
     yield from settle()
     check(data.displacement_subdivision == 2 and cube.modifiers[compositing.DISPLACEMENT_MODIFIER].levels == 2,
           'raising Subdivision restores the preview modifier at the requested level')
 
-    click(window, region, 'BUMP_STRENGTH', fx=.5)
+    drag_slider(window, region, 'BUMP_STRENGTH', .5)
     yield from settle()
     check(abs(data.material.node_tree.nodes['shader.displacement'].inputs['Scale'].default_value - data.displacement_scale * data.bump_strength) < 1e-4,
           'Height strength scales the height displacement preview')
-    click(window, region, 'BUMP_STRENGTH', fx=.98)
+    drag_slider(window, region, 'BUMP_STRENGTH', .98)
     yield from settle()
 
     press(window, 'ESC', *middle)

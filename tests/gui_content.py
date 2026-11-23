@@ -11,7 +11,7 @@ import devil_painter
 from devil_painter import editor, library, shelf, smart
 from devil_painter.document import active_effect, active_layer, find_layer
 from tools.workspace import prepare_scratch
-from tests.gui_harness import bake_landed, check, click, control, finish, has, keys, move, pixels, press, reveal, run_journey, set_hex, settle, slide, spot, type_text, viewport
+from tests.gui_harness import bake_landed, check, click, control, drag_slider, finish, has, keys, move, pixels, press, reveal, run_journey, set_hex, settle, slide, spot, type_text, viewport
 
 CHANNELS = ('BaseColor', 'Roughness')
 
@@ -104,8 +104,7 @@ def journey():
         if control(key).active != (key == 'BAKEMAP.world_normal'):
             click(window, region, key)
             yield from settle()
-    rect = control('BAKE_SAMPLES').rect
-    press(window, 'LEFTMOUSE', region.x + rect.x + rect.w * .03, region.y + rect.y + rect.h / 2)
+    drag_slider(window, region, 'BAKE_SAMPLES', .03)
     yield from settle()
     click(window, region, 'BAKE_RUN')
     yield from settle()

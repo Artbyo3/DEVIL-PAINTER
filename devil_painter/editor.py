@@ -13,8 +13,8 @@ from .blending import BLEND_MODES, CHANNEL, FOLDER_BLENDS, linear_to_srgb, srgb_
 from .ui_system import ACCENT
 from .canvas import Rect
 from .document import (BAKE_ANTIALIAS_LABELS, BAKE_CURVATURE_LABELS, BAKE_ID_LABELS, BAKE_RESOLUTIONS, CHANNEL_DEPTHS, DISPLACEMENT_SCALE_MAX, DISPLACEMENT_SUBDIVISION_MAX, DYNAMICS, PROJECTIONS, PROJECTORS, RESOLUTIONS, STROKE_METHODS, TEXTURE_SAMPLING, active_effect, active_layer, active_tile, bake_map_settings, find_layer,
-                       editing_mask, paint_target, set_channels, slot_value, texture_set, uses_coordinates)
-from .effects import FILL_PROJECTIONS, LEVEL_COMPONENTS, MASK_BLENDS, mask_effects
+                       editing_mask, map_extrusion, map_samples, paint_target, set_channels, slot_value, texture_set, uses_coordinates)
+from .effects import FILL_PROJECTIONS, LEVEL_COMPONENTS, MASK_BLENDS, LevelsView, mask_effects
 from .filters import FILTER, FILTERS, GROUPS
 from .post import POST_SLIDERS
 from .compositing import PIN_CORNERS
@@ -29,12 +29,16 @@ from .polyfill import POLY_NOUN
 from .meshmaps import MESH_MAPS
 from .minimal import MENU_HEADING, SAMPLE_TOP, EXPOSURE_RANGE, GAMMA_RANGE, PROJECTOR_RANGE, NORMAL_SLIDERS, STENCIL_SLIDERS, FX_RANGES, effect_menu, layer_rows, FOV_RANGE, RECENT_COLORS, SHADER_SLIDERS, BRUSH_SLIDERS, BRUSH_TOGGLES, BREAKUP_DETAIL, GENERATOR_SLIDERS, MAX_BRUSH_SIZE, MAX_WORLD_SIZE, REPLACE_TARGET, EFFECT_TARGET, SCALE_RANGE, TILING_RANGE, from_slider, painter_layout
 from .shell import COLUMNS, HEADER, HEIGHTS, PANELS, ROWS_ONLY, SECTIONS, SIDES, WIDTHS, clamp_length, clamp_strip, default_strips, flexible, place, resize_run
-from .state import Popover, TextEdit, WorkspaceState
+from .state import Popover, TextEdit, WorkspaceState, format_number, parse_number
 
 TIMER_INTERVAL = .3
 GESTURE_TOOLS = {'ERASE', 'BLUR', 'SMEAR', 'CLONE'}
 LINE_TOOLS = painting.BUFFER_TOOLS - {'FILL'}
 DRAG_START = 8
+SLIDER_DRAG_START = 4
+NUMERIC_KEYS = {**{name: str(index) for index, name in enumerate(('ZERO', 'ONE', 'TWO', 'THREE', 'FOUR', 'FIVE', 'SIX', 'SEVEN', 'EIGHT', 'NINE'))},
+                **{f'NUMPAD_{index}': str(index) for index in range(10)},
+                'PERIOD': '.', 'NUMPAD_PERIOD': '.', 'MINUS': '-', 'NUMPAD_MINUS': '-', 'PLUS': '+', 'NUMPAD_PLUS': '+'}
 ENV_ROTATE_PIXELS = 720.0
 AUTOSAVE_DEFAULT = 5
 POST_RANGES = {key: (field, top) for key, _, field, top in POST_SLIDERS}
@@ -149,6 +153,21 @@ def wrap_angle(angle):
     return (angle + math.pi) % math.tau - math.pi
 
 
+def parse_world_size(scene, text):
+    raw = text.strip()
+    if not raw:
+        raise ValueError('Type a number.')
+    units = scene.unit_settings
+    try:
+        length = bpy.utils.units.to_value(units.system, 'LENGTH', raw)
+        if not math.isfinite(length):
+            raise ValueError
+        value = length / (units.scale_length or 1.0)
+    except ValueError:
+        value = parse_number(raw, .001, MAX_WORLD_SIZE, units=('m',))
+    return max(.001, min(MAX_WORLD_SIZE, float(value)))
+
+
 class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
     bl_idname = "devil_painter.editor"
     bl_label = "Devil Painter"
@@ -194,6 +213,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         self.line_anchor = None
         self.below_pending, self.below_since = (), 0.0
         self.drag_origin = (0.0, 0.0)
+        self.drag_moved = False
         self.engine_before = ''
         self.world_pixels = (0, 0)
         self.fonts = []
@@ -1554,9 +1574,240 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
     def begin_text(self, key, text):
         self.state.text = TextEdit(key, text, len(text))
 
+    def begin_number(self, key):
+        spec = self.number_spec(key)
+        if spec is None:
+            return
+        text = spec[0]
+        self.state.text = TextEdit(key, text, len(text), numeric=True, selected=True)
+
+    def next_slider(self, current_key, backwards):
+        layout = self.workspace
+        scope = layout.controls[layout.popover_start:] if layout.popover_start >= 0 else layout.controls
+        sliders = [control.key for control in scope if control.kind == 'SLIDER'
+                   and (control.clip is None or control.clip.contains(control.rect.x + control.rect.w / 2, control.rect.y + control.rect.h / 2))]
+        if current_key not in sliders or len(sliders) < 2:
+            return None
+        return sliders[(sliders.index(current_key) + (-1 if backwards else 1)) % len(sliders)]
+
+    def number_spec(self, key):
+        obj, data = self.painted()
+        if key == 'BRUSH_SIZE':
+            if data is not None and brushes.world_sized(data):
+                return (brushes.world_size_text(data.brush_world_size), lambda text: parse_world_size(self.scene, text),
+                        lambda context, value: setattr(data, 'brush_world_size', value))
+            current = painting.brush_value(self.scene, 'size')
+            return (format_number(current, integer=True), lambda text: parse_number(text, 1, MAX_BRUSH_SIZE, integer=True, units=('px',)),
+                    lambda context, value: painting.set_brush_value(self.scene, 'size', value))
+        if key == 'BRUSH_STRENGTH' and data is not None:
+            def write_strength(context, value):
+                data.brush_opacity = value
+                self.brush_changed(context, data)
+            return format_number(data.brush_opacity * 100, decimals=2), lambda text: parse_number(text, 0.0, 1.0, scale=100.0, units=('%',)), write_strength
+        if key in BRUSH_RANGES and data is not None:
+            field, top, floor = BRUSH_RANGES[key]
+            scale = 1.0 if key in {'BRUSH_SPACING', 'BRUSH_ANGLE'} else 100.0
+            units = ('°', 'deg') if key == 'BRUSH_ANGLE' else ('%',)
+            def write_brush(context, value):
+                setattr(data, field, value)
+                self.brush_changed(context, data)
+            return format_number(getattr(data, field) * scale, decimals=2), lambda text: parse_number(text, floor, top, scale=scale, units=units), write_brush
+        if key in GENERATOR_RANGES and data is not None:
+            effect = active_effect(data)
+            if effect is None:
+                return None
+            field, top = GENERATOR_RANGES[key]
+            floor = .5 if key == 'GEN_SCALE' else 0.0
+            def write_gen(context, value):
+                actions.set_generator_value(context, obj, data, field, value)
+                self.message = actions.commit_value(context, obj, data, 'Generator')
+            return format_number(getattr(effect, field)), lambda text: parse_number(text, floor, top), write_gen
+        if key in SHADER_RANGES and data is not None:
+            field, top = SHADER_RANGES[key]
+            return format_number(getattr(data, field)), lambda text: parse_number(text, 0.0, top), lambda context, value: setattr(self, 'message', actions.set_set_value(context, obj, data, field, value, True))
+        if key == 'DISP_SCALE' and data is not None:
+            def write_disp_scale(context, value):
+                message = actions.set_set_value(context, obj, data, 'displacement_scale', value, True)
+                if message:
+                    self.message = message
+            return format_number(data.displacement_scale), lambda text: parse_number(text, 0.0, DISPLACEMENT_SCALE_MAX, units=('m',)), write_disp_scale
+        if key == 'DISP_SUBDIV' and data is not None:
+            def write_disp_subdiv(context, value):
+                message = actions.set_set_value(context, obj, data, 'displacement_subdivision', value, True)
+                if message:
+                    self.message = message
+            return format_number(data.displacement_subdivision, integer=True), lambda text: parse_number(text, 0, DISPLACEMENT_SUBDIVISION_MAX, integer=True), write_disp_subdiv
+        if key == 'PHYS_SIZE' and data is not None:
+            return format_number(obj.devil_painter.physical_size), lambda text: parse_number(text, .01, 10.0, units=('m',)), lambda context, value: setattr(self, 'message', actions.set_project_value(context, obj, obj.devil_painter, 'physical_size', value))
+        if key == 'ENV_ROTATION':
+            space = self._area.spaces.active
+            return format_number(math.degrees(space.shading.studiolight_rotate_z), decimals=2), lambda text: parse_number(text, -180.0, 180.0, units=('°', 'deg')), lambda context, value: setattr(space.shading, 'studiolight_rotate_z', math.radians(value))
+        if key == 'ENV_STRENGTH':
+            space = self._area.spaces.active
+            return format_number(space.shading.studiolight_intensity), lambda text: parse_number(text, 0.0, 2.0), lambda context, value: setattr(space.shading, 'studiolight_intensity', value)
+        if key == 'CAMERA_FOV':
+            space = self._area.spaces.active
+            return format_number(space.lens, decimals=2), lambda text: parse_number(text, FOV_RANGE[0], FOV_RANGE[1], units=('mm',)), lambda context, value: setattr(space, 'lens', value)
+        if key == 'PROJ_BEND' and data is not None:
+            layer = active_layer(data)
+            if layer is None:
+                return None
+            return format_number(layer.proj_bend), lambda text: parse_number(text, 0.0, 1.0), lambda context, value: setattr(self, 'message', actions.set_projector(context, obj, data, dict(proj_bend=value), True) or self.message)
+        if key == 'PROJ_SIZE' and data is not None:
+            layer = active_layer(data)
+            if layer is None:
+                return None
+            return format_number(layer.proj_size), lambda text: parse_number(text, .01, 1000.0), lambda context, value: setattr(self, 'message', actions.set_projector(context, obj, data, dict(proj_size=value), True) or self.message)
+        if key == 'PROJ_SPIN' and data is not None:
+            layer = active_layer(data)
+            if layer is None:
+                return None
+            def write_proj_spin(context, value):
+                rotation = active_layer(data).proj_rotation
+                self.message = actions.set_projector(context, obj, data, dict(proj_rotation=(rotation[0], rotation[1], math.radians(value))), True) or self.message
+            return format_number(math.degrees(layer.proj_rotation[2]) % 360, decimals=2), lambda text: parse_number(text, 0.0, 360.0, units=('°', 'deg')), write_proj_spin
+        if key in {'UV_OFFSET_X', 'UV_OFFSET_Y'} and data is not None:
+            layer = active_layer(data)
+            if layer is None:
+                return None
+            axis = 'XY'.index(key[-1])
+            def write_uv_offset(context, value):
+                offset = list(active_layer(data).uv_offset)
+                offset[axis] = value
+                self.message = actions.set_projector(context, obj, data, dict(uv_offset=tuple(offset)), True) or self.message
+            return format_number(layer.uv_offset[axis] % 1.0), lambda text: parse_number(text, 0.0, 1.0), write_uv_offset
+        if key == 'UV_SPIN' and data is not None:
+            layer = active_layer(data)
+            if layer is None:
+                return None
+            return (format_number(math.degrees(layer.uv_rotation) % 360, decimals=2), lambda text: parse_number(text, 0.0, 360.0, units=('°', 'deg')),
+                    lambda context, value: setattr(self, 'message', actions.set_projector(context, obj, data, dict(uv_rotation=math.radians(value)), True) or self.message))
+        if key == 'TRIPLANAR_HARDNESS' and data is not None:
+            layer = active_layer(data)
+            if layer is None:
+                return None
+            return format_number(1.0 - layer.triplanar_blend), lambda text: parse_number(text, 0.0, 1.0), lambda context, value: setattr(self, 'message', actions.set_projector(context, obj, data, dict(triplanar_blend=1.0 - value), True) or self.message)
+        if key == 'RADIAL' and data is not None:
+            return format_number(data.brush_radial, integer=True), lambda text: parse_number(text, 1, 16, integer=True), lambda context, value: setattr(data, 'brush_radial', value)
+        if key in DRAG_FIELDS and data is not None:
+            field, top = DRAG_FIELDS[key]
+            floor = .05 if key == 'STENCIL_SCALE' else 0.0
+            units = ('°', 'deg') if key in NORMAL_KEYS or key == 'STENCIL_ANGLE' else ()
+            def write_drag_field(context, value):
+                setattr(data, field, value)
+                if key in NORMAL_KEYS:
+                    brushes.normal_color(data)
+                    compositing.update_values(data)
+                self.brush_changed(context, data)
+            return format_number(getattr(data, field), decimals=2 if units else 3), lambda text: parse_number(text, floor, top, units=units), write_drag_field
+        if key == 'BAKE_SAMPLES' and data is not None:
+            return format_number(data.bake_samples, integer=True), lambda text: parse_number(text, 1, 128, integer=True), lambda context, value: setattr(data, 'bake_samples', value)
+        if key == 'BAKE_EXTRUSION' and data is not None:
+            return format_number(data.bake_extrusion * 100, decimals=2), lambda text: parse_number(text, .005, .5, scale=100.0, units=('%',)), lambda context, value: setattr(data, 'bake_extrusion', value)
+        if key == 'BAKE_MAP_SAMPLES' and data is not None:
+            selected = self.state.bake_map
+            return format_number(map_samples(data, selected), integer=True), lambda text: parse_number(text, 1, 128, integer=True), lambda context, value: setattr(bake_map_settings(data, selected), 'samples', value)
+        if key == 'BAKE_MAP_EXTRUSION' and data is not None:
+            selected = self.state.bake_map
+            return format_number(map_extrusion(data, selected) * 100, decimals=2), lambda text: parse_number(text, .005, .5, scale=100.0, units=('%',)), lambda context, value: setattr(bake_map_settings(data, selected), 'extrusion', value)
+        if key == 'BAKE_AO_DISTANCE' and data is not None:
+            return format_number(data.bake_ao_distance * 100, decimals=2), lambda text: parse_number(text, .01, 2.0, scale=100.0, units=('%',)), lambda context, value: setattr(data, 'bake_ao_distance', value)
+        if key == 'BAKE_AO_SPREAD' and data is not None:
+            return format_number(data.bake_ao_spread, decimals=2), lambda text: parse_number(text, 15.0, 180.0, units=('°', 'deg')), lambda context, value: setattr(data, 'bake_ao_spread', value)
+        if key == 'BAKE_THICKNESS_RANGE' and data is not None:
+            return format_number(data.bake_thickness_range * 100, decimals=2), lambda text: parse_number(text, .01, 2.0, scale=100.0, units=('%',)), lambda context, value: setattr(data, 'bake_thickness_range', value)
+        if key.startswith('BRUSHVAL.') and data is not None:
+            channel = key.removeprefix('BRUSHVAL.')
+            def write_brush_val(context, value):
+                data.brush_slots[channel].value = value
+                self.brush_changed(context, data)
+            return format_number(data.brush_slots[channel].value), lambda text: parse_number(text, 0.0, 1.0), write_brush_val
+        if key == 'OPACITY' and data is not None:
+            layer = active_layer(data)
+            if layer is None:
+                return None
+            def write_opacity(context, value):
+                actions.set_opacity(context, obj, data, value)
+                self.message = actions.commit_value(context, obj, data, 'Opacity')
+            return format_number(layer.opacity * 100, decimals=2), lambda text: parse_number(text, 0.0, 1.0, scale=100.0, units=('%',)), write_opacity
+        if key.startswith(('VALUE.', 'VALUEB.')) and data is not None:
+            layer = active_layer(data)
+            if layer is None:
+                return None
+            kind, channel = key.split('.')
+            second = kind == 'VALUEB'
+            current = layer.slots[channel].value_b if second else layer.slots[channel].value
+            def write_channel_val(context, value):
+                actions.set_channel_value(context, obj, data, channel, (value,), second=second)
+                self.message = actions.commit_value(context, obj, data, CHANNEL[channel].label)
+            return format_number(current), lambda text: parse_number(text, 0.0, 1.0), write_channel_val
+        if key.startswith('CHOPACITY.') and data is not None:
+            layer = active_layer(data)
+            if layer is None:
+                return None
+            channel = key.removeprefix('CHOPACITY.')
+            def write_ch_opacity(context, value):
+                actions.set_slot_field(context, obj, data, channel, 'opacity', value)
+                self.message = actions.commit_value(context, obj, data, f'{CHANNEL[channel].label} opacity')
+            return format_number(layer.slots[channel].opacity * 100, decimals=2), lambda text: parse_number(text, 0.0, 1.0, scale=100.0, units=('%',)), write_ch_opacity
+        if key.startswith(('SCALE.', 'DETAIL.', 'CONTRAST.')) and data is not None:
+            layer = active_layer(data)
+            if layer is None:
+                return None
+            kind, channel = key.split('.')
+            bounds = {'SCALE': (from_slider(0.0, SCALE_RANGE), from_slider(1.0, SCALE_RANGE)), 'DETAIL': (0.0, 1.0), 'CONTRAST': (0.0, .98)}[kind]
+            field = kind.lower()
+            def write_pattern(context, value):
+                actions.set_slot_field(context, obj, data, channel, field, value)
+                self.message = actions.commit_value(context, obj, data, f'{CHANNEL[channel].label} {field}')
+            return format_number(getattr(layer.slots[channel], field)), lambda text: parse_number(text, bounds[0], bounds[1]), write_pattern
+        if key == 'TILING' and data is not None:
+            layer = active_layer(data)
+            if layer is None:
+                return None
+            def write_tiling(context, value):
+                actions.set_tiling(context, obj, data, value)
+                self.message = actions.commit_value(context, obj, data, 'Tiling')
+            return format_number(layer.tiling), lambda text: parse_number(text, from_slider(0.0, TILING_RANGE), from_slider(1.0, TILING_RANGE), units=('x',)), write_tiling
+        if key == 'AUTOSAVE_MINUTES':
+            return (format_number(max(autosave.minutes(), 1), integer=True),
+                    lambda text: parse_number(text, autosave.MINUTE_RANGE[0], autosave.MINUTE_RANGE[1], integer=True, units=('min',)),
+                    lambda context, value: autosave.set_minutes(value))
+        if key == 'PREVIEW_SAMPLES':
+            return format_number(self.scene.cycles.preview_samples, integer=True), lambda text: parse_number(text, 1, SAMPLE_TOP, integer=True), lambda context, value: setattr(self.scene.cycles, 'preview_samples', value)
+        if key in POST_RANGES and obj is not None:
+            field, top = POST_RANGES[key]
+            def write_post(context, value):
+                setattr(obj.devil_painter, field, value)
+                post.write(self.scene, obj.devil_painter)
+            return format_number(getattr(obj.devil_painter, field)), lambda text: parse_number(text, 0.0, top), write_post
+        if key == 'CM_EXPOSURE':
+            return format_number(self.scene.view_settings.exposure), lambda text: parse_number(text, EXPOSURE_RANGE[0], EXPOSURE_RANGE[1]), lambda context, value: setattr(self.scene.view_settings, 'exposure', value)
+        if key == 'CM_GAMMA':
+            return format_number(self.scene.view_settings.gamma), lambda text: parse_number(text, GAMMA_RANGE[0], GAMMA_RANGE[1]), lambda context, value: setattr(self.scene.view_settings, 'gamma', value)
+        if key.startswith('FX_') and key.removeprefix('FX_') in FX_RANGES and data is not None:
+            effect = active_effect(data)
+            if effect is None:
+                return None
+            field = key.removeprefix('FX_')
+            top, floor = FX_RANGES[field]
+            holder = LevelsView(effect) if effect.kind == 'LEVELS' else effect
+            scale = 100.0 if field == 'opacity' else 1.0
+            units = ('%',) if field == 'opacity' else ('°', 'deg') if field == 'angle' else ()
+            return (format_number(getattr(holder, field) * scale, decimals=2 if scale == 100.0 else 3),
+                    lambda text: parse_number(text, floor, top, scale=scale, units=units),
+                    lambda context, value: setattr(self, 'message', actions.edit_effect(context, obj, data, field, value, True)))
+        return None
+
     def commit_text(self, context):
         edit = self.state.text
         self.state.text = None
+        if edit.numeric:
+            spec = self.number_spec(edit.key)
+            if spec is not None:
+                _, parse, write = spec
+                write(context, parse(edit.text))
+            return
         obj, data = self.painted()
         if edit.key.startswith('NAME_') and data is not None:
             self.message = actions.rename_layer(context, obj, data, edit.key.removeprefix('NAME_'), edit.text)
@@ -1589,40 +1840,73 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
     def text_event(self, context, event, pointer_event):
         edit = self.state.text
         if pointer_event:
-            if event.value == 'PRESS' and event.type in {'LEFTMOUSE', 'RIGHTMOUSE'}:
+            if event.value in {'PRESS', 'DOUBLE_CLICK'} and event.type in {'LEFTMOUSE', 'RIGHTMOUSE'}:
                 control = self.workspace.hit(*self.pointer)
                 owner = control is not None and (control.key == edit.key or control.key == 'ROW_' + edit.key.removeprefix('NAME_'))
                 if not owner:
                     self.finish_text(context)
                     return None
+                if edit.numeric and event.type == 'LEFTMOUSE':
+                    edit.selected = event.value == 'DOUBLE_CLICK'
+                    edit.cursor = len(edit.text)
+                    self._area.tag_redraw()
                 return {'RUNNING_MODAL'}
             return None
         if event.value != 'PRESS':
             return {'RUNNING_MODAL'}
         if event.type in {'RET', 'NUMPAD_ENTER'}:
             self.finish_text(context)
+        elif event.type == 'TAB' and edit.numeric and not event.ctrl and not event.alt and not event.oskey:
+            previous_key = edit.key
+            self.finish_text(context)
+            self.workspace = self.make_layout()
+            following = self.next_slider(previous_key, event.shift)
+            if following is not None:
+                self.begin_number(following)
         elif event.type == 'ESC':
             self.state.text = None
-        elif event.type == 'BACK_SPACE' and edit.cursor > 0:
-            edit.text = edit.text[:edit.cursor - 1] + edit.text[edit.cursor:]
-            edit.cursor -= 1
+        elif event.type == 'BACK_SPACE':
+            if edit.selected:
+                edit.text, edit.cursor, edit.selected = '', 0, False
+            elif edit.cursor > 0:
+                edit.text = edit.text[:edit.cursor - 1] + edit.text[edit.cursor:]
+                edit.cursor -= 1
         elif event.type == 'DEL':
-            edit.text = edit.text[:edit.cursor] + edit.text[edit.cursor + 1:]
+            if edit.selected:
+                edit.text, edit.cursor, edit.selected = '', 0, False
+            else:
+                edit.text = edit.text[:edit.cursor] + edit.text[edit.cursor + 1:]
         elif event.type == 'LEFT_ARROW':
-            edit.cursor = max(0, edit.cursor - 1)
+            edit.cursor = 0 if edit.selected else max(0, edit.cursor - 1)
+            edit.selected = False
         elif event.type == 'RIGHT_ARROW':
-            edit.cursor = min(len(edit.text), edit.cursor + 1)
+            edit.cursor = len(edit.text) if edit.selected else min(len(edit.text), edit.cursor + 1)
+            edit.selected = False
         elif event.type == 'HOME':
-            edit.cursor = 0
+            edit.cursor, edit.selected = 0, False
         elif event.type == 'END':
-            edit.cursor = len(edit.text)
+            edit.cursor, edit.selected = len(edit.text), False
+        elif event.ctrl and event.type == 'A':
+            edit.selected, edit.cursor = True, len(edit.text)
+        elif event.ctrl and event.type == 'C':
+            context.window_manager.clipboard = edit.text
         elif event.ctrl and event.type == 'V':
             pasted = context.window_manager.clipboard.replace('\n', ' ')
-            edit.text = edit.text[:edit.cursor] + pasted + edit.text[edit.cursor:]
-            edit.cursor += len(pasted)
-        elif event.unicode and event.unicode.isprintable() and not event.ctrl:
-            edit.text = edit.text[:edit.cursor] + event.unicode + edit.text[edit.cursor:]
-            edit.cursor += len(event.unicode)
+            if edit.selected:
+                edit.text, edit.cursor, edit.selected = pasted, len(pasted), False
+            else:
+                edit.text = edit.text[:edit.cursor] + pasted + edit.text[edit.cursor:]
+                edit.cursor += len(pasted)
+        else:
+            typed = ('.' if edit.numeric and event.type == 'NUMPAD_PERIOD' and not event.ctrl and not event.alt
+                     else event.unicode if event.unicode and event.unicode.isprintable() and not event.ctrl and not event.alt
+                     else NUMERIC_KEYS.get(event.type, '') if edit.numeric and not event.ctrl and not event.alt and not event.shift else '')
+            if typed:
+                if edit.selected:
+                    edit.text, edit.cursor, edit.selected = typed, len(typed), False
+                else:
+                    edit.text = edit.text[:edit.cursor] + typed + edit.text[edit.cursor:]
+                    edit.cursor += len(typed)
         self._area.tag_redraw()
         return {'RUNNING_MODAL'}
 
@@ -1636,6 +1920,22 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         key, rect = self.state.drag
         if key == 'ENV_ROTATE_DRAG':
             return self.env_rotate_event(event, rect)
+        if key.startswith('SLIDER:'):
+            slider_key = key.removeprefix('SLIDER:')
+            release = event.type == 'LEFTMOUSE' and event.value == 'RELEASE'
+            if not self.drag_moved and math.dist(self.pointer, self.drag_origin) > SLIDER_DRAG_START * self.workspace.scale:
+                self.drag_moved = True
+            if self.drag_moved and (event.type in {'MOUSEMOVE', 'INBETWEEN_MOUSEMOVE'} or release):
+                x = max(0.0, min(1.0, (self.pointer[0] - rect.x) / rect.w))
+                y = max(0.0, min(1.0, (self.pointer[1] - rect.y) / rect.h))
+                self.apply_drag(context, slider_key, x, y, release)
+            if release:
+                self.state.drag = None
+                if not self.drag_moved:
+                    self.begin_number(slider_key)
+                self.drag_moved = False
+            self._area.tag_redraw()
+            return {'RUNNING_MODAL'}
         x = max(0.0, min(1.0, (self.pointer[0] - rect.x) / rect.w))
         y = max(0.0, min(1.0, (self.pointer[1] - rect.y) / rect.h))
         release = event.type == 'LEFTMOUSE' and event.value == 'RELEASE'
@@ -1937,7 +2237,11 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.state.drag = (key, control.rect)
             if key.startswith('PATH_POINT.'):
                 return None
-        elif control.kind in {'SLIDER', 'SV', 'HUE', 'GRIP'}:
+        elif control.kind == 'SLIDER':
+            self.state.drag = ('SLIDER:' + key, control.rect)
+            self.drag_origin = self.pointer
+            self.drag_moved = False
+        elif control.kind in {'SV', 'HUE', 'GRIP'}:
             self.state.drag = (key, control.rect)
             x = max(0.0, min(1.0, (self.pointer[0] - control.rect.x) / control.rect.w))
             y = max(0.0, min(1.0, (self.pointer[1] - control.rect.y) / control.rect.h))

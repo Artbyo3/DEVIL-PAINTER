@@ -1,3 +1,4 @@
+import math
 from dataclasses import dataclass, field
 from typing import Optional
 from .shell import HEIGHTS, WIDTHS, default_strips
@@ -16,6 +17,36 @@ class TextEdit:
     key: str
     text: str
     cursor: int
+    numeric: bool = False
+    selected: bool = False
+
+
+def format_number(value, integer=False, decimals=3):
+    if integer:
+        return str(int(round(value)))
+    text = f'{float(value):.{decimals}f}'.rstrip('0').rstrip('.')
+    return '0' if text in {'', '-0'} else text
+
+
+def parse_number(text, low, high, scale=1.0, integer=False, units=()):
+    raw = text.strip()
+    if not raw:
+        raise ValueError('Type a number.')
+    lowered = raw.casefold()
+    for suffix in units:
+        if suffix and lowered.endswith(suffix.casefold()):
+            raw = raw[:-len(suffix)].strip()
+            break
+    if not raw:
+        raise ValueError('Type a number.')
+    try:
+        parsed = float(raw)
+    except ValueError:
+        raise ValueError(f'"{text.strip()}" is not a number.') from None
+    if not math.isfinite(parsed):
+        raise ValueError(f'"{text.strip()}" is not a number.')
+    value = max(low, min(high, parsed / scale))
+    return int(round(value)) if integer else float(value)
 
 
 @dataclass

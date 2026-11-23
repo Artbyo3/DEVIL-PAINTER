@@ -16,7 +16,7 @@ import devil_painter
 from devil_painter import brushes, editor, library, painting
 from devil_painter.document import active_layer, find_layer
 from tools.workspace import prepare_scratch
-from tests.gui_harness import check, click, close_cards, control, finish, has, move, native_dab, press, run_journey, settle, shelf_index, top_view, viewport
+from tests.gui_harness import check, click, close_cards, control, drag_slider, finish, has, move, native_dab, press, run_journey, settle, shelf_index, top_view, viewport
 
 LOW, MIDDLE, HIGH = .25, .5, 1.0
 DAB_SPOTS = (-.6, -.2, .2, .6)
@@ -31,7 +31,10 @@ def card_click(window, region, key, fx=.5):
         click(window, region, 'BRUSH_CARD')
         yield from settle()
     check(has(key), f'the Brush card shows {key}')
-    click(window, region, key, fx=fx)
+    if control(key).kind == 'SLIDER':
+        drag_slider(window, region, key, fx)
+    else:
+        click(window, region, key, fx=fx)
     yield from settle()
 
 
@@ -138,7 +141,7 @@ def journey():
     yield from close_cards(window, middle)
     edge_left, edge_right = screen_point(area, region, -1.0), screen_point(area, region, 1.0)
     pixels_per_unit = (edge_right[0] - edge_left[0]) / 2
-    click(window, region, 'BRUSH_SIZE', fx=.1)
+    drag_slider(window, region, 'BRUSH_SIZE', .1)
     yield from settle()
     size = painting.brush_value(bpy.context.scene, 'size')
     check(0 < size < pixels_per_unit * .15, f'the brush is small enough for separate dabs ({size} px, {pixels_per_unit:.0f} px per unit)')

@@ -178,7 +178,7 @@ def journey():
     hard, _ = yield from exported()
 
     def setting(label, fx):
-        yield from drag(fx, fx)
+        yield from drag(.2 if fx >= .5 else .8, fx)
         check(box().projection_blend == layer().triplanar_blend and control('TRIPLANAR_HARDNESS').text == f'{1.0 - layer().triplanar_blend:.2f}',
               f'the {label} hardness {1.0 - layer().triplanar_blend:.2f} reaches the material')
         result, _ = yield from exported()

@@ -15,7 +15,7 @@ import devil_painter
 from devil_painter import editor, library, painting
 from devil_painter.document import active_layer
 from tools.workspace import prepare_scratch
-from tests.gui_harness import POLL, check, control, finish, keys, run_journey, settle, spot, type_text, until, viewport
+from tests.gui_harness import POLL, check, control, drag_slider, finish, keys, run_journey, settle, spot, type_text, until, viewport
 
 DISTANCE = 2.4
 STEPS = 10
@@ -153,7 +153,7 @@ def journey():
     check(data.brush_stencil is not None and brush().texture_slot.map_mode == 'STENCIL', 'Use as stencil puts the decal on screen as a brush stencil')
     click(window, region, 'STENCIL_CARD')
     yield from settle()
-    click(window, region, 'STENCIL_SCALE', fx=.05)
+    drag_slider(window, region, 'STENCIL_SCALE', .05)
     yield from settle()
     check(abs(data.stencil_scale - .2) < .01, f'the scale slider sets a small stencil ({data.stencil_scale:.3f})')
     width, height = region.width, region.height
@@ -252,7 +252,7 @@ def journey():
 
     click(window, region, 'STENCIL_CARD')
     yield from settle()
-    click(window, region, 'STENCIL_X', fx=.3)
+    drag_slider(window, region, 'STENCIL_X', .3)
     yield from settle()
     after = stencil_state(data)
     check(abs(data.stencil_x - .3) < .01 and abs(after['pos'][0] - data.stencil_x * width) < .5,

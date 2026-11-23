@@ -17,7 +17,7 @@ from devil_painter import brushes, editor, library, painting
 from devil_painter.document import find_layer
 from devil_painter.minimal import MAX_WORLD_SIZE
 from tools.workspace import prepare_scratch
-from tests.gui_harness import check, click, close_cards, control, finish, has, move, new_layer, press, run_journey, settle, shelf_index, spot, type_text, viewport
+from tests.gui_harness import check, click, close_cards, control, drag_slider, finish, has, move, new_layer, press, run_journey, settle, shelf_index, spot, type_text, viewport
 
 WORLD_SIZE = .2
 NEAR, FAR = 3.0, 9.0
@@ -33,7 +33,10 @@ def card_click(window, region, key, fx=.5):
         click(window, region, 'BRUSH_CARD')
         yield from settle()
     check(has(key), f'the Brush card shows {key}')
-    click(window, region, key, fx=fx)
+    if control(key).kind == 'SLIDER':
+        drag_slider(window, region, key, fx)
+    else:
+        click(window, region, key, fx=fx)
     yield from settle()
 
 
@@ -140,7 +143,7 @@ def journey():
     check(control('SIZE_SPACE.SCREEN').active and not control('SIZE_SPACE.WORLD').active, 'Screen size is the active choice')
     yield from close_cards(window, middle)
 
-    click(window, region, 'BRUSH_SIZE', fx=.2)
+    drag_slider(window, region, 'BRUSH_SIZE', .2)
     yield from settle()
     screen_px = native_size()
     screen = []
@@ -157,7 +160,7 @@ def journey():
     check(data.brush_size_space == 'WORLD' and control('SIZE_SPACE.WORLD').active, 'a click switches the brush to World size')
     check(editor._active.wants_gesture(bpy.context), 'World size routes Paint through the per-dab replay')
     yield from close_cards(window, middle)
-    click(window, region, 'BRUSH_SIZE', fx=WORLD_SIZE / MAX_WORLD_SIZE)
+    drag_slider(window, region, 'BRUSH_SIZE', WORLD_SIZE / MAX_WORLD_SIZE)
     yield from settle()
     check(abs(data.brush_world_size - WORLD_SIZE) < .005, f'the tool strip Size slider sets the world size ({data.brush_world_size:.4f})')
     check(control('BRUSH_SIZE').text == brushes.world_size_text(data.brush_world_size) and 'px' not in control('BRUSH_SIZE').text,

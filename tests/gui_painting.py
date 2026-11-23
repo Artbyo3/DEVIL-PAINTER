@@ -14,7 +14,7 @@ import devil_painter
 from devil_painter import editor, library, painting
 from devil_painter.document import active_layer, find_layer
 from tools.workspace import prepare_scratch
-from tests.gui_harness import check, click, close_cards, context_menu, control, finish, has, keys, move, nodes, pixels, png, press, reveal, run_journey, select_row, set_hex, settle, slide, spot, type_text, until, viewport
+from tests.gui_harness import check, click, close_cards, context_menu, control, drag_slider, finish, has, keys, move, nodes, pixels, png, press, reveal, run_journey, select_row, set_hex, settle, slide, spot, type_text, until, viewport
 
 
 def spot_of(region, key, fx=.5, fy=.5):
@@ -83,7 +83,7 @@ def card_slide(window, region, opener, key, popover, fx):
     if not (editor._active.state.popover is not None and editor._active.state.popover.kind == popover):
         click(window, region, opener)
         yield from settle()
-    click(window, region, key, fx=fx)
+    drag_slider(window, region, key, fx)
     yield from settle()
 
 
@@ -147,10 +147,10 @@ def journey():
     check(all(has(key) for key in ('BRUSH_ANGLE', 'BRUSH_STROKE', 'SAVE_BRUSH', 'BRUSH_SMOOTHING', 'BRUSHUSE.base_color', 'BRUSHUSE.height')),
           'the brush card offers angle, stroke, lazy mouse, presets, and every channel')
     check(control('BRUSH_SMOOTHING').label == 'Lazy mouse', 'smoothing is the lazy mouse')
-    click(window, region, 'BRUSH_ANGLE', fx=.25)
+    drag_slider(window, region, 'BRUSH_ANGLE', .25)
     yield from settle()
     check(abs(data.brush_angle - 90) < 4, 'the angle slider rotates the brush')
-    click(window, region, 'BRUSH_SMOOTHING', fx=.5)
+    drag_slider(window, region, 'BRUSH_SMOOTHING', .5)
     yield from settle()
     brush = bpy.context.tool_settings.image_paint.brush
     check(brush.use_smooth_stroke and brush.smooth_stroke_radius > 40, 'lazy mouse stabilizes the Blender stroke')
@@ -183,7 +183,7 @@ def journey():
     click(window, region, labels['Soft Round'])
     yield from settle()
 
-    click(window, region, 'BRUSH_SIZE', fx=.06)
+    drag_slider(window, region, 'BRUSH_SIZE', .06)
     yield from settle()
     check(painting.brush_value(bpy.context.scene, 'size') < 40, 'the size slider makes a small brush')
     click(window, region, 'ADD_PAINT')

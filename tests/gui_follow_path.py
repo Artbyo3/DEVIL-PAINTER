@@ -15,7 +15,7 @@ import devil_painter
 from devil_painter import brushes, editor, library
 from devil_painter.document import find_layer
 from tools.workspace import prepare_scratch
-from tests.gui_harness import check, click, close_cards, control, finish, has, native_dab, new_layer, press, run_journey, settle, shelf_index, spot, top_view, type_text, viewport
+from tests.gui_harness import check, click, close_cards, control, drag_slider, finish, has, native_dab, new_layer, press, run_journey, settle, shelf_index, spot, top_view, type_text, viewport
 
 DAB_REACH = .07
 EDGE_LEVEL = .05
@@ -38,7 +38,10 @@ def card_click(window, region, key, fx=.5):
         click(window, region, 'BRUSH_CARD')
         yield from settle()
     check(has(key), f'the Brush card shows {key}')
-    click(window, region, key, fx=fx)
+    if control(key).kind == 'SLIDER':
+        drag_slider(window, region, key, fx)
+    else:
+        click(window, region, key, fx=fx)
     yield from settle()
 
 
@@ -179,7 +182,7 @@ def journey():
     yield from settle()
     check(data.brush_alpha is not None and data.brush_smoothing == 0 and not data.brush_random_angle and data.brush_angle == 0,
           'the one-sided Arrow tip loads with lazy mouse, random angle and base angle off')
-    click(window, region, 'BRUSH_SIZE', fx=.08)
+    drag_slider(window, region, 'BRUSH_SIZE', .08)
     yield from settle()
     evidence = {}
 

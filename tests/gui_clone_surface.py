@@ -14,7 +14,7 @@ import devil_painter
 from devil_painter import editor, painting, shelf
 from devil_painter.document import active_layer, find_layer
 from tools.workspace import prepare_scratch
-from tests.gui_harness import check, click, finish, has, move, press, run_journey, settle, top_view, viewport
+from tests.gui_harness import check, click, drag_slider, finish, has, move, press, run_journey, settle, top_view, viewport
 
 RESOLUTION = 1024
 UV_SCALE = .4
@@ -237,7 +237,7 @@ def journey():
     hard = next(index for index, item in enumerate(shelf.items('BRUSHES')) if item.label == 'Hard Round')
     click(window, region, f'ITEM.{hard}')
     yield from settle()
-    click(window, region, 'BRUSH_SIZE', fx=.06)
+    drag_slider(window, region, 'BRUSH_SIZE', .06)
     yield from settle()
     click(window, region, 'CLONE')
     yield from settle()

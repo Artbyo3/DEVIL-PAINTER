@@ -1969,4 +1969,13 @@ def painter_layout(bounds, scale, state, data, obj_name, tool, brush, directory,
             layout.popover = brush_popover(layout, state, bounds, data)
         elif data is not None:
             layout.popover = export_popover(layout, state, bounds, data, directory)
+    if state.text is not None and state.text.numeric:
+        active = layout.controls[layout.popover_start:] if layout.popover_start >= 0 else layout.controls
+        targets = [control for control in active if control.kind == 'SLIDER' and control.key == state.text.key]
+        if not targets and layout.popover_start >= 0:
+            targets = [control for control in layout.controls[:layout.popover_start] if control.kind == 'SLIDER' and control.key == state.text.key]
+        for control in targets:
+            control.text = state.text.text
+            control.caret = state.text.cursor
+            control.selected = state.text.selected
     return layout

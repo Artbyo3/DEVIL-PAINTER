@@ -14,7 +14,7 @@ from devil_painter import editor, library, shelf
 from devil_painter.document import active_layer, find_layer
 from devil_painter.minimal import EFFECT_TARGET, REPLACE_TARGET
 from tools.workspace import prepare_scratch
-from tests.gui_harness import bake_landed, check, click, context_menu, control, finish, has, keys, move, nodes, png, press, reveal, run_journey, select_row, settle, shown, spot, type_text, until, viewport
+from tests.gui_harness import bake_landed, check, click, context_menu, control, drag_slider, finish, has, keys, move, nodes, png, press, reveal, run_journey, select_row, settle, shown, spot, type_text, until, viewport
 
 
 def generators(layer):
@@ -229,7 +229,7 @@ def journey():
           f'dropping a material below a row creates a fill layer right under it {before} {after} {steel_uid} {editor._active.message}')
     check(not has('DRAG_GHOST'), 'the drag preview goes away after the drop')
     yield from reveal(window, region, 'VALUE.roughness')
-    click(window, region, 'VALUE.roughness', fx=.8)
+    drag_slider(window, region, 'VALUE.roughness', .8)
     yield from settle()
     check(abs(find_layer(data, steel_uid).slots['roughness'].value - .8) < .05, 'the dropped material is tuned with its sliders')
     yield from open_tab(window, region, 'MASKS')
@@ -259,8 +259,7 @@ def journey():
         if control(key).active != (key.removeprefix('BAKEMAP.') in {'ao', 'curvature'}):
             click(window, region, key)
             yield from settle()
-    rect = control('BAKE_SAMPLES').rect
-    press(window, 'LEFTMOUSE', region.x + rect.x + rect.w * .03, region.y + rect.y + rect.h / 2)
+    drag_slider(window, region, 'BAKE_SAMPLES', .03)
     yield from settle()
     click(window, region, 'BAKE_RUN')
     yield from settle()
@@ -305,9 +304,9 @@ def journey():
     check(view.look != 'None', 'picking a look applies it')
     click(window, region, 'VIEWPORT')
     yield from settle()
-    click(window, region, 'CM_EXPOSURE', fx=.7)
+    drag_slider(window, region, 'CM_EXPOSURE', .7)
     yield from settle()
-    click(window, region, 'CM_GAMMA', fx=.6)
+    drag_slider(window, region, 'CM_GAMMA', .6)
     yield from settle()
     check(abs(view.exposure - 2.0) < .1 and abs(view.gamma - 1.88) < .1, 'the exposure and gamma sliders set the display')
     press(window, 'ESC', *middle)
