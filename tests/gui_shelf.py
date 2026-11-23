@@ -2,6 +2,8 @@ import sys
 from pathlib import Path
 import bpy
 import numpy
+from bpy_extras import view3d_utils
+from mathutils import Vector
 
 bpy.context.preferences.view.show_splash = False
 ROOT = Path(__file__).resolve().parents[1]
@@ -48,6 +50,14 @@ def release(window, end):
 def row_point(region, uid, fy):
     rect = control('ROW_' + uid).rect
     return region.x + rect.x + rect.w * .6, region.y + rect.y + rect.h * fy
+
+
+def mesh_point(region, area, obj):
+    view = area.spaces.active.region_3d
+    direction = view.view_rotation @ Vector((0.0, 0.0, -1.0))
+    face = min(range(len(obj.data.polygons)), key=lambda index: obj.data.polygons[index].normal.dot(direction))
+    point = view3d_utils.location_3d_to_region_2d(region, view, obj.matrix_world @ obj.data.polygons[face].center)
+    return region.x + point.x, region.y + point.y
 
 
 def order(data):
@@ -304,6 +314,33 @@ def journey():
     yield from context_menu(window, region, steel_uid, 'EXPORT_LAYER')
     graded = png(export_dir / f'{stem}_BaseColor.png')
     check(numpy.abs(graded - plain).max() < 1e-6, 'exports keep the raw texture values whatever the viewport color management')
+
+    yield from open_tab(window, region, 'MATERIALS')
+    mesh_hit = mesh_point(region, area, cube)
+    before_mesh = len(data.layers)
+    yield from drag_to(window, spot(region, labels()['Gold']), mesh_hit)
+    check(has('DRAG_GHOST') and editor._active.highlight == 0 and editor._active.state.drop[:2] == ('MESH', 0),
+          'dragging a material over the mesh highlights its texture set')
+    yield from release(window, mesh_hit)
+    gold = active_layer(data)
+    roots = [layer.uid for layer in data.layers if not layer.parent]
+    check(gold.name == 'Gold' and len(data.layers) == before_mesh + 1 and not gold.parent and roots[-1] == gold.uid
+          and editor._active.highlight is None and not has('DRAG_GHOST'),
+          'dropping a material onto the mesh adds it at the top of the stack and clears the highlight')
+    stage = editor._active.workspace.zones.stage
+    empty = (region.x + stage.x + 12, region.y + stage.top - 12)
+    yield from drag_to(window, spot(region, labels()['Steel']), empty)
+    check(editor._active.highlight is None and not editor._active.state.drop,
+          'dragging over empty viewport space does not target the mesh')
+    yield from release(window, empty)
+    check(len(data.layers) == before_mesh + 1, 'releasing over empty viewport space does not add a layer')
+    yield from open_tab(window, region, 'MASKS')
+    yield from drag_to(window, spot(region, labels()['Dirt']), mesh_hit)
+    check(editor._active.highlight is None and not editor._active.state.drop,
+          'dragging a mask over the mesh does not target the mesh')
+    yield from release(window, mesh_hit)
+    check(not generators(gold) and len(data.layers) == before_mesh + 1,
+          'releasing a mask over the mesh leaves the layers unchanged')
 
     click(window, region, 'CLOSE')
     yield from settle()

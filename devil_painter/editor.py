@@ -2326,29 +2326,56 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
     def shelf_item(self, key):
         return shelf.visible(self.state.shelf_tab, self.state.shelf_query, self.state.shelf_scope)[int(key.removeprefix('ITEM.'))]
 
+    def mesh_drop_target(self, obj, data, item):
+        if data is None or item.kind not in LAYER_KINDS:
+            return None
+        if not (0 <= self.pointer[0] < self._region.width and 0 <= self.pointer[1] < self._region.height):
+            return None
+        if self.workspace.covers(*self.pointer):
+            return None
+        face = sets.face_under(self._region, self._area.spaces.active.region_3d, obj, self.pointer)
+        if face < 0:
+            return None
+        return sets.locate(obj, obj.devil_painter, face)
+
     def track_item(self, context, key, release):
         item = self.shelf_item('ITEM.' + key.removeprefix('DRAG_ITEM.'))
         moved = math.dist(self.pointer, self.drag_origin) > DRAG_START * self.workspace.scale
+        obj, data = self.painted()
         target = self.drop_target('ROW_') if moved else None
+        mesh_hit = None if target is not None or not moved else self.mesh_drop_target(obj, data, item)
         if target is not None:
-            obj, data = self.painted()
             height = (self.pointer[1] - target.rect.y) / target.rect.h
             folder = find_layer(data, target.key.removeprefix('ROW_')).kind == 'FOLDER'
             mode = 'INTO' if item.kind in ONTO_KINDS or (folder and .33 <= height <= .66) else 'ABOVE' if height >= .5 else 'BELOW'
             self.state.drop = (target.key, mode)
+        elif mesh_hit is not None:
+            self.state.drop = ('MESH', mesh_hit[0], mesh_hit[1])
         else:
             self.state.drop = ()
+        self.highlight = mesh_hit[0] if mesh_hit is not None and not release else None
         self.state.ghost = (self.pointer[0], self.pointer[1], item.label, shelf.thumbnail(item)) if moved and not release else ()
         if not release:
             return
         drop, self.state.drop = self.state.drop, ()
-        obj, data = self.painted()
         if not moved:
             self.message = self.use_shelf_item(context, obj, data, item)
+        elif drop and drop[0] == 'MESH':
+            self.message = self.drop_on_mesh(context, obj, item, drop[1], drop[2])
         elif drop:
             self.message = self.drop_item(context, obj, data, item, drop[0].removeprefix('ROW_'), drop[1])
         elif 'LAYERS' in self.workspace.scroll_areas and self.workspace.scroll_areas['LAYERS'][0].contains(*self.pointer):
             self.message = self.use_shelf_item(context, obj, data, item)
+
+    def drop_on_mesh(self, context, obj, item, set_index, tile):
+        actions.activate(context, obj, obj.devil_painter, set_index, tile)
+        data = texture_set(obj)
+        self.state.multi.clear()
+        self.state.armed = ''
+        top = next((layer.uid for layer in reversed(data.layers) if not layer.parent), '')
+        if top:
+            return self.drop_item(context, obj, data, item, top, 'ABOVE')
+        return self.use_shelf_item(context, obj, data, item)
 
     def drop_item(self, context, obj, data, item, target_uid, mode):
         actions.select_layer(context, obj, data, target_uid)
