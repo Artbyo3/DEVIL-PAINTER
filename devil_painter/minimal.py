@@ -10,7 +10,7 @@ from .brushes import world_size_text
 from pathlib import Path
 from .blending import BLEND_MODES, CHANNEL, CHANNELS, FOLDER_BLENDS, linear_to_srgb
 from .canvas import Layout, Rect
-from .document import (BAKE_ANTIALIAS_LABELS, BAKE_CURVATURE_LABELS, BAKE_ID_LABELS, DEPTH_LABELS, DYNAMICS, NORMAL_FORMATS, PROJECTORS, STROKE_METHODS, TEXTURE_SAMPLING, TRANSPARENCY, NORMAL_SPACES, PROJECTIONS, RESOLUTIONS, SHADERS, active_effect, active_layer, children, editing_mask, find_layer, isolated_uids,
+from .document import (BAKE_ANTIALIAS_LABELS, BAKE_CURVATURE_LABELS, BAKE_ID_LABELS, DEPTH_LABELS, DISPLACEMENT_SCALE_MAX, DISPLACEMENT_SUBDIVISION_MAX, DYNAMICS, NORMAL_FORMATS, PROJECTORS, STROKE_METHODS, TEXTURE_SAMPLING, TRANSPARENCY, NORMAL_SPACES, PROJECTIONS, RESOLUTIONS, SHADERS, active_effect, active_layer, children, editing_mask, find_layer, isolated_uids,
                        linked_layer, map_extrusion, map_samples, set_channels, slot_value, uses_coordinates)
 from .effects import ANCHORED_KINDS, CONTENT_SOURCES, EFFECT_ICONS, EFFECT_KINDS, FILL_PROJECTIONS, LEVEL_COMPONENTS, MASK_BLEND_LABEL, LevelsView, effect_label
 from .filters import FILTER, FILTERS
@@ -1636,7 +1636,8 @@ def padding_label(padding):
 def project_popover(layout, state, bounds, data):
     s = layout.scale
     project = data.id_data.devil_painter
-    card = place_popover(bounds, state.popover.anchor, 420 * s, (16 * LINE_HEIGHT + 30) * s, s)
+    lines = 17 + int(data.height_displacement)
+    card = place_popover(bounds, state.popover.anchor, 420 * s, (lines * LINE_HEIGHT + 30) * s, s)
     x, w = card.x + 14 * s, card.w - 28 * s
     y = card.top - 34 * s
     layout.add('PROJECT_TITLE', Rect(x, y, w, 22 * s), 'NOTE', label='Project · ' + project.template)
@@ -1661,6 +1662,18 @@ def project_popover(layout, state, bounds, data):
         y -= LINE_HEIGHT * s
         value = getattr(data, field)
         layout.add(key, Rect(x, y, w, 24 * s), 'SLIDER', label=label, value=value / top, text=f'{value:.2f}')
+    y -= LINE_HEIGHT * s
+    layout.add('HEIGHT_DISP', Rect(x, y, w, 24 * s), 'TOGGLE', label='Height displacement', active=data.height_displacement,
+               tip='Displace and tessellate the mesh from the height channel in the viewport preview')
+    if data.height_displacement:
+        y -= LINE_HEIGHT * s
+        half = (w - 4 * s) / 2
+        layout.add('DISP_SCALE', Rect(x, y, half, 24 * s), 'SLIDER', label='Scale',
+                   value=data.displacement_scale / DISPLACEMENT_SCALE_MAX, text=f'{data.displacement_scale:.2f} m',
+                   tip='How far height displaces the surface in meters')
+        layout.add('DISP_SUBDIV', Rect(x + half + 4 * s, y, half, 24 * s), 'SLIDER', label='Subdivision',
+                   value=data.displacement_subdivision / DISPLACEMENT_SUBDIVISION_MAX, text=str(data.displacement_subdivision),
+                   tip='Viewport tessellation levels for the displaced preview')
     y -= LINE_HEIGHT * s
     chip_row(layout, 'TRANSP', [(key, label) for key, label, _ in TRANSPARENCY], data.transparency, x, y, w - 126 * s, s,
              'Order independent transparency never sorts badly; blended is smoother for thin glass')

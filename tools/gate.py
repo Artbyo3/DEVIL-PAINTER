@@ -19,6 +19,7 @@ EXPECTED_EXPORTS = {
     'gui_baking.py': (0, 'verifies background mesh-map baking, cage/skew maps, and bake cancel rather than texture export'),
     'gui_clone_surface.py': (0, 'verifies surface-space clone source picking and seam-crossing strokes directly on layer pixels'),
     'gui_content.py': (50, ''),
+    'gui_displacement.py': (0, 'verifies height displacement preview, scale, and viewport subdivision without exporting textures'),
     'gui_editor.py': (12, ''),
     'gui_extras.py': (5, ''),
     'gui_follow_path.py': (5, ''),

@@ -32,6 +32,10 @@ STROKE_METHODS = (('SPACE', 'Space', ''), ('LINE', 'Line', ''), ('DOTS', 'Dots',
 NORMAL_FORMATS = (('OPENGL', 'OpenGL', ''), ('DIRECTX', 'DirectX', ''))
 NORMAL_SPACES = (('TANGENT', 'Tangent', ''), ('OBJECT', 'Object', ''))
 SHADERS = (('PRINCIPLED', 'Principled PBR', ''), ('UNLIT', 'Unlit', ''), ('SPECULAR_GLOSSINESS', 'Spec / gloss', ''))
+DISPLACEMENT_SCALE = .05
+DISPLACEMENT_SCALE_MAX = .5
+DISPLACEMENT_SUBDIVISION = 2
+DISPLACEMENT_SUBDIVISION_MAX = 6
 CHANNEL_DEPTHS = (('8', '8-bit', ''), ('16', '16-bit', ''), ('32', '32-bit float', ''))
 DEPTH_LABELS = {'8': '8-bit', '16': '16-bit', '32': '32F'}
 
@@ -205,6 +209,9 @@ class DEVIL_PAINTER_PG_texture_set(bpy.types.PropertyGroup):
     bump_strength: bpy.props.FloatProperty(default=1.0, min=0.0, max=1.0)
     normal_strength: bpy.props.FloatProperty(default=1.0, min=0.0, max=2.0)
     emission_strength: bpy.props.FloatProperty(default=1.0, min=0.0, max=20.0)
+    height_displacement: bpy.props.BoolProperty(default=False)
+    displacement_scale: bpy.props.FloatProperty(default=DISPLACEMENT_SCALE, min=0.0, max=DISPLACEMENT_SCALE_MAX)
+    displacement_subdivision: bpy.props.IntProperty(default=DISPLACEMENT_SUBDIVISION, min=0, max=DISPLACEMENT_SUBDIVISION_MAX)
     resolution: bpy.props.IntProperty(default=2048, min=64, max=8192)
     channels: bpy.props.CollectionProperty(type=DEVIL_PAINTER_PG_channel)
     layers: bpy.props.CollectionProperty(type=DEVIL_PAINTER_PG_layer)

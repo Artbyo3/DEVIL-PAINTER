@@ -28,6 +28,7 @@ ALBEDO = {'PRINCIPLED': 'base_color', 'UNLIT': 'base_color', 'SPECULAR_GLOSSINES
 DIELECTRIC_F0 = .04
 IOR_RANGE = (1.0, 3.0)
 DISPLACEMENT_MIDLEVEL = .5
+DISPLACEMENT_MODIFIER = 'DP Displacement Preview'
 
 
 def rgba(value):
@@ -106,7 +107,7 @@ class Build:
     def __init__(self, nodes, links, sampler, stroke=None, maps=None, live=False, size=1.0, active=1001, shading=None, data=None, resolution=1024):
         self.nodes, self.links, self.sampler, self.stroke = nodes, links, sampler, stroke
         self.maps, self.live, self.size, self.active = maps or {}, live, size, active
-        self.shading = shading or dict(shader='PRINCIPLED', normal_format='OPENGL', normal_space='TANGENT')
+        self.shading = shading or dict(shader='PRINCIPLED', normal_format='OPENGL', normal_space='TANGENT', height_displacement=False)
         self.shaded = None
         self.data, self.resolution = data, resolution
         self.masks, self.anchors, self.layer_map, self.below, self.slopes = {}, {}, {}, {}, {}
@@ -237,7 +238,7 @@ def signature(data):
     owner = f'{stroke[0]}:{",".join(stroke[2])}:{active_tile(data)}:{data.stroke_tool}' if stroke else ''
     tiles = ','.join(str(number) for number in numbers(data))
     project = data.id_data.devil_painter
-    shading = f'{data.visible}{data.shader}{project.normal_format}{project.normal_space}'
+    shading = f'{data.visible}{data.shader}{project.normal_format}{project.normal_space}{data.height_displacement}'
     quick = data.quick_mask.name if data.quick_mask is not None else ''
     return f'{NODE_NAMING};{channels};{data.solo};{data.isolate};{layers};{owner};{maps};{tiles};{project.uv_map};{shading};{quick};{data.bake_paint}'
 
@@ -788,7 +789,7 @@ def surface_normal(build, results, x):
             color = flip_green(nodes, links, color)
         links.new(color, node.inputs['Color'])
         normal = node.outputs['Normal']
-    if 'height' in results:
+    if 'height' in results and not build.shading.get('height_displacement', False):
         bump = nodes.new('ShaderNodeBump')
         bump.name = 'shader.bump'
         bump.location = (x, -800)
@@ -810,6 +811,17 @@ def shader_value(build, key, result, x):
     if key == 'specular':
         return vector_math(nodes, links, 'MULTIPLY', result, (1 / DIELECTRIC_F0,) * 3)
     return result
+
+
+def displacement_source(build, results):
+    height_on = build.shading.get('height_displacement', False) and 'height' in results
+    has_disp = 'displacement' in results
+    if height_on and has_disp:
+        return math_node(build.nodes, build.links, 'ADD', gray(build, results['displacement']),
+                         math_node(build.nodes, build.links, 'SUBTRACT', gray(build, results['height']), DISPLACEMENT_MIDLEVEL))
+    if height_on:
+        return results['height']
+    return results['displacement'] if has_disp else None
 
 
 def displacement(build, result, x):
@@ -1094,8 +1106,10 @@ def build_tree(build, channels, layers, solo=None, raw=False):
         links.new(build.shaded if build.shaded is not None else results['base_color'], unlit.inputs['Color'])
         surface = unlit.outputs[0]
     links.new(surface, output.inputs['Surface'])
-    if not solo and 'displacement' in results:
-        links.new(displacement(build, results['displacement'], end + 300), output.inputs['Displacement'])
+    if not solo and not raw and (build.data is None or not (build.data.solo or build.data.bake_paint)):
+        source = displacement_source(build, results)
+        if source is not None:
+            links.new(displacement(build, source, end + 300), output.inputs['Displacement'])
     return output
 
 
@@ -1244,7 +1258,8 @@ def set_build(data, tree, raw=False):
     project = data.id_data.devil_painter
     sampler = Sampler(tree.nodes, tree.links, numbers(data), lambda image, number: tile_variant(data, image, number), project.uv_map)
     maps = {item.name: item.image for item in data.maps if item.image is not None}
-    shading = dict(shader=data.shader, normal_format=project.normal_format, normal_space=project.normal_space)
+    shading = dict(shader=data.shader, normal_format=project.normal_format, normal_space=project.normal_space,
+                   height_displacement=data.height_displacement)
     return Build(tree.nodes, tree.links, sampler, None if raw else stroke_link(data), maps, False, 1.0, active_tile(data), shading, data, data.resolution)
 
 
@@ -1285,6 +1300,9 @@ def update_values(data, raw=False):
         nodes['shader.normal_map'].inputs['Strength'].default_value = data.normal_strength
     if 'shader.bump' in nodes:
         nodes['shader.bump'].inputs['Strength'].default_value = data.bump_strength
+    if 'shader.displacement' in nodes:
+        nodes['shader.displacement'].inputs['Scale'].default_value = (
+            data.displacement_scale * data.bump_strength if data.height_displacement else BUMP_DISTANCE)
     if 'shader.bsdf' in nodes:
         nodes['shader.bsdf'].inputs['Emission Strength'].default_value = data.emission_strength
     obj = data.id_data
@@ -1293,6 +1311,33 @@ def update_values(data, raw=False):
         mapping = nodes.get(own_node(layer, 'mapping'))
         if mapping is not None and layer.projection == 'TRIPLANAR' and project.use_physical:
             mapping.inputs['Scale'].default_value = tuple(layer.tiling * axis / project.physical_size for axis in obj.scale)
+
+
+def active_displacement(data):
+    if not data.visible or not data.height_displacement:
+        return False
+    keys = {channel.key for channel in set_channels(data)}
+    return 'height' in keys or 'displacement' in keys
+
+
+def sync_tessellation(obj):
+    levels = max((item.displacement_subdivision for item in obj.devil_painter.sets if active_displacement(item)), default=0)
+    modifier = obj.modifiers.get(DISPLACEMENT_MODIFIER)
+    if levels > 0:
+        if modifier is None:
+            modifier = obj.modifiers.new(name=DISPLACEMENT_MODIFIER, type='SUBSURF')
+        if modifier.subdivision_type != 'SIMPLE':
+            modifier.subdivision_type = 'SIMPLE'
+        if modifier.levels != levels:
+            modifier.levels = levels
+        if modifier.render_levels != 0:
+            modifier.render_levels = 0
+        if not modifier.show_viewport:
+            modifier.show_viewport = True
+        if modifier.show_render:
+            modifier.show_render = False
+    elif modifier is not None:
+        obj.modifiers.remove(modifier)
 
 
 def sync(data):
@@ -1308,6 +1353,10 @@ def sync(data):
         material.surface_render_method = method
     if material.use_transparency_overlap != data.transparency_overlap:
         material.use_transparency_overlap = data.transparency_overlap
+    displacement_method = 'BOTH' if active_displacement(data) else 'BUMP'
+    if material.displacement_method != displacement_method:
+        material.displacement_method = displacement_method
+    sync_tessellation(data.id_data)
 
 
 def assign_image_colorspace(image, channel):

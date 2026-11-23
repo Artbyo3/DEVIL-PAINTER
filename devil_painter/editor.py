@@ -12,7 +12,7 @@ from . import actions, autosave, bakejob, baking, bridge, brushes, caches, compo
 from .blending import BLEND_MODES, CHANNEL, FOLDER_BLENDS, linear_to_srgb, srgb_to_linear
 from .ui_system import ACCENT
 from .canvas import Rect
-from .document import (BAKE_ANTIALIAS_LABELS, BAKE_CURVATURE_LABELS, BAKE_ID_LABELS, BAKE_RESOLUTIONS, CHANNEL_DEPTHS, DYNAMICS, PROJECTIONS, PROJECTORS, RESOLUTIONS, STROKE_METHODS, TEXTURE_SAMPLING, active_effect, active_layer, active_tile, bake_map_settings, find_layer,
+from .document import (BAKE_ANTIALIAS_LABELS, BAKE_CURVATURE_LABELS, BAKE_ID_LABELS, BAKE_RESOLUTIONS, CHANNEL_DEPTHS, DISPLACEMENT_SCALE_MAX, DISPLACEMENT_SUBDIVISION_MAX, DYNAMICS, PROJECTIONS, PROJECTORS, RESOLUTIONS, STROKE_METHODS, TEXTURE_SAMPLING, active_effect, active_layer, active_tile, bake_map_settings, find_layer,
                        editing_mask, paint_target, set_channels, slot_value, texture_set, uses_coordinates)
 from .effects import FILL_PROJECTIONS, LEVEL_COMPONENTS, MASK_BLENDS, mask_effects
 from .filters import FILTER, FILTERS, GROUPS
@@ -1674,6 +1674,14 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             actions.set_set_value(context, obj, data, field, x * top, False)
             if release:
                 self.message = actions.set_set_value(context, obj, data, field, x * top, True)
+        elif key == 'DISP_SCALE' and data is not None:
+            message = actions.set_set_value(context, obj, data, 'displacement_scale', x * DISPLACEMENT_SCALE_MAX, release)
+            if message:
+                self.message = message
+        elif key == 'DISP_SUBDIV' and data is not None:
+            message = actions.set_set_value(context, obj, data, 'displacement_subdivision', round(x * DISPLACEMENT_SUBDIVISION_MAX), release)
+            if message:
+                self.message = message
         elif key == 'PHYS_SIZE' and data is not None:
             obj.devil_painter.physical_size = max(.01, x * 10)
             compositing.update_values(data)
@@ -2295,6 +2303,8 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.message = actions.set_project_value(context, obj, obj.devil_painter, 'use_physical', not obj.devil_painter.use_physical)
         elif key.startswith('SHADER.'):
             self.message = actions.set_set_value(context, obj, data, 'shader', key.removeprefix('SHADER.'), True)
+        elif key == 'HEIGHT_DISP':
+            self.message = actions.set_set_value(context, obj, data, 'height_displacement', not data.height_displacement, True)
         elif key == 'REIMPORT':
             bpy.ops.devil_painter.reimport_mesh('INVOKE_DEFAULT')
         elif key == 'REIMPORT_OBJECT':
