@@ -137,6 +137,7 @@ def bake_tiles(obj, project, wanted, prepare, bake_type, margin, scale=1, resolu
         targets = {}
         try:
             for index, data in enumerate(project.sets):
+                compositing.ensure_material(obj, data)
                 tree = data.material.node_tree
                 if index in wanted and number in tiles.numbers(data):
                     prepare(data)
@@ -169,6 +170,7 @@ def bake_tiles(obj, project, wanted, prepare, bake_type, margin, scale=1, resolu
 
 def resync(project):
     for data in project.sets:
+        compositing.ensure_material(data.id_data, data)
         data.material[compositing.SIGNATURE_KEY] = ''
         compositing.sync(data)
 
