@@ -711,8 +711,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             if result is not None:
                 return result
         elif control is None and press and event.type in {'LEFTMOUSE', 'RIGHTMOUSE'} and not event.alt:
-            name = next((key for key, rect in layout.zones.rects.items() if rect.contains(*self.pointer)
-                         and (key == 'DOCK' or layout.covers(*self.pointer))), None)
+            name = next((key for key, rect in layout.zones.rects.items() if rect.contains(*self.pointer) and layout.covers(*self.pointer)), None)
             if name is not None and event.type == 'LEFTMOUSE':
                 self.grab_section(name)
             elif name is not None:

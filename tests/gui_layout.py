@@ -104,7 +104,7 @@ def grab_point(region, key):
     for step in range(1, int(found.h // 2)):
         for fraction in (.5, .1, .9, .3, .7):
             x, y = found.x + found.w * fraction, found.top - 2 * step
-            if layout.hit(x, y) is None and (key == 'DOCK' or layout.covers(x, y)):
+            if layout.hit(x, y) is None and layout.covers(x, y):
                 return region.x + x, region.y + y
     raise AssertionError(f'no empty spot to grab the {NAMES[key]}')
 
@@ -219,7 +219,7 @@ def journey():
     yield from settle()
     check(len(editor._active.state.strips['RIGHT']) == 2 and editor._active.state.strips['RIGHT'][0]['items'] == ['PROPERTIES'] and not escaped(),
           f'dropping Properties on the outer edge of the column splits it into its own column {editor._active.state.strips["RIGHT"]} {escaped()}')
-    targets = dict(SHELF='LEFT', SETS='LEFT', LAYERS='LEFT', PROPERTIES='RIGHT', MAPS='RIGHT', HISTORY='RIGHT')
+    targets = dict(SHELF='LEFT', SETS='LEFT', LAYERS='LEFT', PROPERTIES='RIGHT', MAPS='RIGHT', HISTORY='RIGHT', DOCK='BOTTOM')
     for key in targets:
         before = strip_of(key)[0]
         move_section(window, region, key, *stage_point(region, targets[key]))
@@ -228,7 +228,7 @@ def journey():
         check(side == targets[key] and not escaped() and not has('SECTION_GHOST'),
               f'dragging the {NAMES[key]} to the {targets[key].lower()} edge of the viewport moves it there (from {before.lower()}) {escaped()}')
         inventory[key].add('rearranged')
-    check(all(inventory[key] == ({'resized'} if key == 'DOCK' else {'rearranged', 'resized'}) for key in SECTIONS),
+    check(all(inventory[key] == {'rearranged', 'resized'} for key in SECTIONS),
           'inventory: ' + '; '.join(f'{NAMES[key]} {sorted(inventory[key])}' for key in SECTIONS))
     stage = workspace().zones.stage
     check(stage.w > 0 and stage.h > 0 and not any(found.x < stage.x + stage.w and stage.x < found.x + found.w and found.y < stage.top and stage.y < found.top
@@ -268,6 +268,7 @@ def journey():
     yield from settle()
     check(snapshot() == zones_before and saved_workspace(settings_file) == saved_before,
           f'after a restart every section is back exactly where and how big the user left it {zones_before} {snapshot()}')
+    check(workspace().zones.places['DOCK'][0] == 'BOTTOM', 'after a restart the tool dock is still on the bottom edge where it was moved')
     check(not escaped(), f'the restored arrangement has no overflow {escaped()}')
 
     x, y = grab_point(region, 'BAR')

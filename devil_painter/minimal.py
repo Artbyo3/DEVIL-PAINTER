@@ -415,6 +415,9 @@ def dock_layout(layout, zone, tool, state):
         if per_row == 1:
             top -= index * button + gap
             index = 0
+    if layout.tool_groups:
+        low = min(group.y for group in layout.tool_groups)
+        layout.dock = Rect(zone.x, low, zone.w, zone.top - low)
 
 
 def selection(data):
