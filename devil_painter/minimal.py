@@ -1712,7 +1712,9 @@ def viewport_popover(layout, state, bounds, shading, lens, ortho, view, project,
                tip='HDRI that lights the material preview')
     y -= LINE_HEIGHT * s
     rotation = (shading.studiolight_rotate_z + math.pi) / (2 * math.pi)
-    layout.add('ENV_ROTATION', Rect(x, y, w, 24 * s), 'SLIDER', label='Rotation', value=rotation, text=f'{math.degrees(shading.studiolight_rotate_z):.0f}°')
+    layout.add('ENV_ROTATION', Rect(x, y, w, 24 * s), 'SLIDER', label='Rotation', value=rotation,
+               text=f'{math.degrees(shading.studiolight_rotate_z):.0f}°',
+               tip='Rotate the environment lighting', shortcut='Shift Right-drag')
     y -= LINE_HEIGHT * s
     layout.add('ENV_STRENGTH', Rect(x, y, w, 24 * s), 'SLIDER', label='Strength', value=shading.studiolight_intensity / 2,
                text=f'{shading.studiolight_intensity:.2f}')

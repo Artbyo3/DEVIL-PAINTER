@@ -21,6 +21,7 @@ EXPECTED_EXPORTS = {
     'gui_content.py': (50, ''),
     'gui_displacement.py': (0, 'verifies height displacement preview, scale, and viewport subdivision without exporting textures'),
     'gui_editor.py': (12, ''),
+    'gui_env_rotate.py': (0, 'verifies Shift+right-drag environment rotation, wrapping, cancel, slider sync, and stencil coexistence without exporting textures'),
     'gui_extras.py': (5, ''),
     'gui_follow_path.py': (5, ''),
     'gui_history.py': (0, 'verifies unified undo/redo across strokes, masks, effects, and the history panel without exporting textures'),

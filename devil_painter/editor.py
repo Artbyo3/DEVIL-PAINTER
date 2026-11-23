@@ -35,6 +35,7 @@ TIMER_INTERVAL = .3
 GESTURE_TOOLS = {'ERASE', 'BLUR', 'SMEAR', 'CLONE'}
 LINE_TOOLS = painting.BUFFER_TOOLS - {'FILL'}
 DRAG_START = 8
+ENV_ROTATE_PIXELS = 720.0
 AUTOSAVE_DEFAULT = 5
 POST_RANGES = {key: (field, top) for key, _, field, top in POST_SLIDERS}
 ONTO_KINDS = {'MASK', 'GENERATOR', 'FILTER'}
@@ -142,6 +143,10 @@ def parse_hex(text):
     if len(digits) != 6:
         raise ValueError('Type six hex digits, like #C83A4F.')
     return tuple(int(digits[index:index + 2], 16) / 255 for index in (0, 2, 4))
+
+
+def wrap_angle(angle):
+    return (angle + math.pi) % math.tau - math.pi
 
 
 class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
@@ -567,6 +572,9 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         control = layout.hit(*self.pointer)
         over = layout.covers(*self.pointer) or control is not None
         if press and event.type == 'RIGHTMOUSE' and not over:
+            if self.wants_env_rotate(context, event):
+                self.state.popover = None
+                return self.start_env_rotate()
             self.stencil_pending = True
         if self.state.popover is not None:
             inside = layout.popover is not None and layout.popover.contains(*self.pointer)
@@ -1626,6 +1634,8 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
 
     def drag_event(self, context, event):
         key, rect = self.state.drag
+        if key == 'ENV_ROTATE_DRAG':
+            return self.env_rotate_event(event, rect)
         x = max(0.0, min(1.0, (self.pointer[0] - rect.x) / rect.w))
         y = max(0.0, min(1.0, (self.pointer[1] - rect.y) / rect.h))
         release = event.type == 'LEFTMOUSE' and event.value == 'RELEASE'
@@ -1791,6 +1801,45 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         elif key == 'COLOR_HUE':
             self.state.hsv = (x, self.state.hsv[1], self.state.hsv[2])
             self.apply_color(context, release)
+
+    def stencil_active(self, context, data):
+        brush = context.tool_settings.image_paint.brush
+        return (data.brush_stencil is not None and brush is not None
+                and brush.texture is not None and brush.texture_slot.map_mode == 'STENCIL')
+
+    def wants_env_rotate(self, context, event):
+        data = self.painted()[1]
+        if data is None or not event.shift or event.ctrl or event.alt or event.oskey:
+            return False
+        if not (0 <= self.pointer[0] < self._region.width and 0 <= self.pointer[1] < self._region.height):
+            return False
+        return not self.stencil_active(context, data)
+
+    def start_env_rotate(self):
+        space = self._area.spaces.active
+        self.state.drag = ('ENV_ROTATE_DRAG', (self.pointer[0], float(space.shading.studiolight_rotate_z)))
+        self._area.tag_redraw()
+        return {'RUNNING_MODAL'}
+
+    def env_rotate_event(self, event, origin):
+        space = self._area.spaces.active
+        start_x, start_angle = origin
+        if event.type == 'ESC' and event.value == 'PRESS':
+            space.shading.studiolight_rotate_z = start_angle
+            self.state.drag = None
+            self.message = f'Environment rotation {round(math.degrees(start_angle))}°.'
+            self._area.tag_redraw()
+            return {'RUNNING_MODAL'}
+        release = event.type == 'RIGHTMOUSE' and event.value == 'RELEASE'
+        if event.type in {'MOUSEMOVE', 'INBETWEEN_MOUSEMOVE'} or release:
+            delta = (self.pointer[0] - start_x) / (ENV_ROTATE_PIXELS * self.workspace.scale) * math.tau
+            angle = start_angle if delta == 0.0 else wrap_angle(start_angle + delta)
+            space.shading.studiolight_rotate_z = angle
+            self.message = f'Environment rotation {round(math.degrees(angle))}°.'
+        if release:
+            self.state.drag = None
+        self._area.tag_redraw()
+        return {'RUNNING_MODAL'}
 
     def stencil_moving(self):
         return any(operator.bl_idname == 'BRUSH_OT_stencil_control' for operator in self._window.modal_operators)
