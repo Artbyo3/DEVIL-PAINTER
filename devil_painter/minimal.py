@@ -148,7 +148,7 @@ def panel(layout, state, spec, x, top, width, view):
     for action_key, label, width_units, tip, icon in spec.actions:
         w = width_units * s
         right -= w
-        layout.add(action_key, Rect(right, header.y + 4 * s, w, header.h - 8 * s), 'ICON' if icon else 'CHIP', label=label, icon=icon, tip=tip)
+        layout.add(action_key, Rect(right, header.y + 4 * s, w, header.h - 8 * s), 'CHIP', label=label, icon=icon, tip=tip)
         right -= 4 * s
     viewport = Rect(x, card.y, width, view)
     overflow = max(0.0, spec.body - view)

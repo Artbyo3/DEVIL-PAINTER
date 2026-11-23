@@ -141,9 +141,11 @@ def journey():
     check(len(body.layers) == 1 and body.active_uid == first, 'a new texture set starts with one default layer')
 
     folder_btn, delete_btn = control('ADD_FOLDER'), control('DELETE_LAYER')
-    check(folder_btn.kind == 'ICON' and folder_btn.icon == 'FOLDER' and folder_btn.tip == 'New folder above the selected layer',
-          'the Layers header folder button is an icon-only button with its existing tooltip')
-    check(delete_btn.kind == 'ICON' and delete_btn.icon == 'DELETE' and delete_btn.tip == 'Delete Layer'
+    check(folder_btn.kind == 'CHIP' and folder_btn.icon == 'FOLDER' and folder_btn.rect.w == folder_btn.rect.h
+          and folder_btn.tip == 'New folder above the selected layer',
+          'the Layers header folder button is a square icon chip with its existing tooltip')
+    check(delete_btn.kind == 'CHIP' and delete_btn.icon == 'DELETE' and delete_btn.rect.w == delete_btn.rect.h
+          and delete_btn.tip == 'Delete Layer'
           and control('ADD_PAINT').rect.x < control('ADD_FILL').rect.x < folder_btn.rect.x < delete_btn.rect.x,
           'the Layers header delete button sits immediately to the right of the folder icon button')
     click(window, region, 'DELETE_LAYER')

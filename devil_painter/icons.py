@@ -39,3 +39,33 @@ def icon_pixels(name, pixels):
         if step:
             levels.setdefault(step, []).append(cell)
     return levels
+
+
+@lru_cache(maxsize=None)
+def icon_bounds(name, pixels):
+    cells = [cell for points in icon_pixels(name, pixels).values() for cell in points]
+    if not cells:
+        return 0, 0, 0, 0
+    xs = [x for x, _ in cells]
+    ys = [y for _, y in cells]
+    return min(xs), min(ys), max(xs) - min(xs) + 1, max(ys) - min(ys) + 1
+
+
+def glyph_extent(name, pixels):
+    return max(icon_bounds(name, pixels)[2:])
+
+
+@lru_cache(maxsize=None)
+def icon_fit_size(name, target):
+    spans = icon_spans(name)
+    if not spans:
+        return target
+    xs = [value for column, _, width, _ in spans for value in (column, column + width)]
+    ys = [value for _, row, _, _ in spans for value in (row, row + 1)]
+    extent = max(max(xs) - min(xs), max(ys) - min(ys))
+    size = max(1, round(target * ICON_GRID / extent))
+    while size > 1 and glyph_extent(name, size) > target:
+        size -= 1
+    while glyph_extent(name, size + 1) <= target:
+        size += 1
+    return size
