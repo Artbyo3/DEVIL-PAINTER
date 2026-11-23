@@ -3,6 +3,7 @@ import itertools
 import time
 import traceback
 from pathlib import Path
+import PyOpenColorIO
 import bpy
 import numpy
 import math
@@ -46,12 +47,14 @@ ONTO_KINDS = {'MASK', 'GENERATOR', 'FILTER'}
 LAYER_KINDS = {'MATERIAL', 'SMART', 'TEXTURE', 'PATTERN'}
 
 
-def choices(view, field):
-    try:
-        setattr(view, field, '')
-    except TypeError as error:
-        return [name for name in str(error).split('(', 1)[-1].rstrip(')').replace("'", '').split(', ') if name]
-    return [getattr(view, field)]
+def choices(scene, field):
+    config = PyOpenColorIO.GetCurrentConfig()
+    if field == 'view_transform':
+        return list(config.getViews(scene.display_settings.display_device)) or [scene.view_settings.view_transform]
+    names = list(config.getLookNames())
+    prefix = scene.view_settings.view_transform.split(' - ', 1)[0] + ' - '
+    scoped = [name for name in names if name.startswith(prefix)]
+    return ['None'] + (scoped or [name for name in names if ' - ' not in name])
 STROKE_LABEL = {key: label for key, label, _ in STROKE_METHODS}
 NORMAL_KEYS = {key for key, _, _, _ in NORMAL_SLIDERS}
 DRAG_FIELDS = {key: (field, top) for key, _, field, top in (*NORMAL_SLIDERS, *STENCIL_SLIDERS)}
@@ -211,6 +214,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         self.direct_stroke = None
         self.stroke_label_pending = ''
         self.stencil_pending = False
+        self.stencil_region = (0, 0)
         self.line_anchor = None
         self.below_pending, self.below_since = (), 0.0
         self.drag_origin = (0.0, 0.0)
@@ -561,6 +565,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         if event.type == 'EVT_DROP':
             return {'PASS_THROUGH'}
         self.sync_flat()
+        self.sync_stencil_resize(context)
         self.drop_stale_anchor()
         self.workspace = self.make_layout()
         self.pointer = (event.mouse_x - self._region.x, event.mouse_y - self._region.y)
@@ -2166,12 +2171,26 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
     def stencil_moving(self):
         return any(operator.bl_idname == 'BRUSH_OT_stencil_control' for operator in self._window.modal_operators)
 
+    def sync_stencil_resize(self, context):
+        size = (self._region.width, self._region.height)
+        if size == self.stencil_region or self.stencil_moving():
+            return
+        data = self.painted()[1]
+        if data is None or data.brush_stencil is None:
+            self.stencil_region = size
+            return
+        brush = context.tool_settings.image_paint.brush
+        if brush is not None:
+            brushes.sync_stencil(context, brush, data, self._region)
+        self.stencil_region = size
+
     def finish_stencil(self, context):
         self.stencil_pending = False
         data = self.painted()[1]
         brush = context.tool_settings.image_paint.brush
-        if data is not None and brush is not None and brushes.read_stencil(context, brush, data):
+        if data is not None and brush is not None and brushes.read_stencil(context, brush, data, self._region):
             self.brush_changed(context, data)
+        self.stencil_region = (self._region.width, self._region.height)
 
     def brush_changed(self, context, data):
         data.brush_preset = 'Custom'
@@ -2550,13 +2569,13 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             bpy.ops.devil_painter.import_textures('INVOKE_DEFAULT')
         elif key == 'CM_VIEW':
             self.state.popover = Popover('MENU', control.rect, items=tuple((f'SET_CM_VIEW.{name}', name, name == self.scene.view_settings.view_transform)
-                                                                           for name in choices(self.scene.view_settings, 'view_transform')))
+                                                                           for name in choices(self.scene, 'view_transform')))
         elif key.startswith('SET_CM_VIEW.'):
             self.scene.view_settings.view_transform = key.removeprefix('SET_CM_VIEW.')
             self.message = f'The viewport shows {self.scene.view_settings.view_transform}. Exports keep the raw texture values.'
         elif key == 'CM_LOOK':
             self.state.popover = Popover('MENU', control.rect, items=tuple((f'SET_CM_LOOK.{name}', name, name == self.scene.view_settings.look)
-                                                                           for name in choices(self.scene.view_settings, 'look')))
+                                                                           for name in choices(self.scene, 'look')))
         elif key.startswith('SET_CM_LOOK.'):
             self.scene.view_settings.look = key.removeprefix('SET_CM_LOOK.')
             self.message = f'Look: {self.scene.view_settings.look}.'

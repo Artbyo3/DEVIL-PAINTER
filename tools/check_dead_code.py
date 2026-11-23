@@ -51,7 +51,7 @@ def load_modules(root, directories=REFERENCING):
         if not folder.is_dir():
             raise FileNotFoundError(f'check_dead_code: folder {directory}/ is missing')
         for path in sorted(folder.rglob('*.py')):
-            if '__pycache__' in path.parts:
+            if not path.is_file() or '__pycache__' in path.parts:
                 continue
             name = module_name(root, path)
             modules[name] = Module(path, name, ast.parse(path.read_text(encoding='utf-8-sig'), filename=str(path)), path.relative_to(root).as_posix())

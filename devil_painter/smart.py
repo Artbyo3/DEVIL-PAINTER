@@ -3,7 +3,7 @@ import time
 import bpy
 import numpy
 from .blending import CHANNEL
-from .document import add_slots, children, texture_set
+from .document import add_slots, children, find_layer, texture_set
 from .effects import EFFECT_FIELDS
 from .tiles import adopt
 from .library import (BUILTIN_MATERIALS, apply_definition, capture, definition_effects, library_root, load_image, material, pattern, plain,
@@ -203,13 +203,13 @@ def owned_image(data, path, name, data_values, fill=(0.0, 0.0, 0.0, 0.0)):
     return adopt(data, image, fill)
 
 
-def build(obj, data, definition, root, blank):
+def build(obj, data, definition, root_uid, blank):
     uids = []
     for item in definition['layers']:
         data.serial += 1
         layer = data.layers.add()
         layer.uid, layer.kind, layer.name = f'L{data.serial}', item['kind'], item['name']
-        layer.parent = root.uid if item['parent'] < 0 else uids[item['parent']]
+        layer.parent = root_uid if item['parent'] < 0 else uids[item['parent']]
         layer.opacity, layer.visible = item['opacity'], item['visible']
         uid = layer.uid
         if layer.kind != 'FOLDER':
@@ -226,11 +226,12 @@ def build(obj, data, definition, root, blank):
         uids.append(uid)
     settings_root = definition.get('root')
     if settings_root:
+        root = find_layer(data, root_uid)
         root.opacity = settings_root['opacity']
         add_effects(obj, data, root, definition_effects(settings_root))
         if settings_root['mask']:
-            root.mask = owned_image(data, settings_root['mask'], f'DP {obj.name} {root.uid} mask', False, (1.0, 1.0, 1.0, 1.0))
-    relink_anchors(data, [root.uid, *uids], uids)
+            root.mask = owned_image(data, settings_root['mask'], f'DP {obj.name} {root_uid} mask', False, (1.0, 1.0, 1.0, 1.0))
+    relink_anchors(data, [root_uid, *uids], uids)
 
 
 def relink_anchors(data, owners, uids):

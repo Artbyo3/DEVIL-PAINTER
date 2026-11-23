@@ -153,6 +153,15 @@ def print_tail(path, lines=TAIL_LINES):
         print(f'    | {line}')
 
 
+def kill_process_tree(process):
+    if os.name == 'nt':
+        subprocess.run(['taskkill', '/T', '/F', '/PID', str(process.pid)], capture_output=True)
+    try:
+        process.kill()
+    except OSError:
+        pass
+
+
 def run_process(command, log, environment, timeout, echo):
     started = time.time()
     with log.open('w', encoding='utf-8', errors='replace') as handle:
@@ -170,7 +179,7 @@ def run_process(command, log, environment, timeout, echo):
         try:
             code, timed_out = process.wait(timeout=timeout), False
         except subprocess.TimeoutExpired:
-            process.kill()
+            kill_process_tree(process)
             code, timed_out = process.wait(), True
         if reader:
             reader.join(30)

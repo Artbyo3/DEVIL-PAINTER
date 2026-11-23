@@ -88,3 +88,11 @@ class DeadCodeTests(unittest.TestCase):
             with self.assertRaises(FileNotFoundError) as raised:
                 find_dead_code(root)
             self.assertIn('tools/', str(raised.exception))
+
+    def test_directories_ending_in_py_are_skipped(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = fixture(folder, {})
+            (root / 'tests' / 'probe.py').mkdir()
+            (root / 'tools' / 'folder.py').mkdir()
+            (root / 'scratch' / 'probe.py').mkdir(parents=True)
+            self.assertEqual(find_dead_code(root), [])

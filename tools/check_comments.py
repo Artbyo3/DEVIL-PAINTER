@@ -25,6 +25,8 @@ def check_repository(root):
     violations = []
     for directory in ('devil_painter', 'tests', 'tools'):
         for source in sorted((root / directory).rglob('*.py')):
+            if not source.is_file():
+                continue
             try:
                 check_source(source.read_text(encoding='utf-8-sig'), str(source.relative_to(root)))
             except (ValueError, SyntaxError) as error:

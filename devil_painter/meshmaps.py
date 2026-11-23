@@ -213,9 +213,24 @@ def map_key_image(obj, data, key, size):
         item = data.maps.add()
         item.name = key
     if item.image is None or tuple(item.image.size) != (size, size):
-        if item.image is not None:
-            release(data, item.image)
-        item.image = create(data, f'DP {obj.name} {data.name} {key} map', (0.0, 0.0, 0.0, 0.0), True, size=size)
+        name = f'DP {obj.name} {data.name} {key} map'
+        old = item.image
+        extras = [(entry.number, entry.image) for entry in data.tile_images if entry.key == old and entry.image is not None] if old is not None else []
+        if old is not None:
+            release(data, old)
+        fresh = create(data, name, (0.0, 0.0, 0.0, 0.0), True, size=size)
+        item.image = fresh
+        if old is not None:
+            old.user_remap(fresh)
+            bpy.data.images.remove(old)
+            fresh.name = name
+            for number, old_tile in extras:
+                new_tile = variant(data, fresh, number)
+                if new_tile is not old_tile and new_tile is not fresh:
+                    old_tile.user_remap(new_tile)
+                bpy.data.images.remove(old_tile)
+                if new_tile is not fresh:
+                    new_tile.name = f'{name} {number}'
     return item.image
 
 

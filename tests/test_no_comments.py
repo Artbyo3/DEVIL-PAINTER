@@ -42,3 +42,12 @@ class NoCommentsTests(unittest.TestCase):
                 check_comments.check_repository(root)
         self.assertIn('a.py:1: code comment', str(raised.exception))
         self.assertIn('b.py:1: docstring or standalone string', str(raised.exception))
+
+    def test_comment_check_skips_directories_ending_in_py(self):
+        with tempfile.TemporaryDirectory(dir=workspace.prepare_scratch()) as folder:
+            root = Path(folder)
+            for directory in ('devil_painter', 'tests', 'tools'):
+                (root / directory).mkdir()
+            (root / 'tests' / 'probe.py').mkdir()
+            (root / 'tools' / 'clean.py').write_text('x = 1\n', encoding='utf-8')
+            self.assertEqual(check_comments.check_repository(root), 1)

@@ -263,6 +263,27 @@ class ScratchWorkspaceTests(unittest.TestCase):
         self.assertIn('partial', log_text)
         self.assertIn('[gate] killed after 3s without finishing', log_text)
 
+    def test_journey_timeout_kills_child_processes(self):
+        run = dev.Run('test', workspace.prepare_scratch(self.scratch / 'run-test'))
+        run.logs.mkdir()
+        child_pid = run.folder / 'child.pid'
+        script = (
+            'import pathlib, subprocess, sys, time; '
+            'child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"]); '
+            f'pathlib.Path({str(child_pid)!r}).write_text(str(child.pid), encoding="utf-8"); '
+            'time.sleep(60)'
+        )
+        with patch('builtins.print'):
+            passed = dev.step(run, 'Journey 97 hung_tree.py', [sys.executable, '-c', script], workspace.child_environment(run.folder),
+                              timeout=3, echo=False, failure_record=run.folder / 'hung_tree.failures')
+        self.assertFalse(passed)
+        self.assertTrue(child_pid.is_file())
+        deadline = time.monotonic() + 5.0
+        pid = int(child_pid.read_text(encoding='utf-8'))
+        while time.monotonic() < deadline and dev.gate_state.process_alive(pid):
+            time.sleep(0.1)
+        self.assertFalse(dev.gate_state.process_alive(pid))
+
     def test_journey_fails_when_the_editor_recorded_a_failure_despite_exit_zero(self):
         run = dev.Run('test', workspace.prepare_scratch(self.scratch / 'run-test'))
         run.logs.mkdir()

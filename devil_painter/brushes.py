@@ -338,8 +338,8 @@ def stencil_frame(data, width, height):
     return (data.stencil_x * width, data.stencil_y * height), dimension, math.radians(data.stencil_angle)
 
 
-def read_stencil(context, brush, data):
-    region = view_region(context)
+def read_stencil(context, brush, data, region=None):
+    region = region or view_region(context)
     if region is None or data.brush_stencil is None or brush.texture is None:
         return False
     values = dict(stencil_x=brush.stencil_pos[0] / region.width, stencil_y=brush.stencil_pos[1] / region.height,
@@ -351,7 +351,7 @@ def read_stencil(context, brush, data):
     return changed
 
 
-def sync_stencil(context, brush, data):
+def sync_stencil(context, brush, data, region=None):
     if data.brush_stencil is None:
         brush.texture = None
         return
@@ -359,7 +359,7 @@ def sync_stencil(context, brush, data):
     texture.image = data.brush_stencil
     brush.texture = texture
     brush.texture_slot.map_mode = 'STENCIL'
-    region = view_region(context)
+    region = region or view_region(context)
     if region is not None:
         position, dimension, angle = stencil_frame(data, region.width, region.height)
         brush.stencil_pos, brush.stencil_dimension = position, dimension

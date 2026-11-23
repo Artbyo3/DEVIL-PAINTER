@@ -1,3 +1,4 @@
+import shutil
 import sys
 from pathlib import Path
 import bpy
@@ -545,6 +546,7 @@ def journey():
           'clicking a pattern drives the armed channel')
 
     textures = scratch / 'textures'
+    shutil.rmtree(textures, ignore_errors=True)
     textures.mkdir(exist_ok=True)
     write_png(textures / 'brick_basecolor.png', (.6, .2, .1, 1.0))
     write_png(textures / 'brick_roughness.png', (.7, .7, .7, 1.0))

@@ -59,12 +59,17 @@ captured = json.loads(api.material_of(cube, uid))
 check(captured['name'] == 'Gold' and abs(captured['slots']['roughness']['value'] - .62) < 1e-6, 'material_of() returns the layer as JSON content')
 smart = json.loads(api.smart_materials())
 folder = api.add_smart_material(cube, smart[0])
-check(next(item for item in api.layers(cube) if item['uid'] == folder)['kind'] == 'FOLDER', 'add_smart_material() builds a smart material from JSON')
+children = [item for item in api.layers(cube) if item['parent'] == folder]
+check(next(item for item in api.layers(cube) if item['uid'] == folder)['kind'] == 'FOLDER'
+      and len(children) == len(smart[0]['layers']), 'add_smart_material() builds a smart material from JSON')
 paint = api.add_paint(cube)
 check(api.selected(cube) == paint and any(item['uid'] == paint and item['kind'] == 'PAINT' for item in api.layers(cube)), 'add_paint() adds a paint layer and selects it')
 api.remove_layer(cube, paint)
 check(all(item['uid'] != paint for item in api.layers(cube)), 'remove_layer() deletes a layer')
 api.remove_layer(cube, folder)
+check(all(item['uid'] != folder and item['parent'] != folder for item in api.layers(cube))
+      and {item['uid'] for item in api.layers(cube)} == {records[0]['uid'], uid, masked},
+      'remove_layer() deletes a smart-material folder and every layer inside it')
 api.remove_layer(cube, masked)
 written = api.export(cube, export_dir)
 check(written and all(Path(path).is_file() for path in written), 'export() writes the texture files and returns their paths')
