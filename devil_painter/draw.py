@@ -494,6 +494,15 @@ class Renderer:
         rect = control.rect
         self.round_rect(rect, ACCENT_HOVER if hover else ACCENT, radius=rect.w / 2)
 
+    def history_row(self, control, hover, metrics):
+        rect, s = control.rect, self.s
+        if control.active or hover:
+            self.round_rect(rect, ACCENT_BG if control.active else BG_ELEVATED, radius=metrics.menu_item)
+        if control.active:
+            self.draw_icon('CHECK', rect.x + 12 * s, rect.y + rect.h / 2, 10, ACCENT)
+        color = TEXT_PRIMARY if control.active or hover else TEXT_SECONDARY if control.value >= .5 else TEXT_MUTED
+        self.text(rect.x + 24 * s, rect.y + (rect.h - 10 * s) / 2, control.label, 10, color, max_width=rect.w - 30 * s)
+
     def note(self, control, hover, metrics):
         rect = control.rect
         self.text(rect.x + 2 * self.s, rect.y + (rect.h - 10 * self.s) / 2, control.label, 10, TEXT_MUTED, max_width=rect.w)
@@ -504,4 +513,4 @@ DRAWERS = {'TOOL': Renderer.tool, 'ICON': Renderer.icon_button, 'CHIP': Renderer
            'HEADER': Renderer.header, 'DROPDOWN': Renderer.dropdown, 'FIELD': Renderer.field, 'MENUITEM': Renderer.menu_item,
            'SV': Renderer.saturation_value, 'HUE': Renderer.hue, 'SCROLLBAR': Renderer.scrollbar, 'THUMB': Renderer.thumb,
            'GRIP': Renderer.grip, 'TILE': Renderer.tile, 'SOURCE': Renderer.source, 'GIZMO': Renderer.gizmo,
-           'GHOST': Renderer.ghost}
+           'GHOST': Renderer.ghost, 'HISTORY': Renderer.history_row}

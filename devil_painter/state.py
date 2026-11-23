@@ -64,3 +64,4 @@ class WorkspaceState:
     poly_erase: bool = False
     bake_pending: str = ''
     bake_since: float = 0.0
+    history_version: int = 0

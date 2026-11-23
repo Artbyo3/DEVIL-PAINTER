@@ -86,7 +86,7 @@ class ArrangementTests(unittest.TestCase):
     def test_the_last_section_fills_its_column_and_collapsed_panels_keep_their_header(self):
         found = layout(default_strips(), collapsed={'PROPERTIES'})
         self.assertAlmostEqual(found.rects['PROPERTIES'].h, HEADER)
-        self.assertAlmostEqual(found.rects['MAPS'].y, BOUNDS.y + 8, delta=1)
+        self.assertAlmostEqual(found.rects[PANELS[-1]].y, BOUNDS.y + 8, delta=1)
 
     def test_column_and_row_sizes_stay_within_safe_limits(self):
         self.assertEqual(clamp_strip('LEFT', 1, ['DOCK']), 40)
