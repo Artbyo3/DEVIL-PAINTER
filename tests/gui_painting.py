@@ -183,7 +183,7 @@ def journey():
     click(window, region, labels['Soft Round'])
     yield from settle()
 
-    drag_slider(window, region, 'BRUSH_SIZE', .06)
+    drag_slider(window, region, 'BRUSH_SIZE', .03)
     yield from settle()
     check(painting.brush_value(bpy.context.scene, 'size') < 40, 'the size slider makes a small brush')
     click(window, region, 'ADD_PAINT')

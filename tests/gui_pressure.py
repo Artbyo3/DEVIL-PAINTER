@@ -141,7 +141,7 @@ def journey():
     yield from close_cards(window, middle)
     edge_left, edge_right = screen_point(area, region, -1.0), screen_point(area, region, 1.0)
     pixels_per_unit = (edge_right[0] - edge_left[0]) / 2
-    drag_slider(window, region, 'BRUSH_SIZE', .1)
+    drag_slider(window, region, 'BRUSH_SIZE', .05)
     yield from settle()
     size = painting.brush_value(bpy.context.scene, 'size')
     check(0 < size < pixels_per_unit * .15, f'the brush is small enough for separate dabs ({size} px, {pixels_per_unit:.0f} px per unit)')
@@ -163,6 +163,20 @@ def journey():
           f'flow tracks pressure: dab center coverage {low_flow:.4f} at {LOW} and {high_flow:.4f} at {HIGH} (ratio {low_flow / high_flow:.4f})')
     check(abs(data.brush_flow - 1.0) < 1e-6 and abs(bpy.context.tool_settings.image_paint.brush.strength - 1.0) < 1e-6,
           'the stroke leaves the brush flow at its set value')
+    yield from card_click(window, region, 'BRUSH_PRESSURE_OPACITY')
+    yield from close_cards(window, middle)
+    click(window, region, 'ADD_PAINT')
+    yield from settle()
+    both_uid = active_layer(data).uid
+    dab(window, area, region, [(points[0], LOW)])
+    dab(window, area, region, [(points[1], HIGH)])
+    yield from settle()
+    alpha = layer_pixels(find_layer(data, both_uid))[..., 3]
+    low_both, high_both = (float(alpha[center_of(cube, data, point)[1], center_of(cube, data, point)[0]]) for point in points[:2])
+    check(data.brush_pressure_opacity and data.brush_pressure_flow and abs(low_both / high_both - LOW) < .03,
+          f'with Pressure opacity and Pressure flow both on, flow follows pressure once: ratio {low_both / high_both:.4f} at {LOW}')
+    yield from card_click(window, region, 'BRUSH_PRESSURE_OPACITY')
+    yield from close_cards(window, middle)
 
     start_uv, end_uv = center_of(cube, data, points[0]), center_of(cube, data, points[3])
     click(window, region, 'ADD_PAINT')
@@ -297,18 +311,23 @@ def journey():
 
     yield from card_click(window, region, 'SAVE_BRUSH')
     saved = json.loads(settings_path.read_text(encoding='utf-8'))['brush_presets'][-1]
-    check(saved['pressure_flow'] is True and saved['pressure_hardness'] is True and saved['pressure_angle'] is True,
-          f'Save as preset writes the pressure toggles to disk ({saved["name"]})')
+    check(saved['pressure_flow'] is True and saved['pressure_hardness'] is True and saved['pressure_angle'] is True
+          and saved['pressure_size'] is False and saved['pressure_opacity'] is False,
+          f'Save as preset writes every pressure toggle, size and opacity included, to disk ({saved["name"]})')
     yield from close_cards(window, middle)
     click(window, region, f'ITEM.{shelf_index("Soft Round")}')
     yield from settle()
+    yield from card_click(window, region, 'BRUSH_PRESSURE_OPACITY')
+    yield from close_cards(window, middle)
+    check(data.brush_pressure_opacity, 'Pressure opacity is on before the saved preset loads')
     check(not (data.brush_pressure_flow or data.brush_pressure_hardness or data.brush_pressure_angle), 'a built-in preset turns the pressure mappings off')
     library._cache.clear()
     click(window, region, 'SHELF_TAB.BRUSHES')
     yield from settle()
     click(window, region, f'ITEM.{shelf_index(saved["name"])}')
     yield from settle()
-    check(data.brush_pressure_flow and data.brush_pressure_hardness and data.brush_pressure_angle, 'the preset reloaded from disk brings every pressure mapping back')
+    check(data.brush_pressure_flow and data.brush_pressure_hardness and data.brush_pressure_angle and not data.brush_pressure_opacity and not data.brush_pressure_size,
+          'the preset reloaded from disk brings every pressure toggle back, size and opacity included')
 
     saved_file = scratch / 'pressure.blend'
     with bpy.context.temp_override(window=window, area=area, region=region):

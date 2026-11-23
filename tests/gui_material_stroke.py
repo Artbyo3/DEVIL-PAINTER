@@ -197,7 +197,7 @@ def brush_radius(cube, data, area, region):
     first = screen_point(area, region, 0.0, 0.0)
     size = painting.brush_value(bpy.context.scene, 'size')
     near = editor._active.texture_point(cube, data, first)
-    far = editor._active.texture_point(cube, data, (first[0] + size, first[1]))
+    far = editor._active.texture_point(cube, data, (first[0] + size / 2, first[1]))
     return math.dist(near[1:], far[1:])
 
 
@@ -232,7 +232,7 @@ def journey():
     hard = next(index for index, item in enumerate(shelf.items('BRUSHES')) if item.label == 'Hard Round')
     click(window, region, f'ITEM.{hard}')
     yield from settle()
-    drag_slider(window, region, 'BRUSH_SIZE', .06)
+    drag_slider(window, region, 'BRUSH_SIZE', .03)
     yield from settle()
     click(window, region, 'SHELF_TAB.MATERIALS')
     yield from settle()

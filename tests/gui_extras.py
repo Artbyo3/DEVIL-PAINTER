@@ -117,7 +117,7 @@ def journey():
     resolution = data.resolution
     right, front, top = (face_of(cube, normal) for normal in ((1, 0, 0), (0, -1, 0), (0, 0, 1)))
     spot = {face: face_center_pixel(cube, face, resolution) for face in (right, front, top)}
-    drag_slider(window, region, 'BRUSH_SIZE', .05)
+    drag_slider(window, region, 'BRUSH_SIZE', .025)
     yield from settle()
 
     yield from card_click(window, region, 'PROJECT', 'TRANSP.DITHERED', 'PROJECT')

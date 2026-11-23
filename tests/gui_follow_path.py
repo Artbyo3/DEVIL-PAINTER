@@ -182,7 +182,7 @@ def journey():
     yield from settle()
     check(data.brush_alpha is not None and data.brush_smoothing == 0 and not data.brush_random_angle and data.brush_angle == 0,
           'the one-sided Arrow tip loads with lazy mouse, random angle and base angle off')
-    drag_slider(window, region, 'BRUSH_SIZE', .08)
+    drag_slider(window, region, 'BRUSH_SIZE', .04)
     yield from settle()
     evidence = {}
 

@@ -28,7 +28,8 @@ PRESETS = (
 )
 PRESSURE_FIELDS = ('pressure_flow', 'pressure_hardness', 'pressure_angle')
 JITTER_FIELDS = ('jitter_size', 'jitter_flow', 'jitter_angle')
-PRESET_FIELDS = ('hardness', 'flow', 'spacing', 'smoothing', 'jitter', 'random_angle', 'stroke', 'angle', *PRESSURE_FIELDS, *JITTER_FIELDS, 'follow_path', 'size_space', 'world_size')
+PRESET_FIELDS = ('hardness', 'flow', 'spacing', 'smoothing', 'jitter', 'random_angle', 'stroke', 'angle', 'pressure_size', 'pressure_opacity', *PRESSURE_FIELDS, *JITTER_FIELDS,
+                 'follow_path', 'size_space', 'world_size')
 PRESET_DEFAULTS = dict(stroke='SPACE', angle=0.0, follow_path=False, size_space='SCREEN', world_size=.1, **{field: False for field in PRESSURE_FIELDS}, **{field: 0.0 for field in JITTER_FIELDS})
 JITTER_SEEDS = 100000
 FOLLOW_REACH = 24.0
@@ -147,16 +148,16 @@ def pressure_mapped(data):
     return any(getattr(data, 'brush_' + field) for field in PRESSURE_FIELDS)
 
 
-def jittered(data):
-    return any(getattr(data, 'brush_' + field) for field in JITTER_FIELDS)
+def jittered(data, tool):
+    return any((data.brush_jitter_size, data.brush_jitter_angle, tool in STROKE_TOOLS and data.brush_jitter_flow))
 
 
 def world_sized(data):
     return data.brush_size_space == 'WORLD'
 
 
-def per_point(data):
-    return jittered(data) or data.brush_follow_path or world_sized(data)
+def per_point(data, tool):
+    return jittered(data, tool) or data.brush_follow_path or world_sized(data)
 
 
 def world_radius(region, view, obj, point, world_size):
@@ -167,6 +168,15 @@ def world_radius(region, view, obj, point, world_size):
     near = view3d_utils.location_3d_to_region_2d(region, view, center)
     far = view3d_utils.location_3d_to_region_2d(region, view, center + view.view_rotation @ Vector((world_size / 2, 0.0, 0.0)))
     return None if near is None or far is None else (far - near).length
+
+
+def first_world_radius(data, region, view, obj, points):
+    return next((radius for point, _ in points if (radius := world_radius(region, view, obj, point, data.brush_world_size)) is not None), None)
+
+
+def stroke_size(data, region, view, obj, points, size):
+    radius = first_world_radius(data, region, view, obj, points) if world_sized(data) else None
+    return size if radius is None else 2 * radius
 
 
 def brush_spacing(data):
@@ -213,7 +223,7 @@ def spaced_stroke(context, data, region, view, obj, size, points):
         return [], []
     curve = context.tool_settings.image_paint.brush.curve_size
     world = world_sized(data)
-    first_hit = next((radius for point, _ in points if (radius := world_radius(region, view, obj, point, data.brush_world_size)) is not None), None) if world else None
+    first_hit = first_world_radius(data, region, view, obj, points) if world else None
     if first_hit is None:
         world = False
     last_radius = first_hit if world else size / 2
@@ -238,8 +248,8 @@ def textured(data):
     return any(slot.enabled and slot.source == 'IMAGE' and slot.image is not None for slot in data.brush_slots)
 
 
-def per_dab(data):
-    return pressure_mapped(data) or per_point(data)
+def per_dab(data, tool):
+    return pressure_mapped(data) or per_point(data, tool)
 
 
 def path_angles(points):
@@ -297,7 +307,7 @@ def sync(context, data):
     brush.smooth_stroke_factor = .5 + .49 * data.brush_smoothing
     brush.jitter = data.brush_jitter
     brush.use_pressure_size = data.brush_pressure_size
-    brush.use_pressure_strength = data.brush_pressure_opacity
+    brush.use_pressure_strength = data.brush_pressure_opacity and not (data.brush_pressure_flow and active_tool(context) == 'PAINT')
     brush.stroke_method = data.brush_stroke
     if data.brush_alpha is None:
         brush.mask_texture = None
@@ -419,7 +429,8 @@ def load_alpha(name):
 
 def apply_preset(context, data, preset):
     for field in PRESET_FIELDS:
-        setattr(data, 'brush_' + field, preset.get(field, PRESET_DEFAULTS.get(field)))
+        if field in preset or field in PRESET_DEFAULTS:
+            setattr(data, 'brush_' + field, preset.get(field, PRESET_DEFAULTS.get(field)))
     alpha = preset['alpha']
     data.brush_alpha = (bpy.data.images.load(alpha, check_existing=True) if alpha.endswith('.png') else load_alpha(alpha)) if alpha else None
     data.brush_preset = preset['name']

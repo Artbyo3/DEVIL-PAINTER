@@ -195,6 +195,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         self.toast_until = 0.0
         self.toast_rect = None
         self.toast_revealed = False
+        self.view_key = None
         self.state = WorkspaceState()
         self.load_column()
         self.message = library.settings_notice()
@@ -544,6 +545,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.poll_bake(context)
             self.auto_bake(context)
             self.refresh_below(context)
+            self.follow_view()
             for note in packs.poll() + [autosave.failure_notice()]:
                 if note:
                     self.message = note
@@ -880,7 +882,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         tool = painting.active_tool(self.scene)
         if data.brush_radial > 1 and tool in painting.BUFFER_TOOLS - {'FILL'}:
             return True
-        if brushes.per_dab(data) and tool in painting.BUFFER_TOOLS - {'FILL'}:
+        if brushes.per_dab(data, tool) and tool in painting.BUFFER_TOOLS - {'FILL'}:
             return True
         buffered = painting.uses_stroke_buffer(context, data)
         if tool == 'PAINT' and data.brush_dynamics != 'NONE':
@@ -972,6 +974,13 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             source.size = max(1, round(2 * radius))
         self.world_pixels = (source.as_pointer(), source.size)
 
+    def follow_view(self):
+        key = tuple(tuple(row) for row in self._area.spaces.active.region_3d.perspective_matrix)
+        if key != self.view_key:
+            self.view_key = key
+            self.track_world_size()
+            self._area.tag_redraw()
+
     def texture_point(self, obj, data, pointer):
         face, location = sets.hit_under(self._region, self._area.spaces.active.region_3d, obj, pointer)
         return None if face < 0 else self.surface_point(obj, data, face, location)
@@ -1018,9 +1027,10 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         points, radii = brushes.spaced_stroke(context, data, self._region, self._area.spaces.active.region_3d, obj, painting.brush_value(self.scene, 'size'), points)
         elements = [dict(name='', location=(0.0, 0.0, 0.0), mouse=point, mouse_event=point, is_start=index == 0, pressure=pressure, size=radius,
                          time=index * .01, x_tilt=0.0, y_tilt=0.0) for index, ((point, pressure), radius) in enumerate(zip(points, radii))]
-        mapped = brushes.per_dab(data)
-        if brushes.per_point(data):
-            jitter = brushes.dab_jitter(data, len(points), brushes.jitter_seed(points)) if brushes.jittered(data) else [(1.0, 1.0, 0.0)] * len(points)
+        tool = painting.active_tool(self.scene)
+        mapped = brushes.per_dab(data, tool)
+        if brushes.per_point(data, tool):
+            jitter = brushes.dab_jitter(data, len(points), brushes.jitter_seed(points)) if brushes.jittered(data, tool) else [(1.0, 1.0, 0.0)] * len(points)
             headings = brushes.path_angles(points) if data.brush_follow_path else [0.0] * len(points)
             for element, (size_scale, _, _) in zip(elements, jitter):
                 element['size'] *= size_scale
@@ -1056,7 +1066,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         if shaped:
             points = self.gesture_path(data, points)
         buffered = painting.uses_stroke_buffer(context, data)
-        size = painting.brush_value(self.scene, 'size')
+        size = brushes.stroke_size(data, self._region, self._area.spaces.active.region_3d, obj, points, painting.brush_value(self.scene, 'size'))
         trails = [points]
         if data.brush_dynamics != 'NONE' and painting.active_tool(self.scene) == 'PAINT':
             trails = dynamics.trails(data.brush_dynamics, self._region, self._area.spaces.active.region_3d, obj, points, size)
@@ -1103,8 +1113,8 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
     def merge_pass(self, obj, data, points, spots, size):
         tile = active_tile(data)
         path = [(spot[1], spot[2]) for spot in spots if spot and spot[0] == tile]
-        first, edge = spots[0], self.texture_point(obj, data, (points[0][0][0] + size, points[0][0][1]))
-        radius = math.dist(first[1:], edge[1:]) if first and edge and first[0] == edge[0] else size
+        first, edge = spots[0], self.texture_point(obj, data, (points[0][0][0] + size / 2, points[0][0][1]))
+        radius = math.dist(first[1:], edge[1:]) if first and edge and first[0] == edge[0] else size / 2
         source = self.state.clone_source[1] if self.state.clone_source and self.state.clone_source[0] == tile else None
         cloning = painting.active_tool(self.scene) == 'CLONE'
         if cloning and source is None:

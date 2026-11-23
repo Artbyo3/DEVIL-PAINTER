@@ -2034,7 +2034,7 @@
  "gui_jitter.py": [
   [
    "export_jitter/Cube_Material_BaseColor.png",
-   "098f789e81e2df39e657e890e34960a90258c34e1db459119f61febfd8e726b2"
+   "fe531d40d4388d48e8e7d4cbd04d4f5396823a2d270c3d64325d072a923398b4"
   ],
   [
    "export_jitter/Cube_Material_Roughness.png",
@@ -2441,11 +2441,11 @@
  "gui_material_stroke.py": [
   [
    "export_material_stroke/Cube_Material_BaseColor.png",
-   "0cd87e38b9ea8db08999a71ede9360172a9b85a88dc2d28530f9c76124f89f77"
+   "d73704824573d6b1c8e7b856b5b5de788a288e4f2c66ff6fdc3e19b179d5c99d"
   ],
   [
    "export_material_stroke/Cube_Material_Roughness.png",
-   "f4d4840e76e3ae95ae9db18a47a41a79de5903be31e177c0ef4719097bbc3b6f"
+   "a3e07283102075fbb69402752bef636c14f7a5f5ecf162d808f1e819de7953fc"
   ],
   [
    "export_material_stroke/Cube_Material_Metallic.png",
