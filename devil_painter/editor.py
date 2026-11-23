@@ -585,7 +585,8 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
                 return result
         if self.state.drag is not None:
             return self.drag_event(context, event)
-        if press and event.type == 'LEFTMOUSE' and self.toast_rect is not None and self.toast_rect.contains(*self.pointer) and masked(self.message) != self.message:
+        if (press and event.type == 'LEFTMOUSE' and self.toast_rect is not None and self.toast_rect.contains(*self.pointer) and masked(self.message) != self.message
+                and not self.workspace.covers(*self.pointer) and self.workspace.hit(*self.pointer) is None):
             self.toast_revealed = not self.toast_revealed
             self.toast_until = time.monotonic() + TOAST_SECONDS
             self._area.tag_redraw()
@@ -1552,7 +1553,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             items.append(('DELETE_SELECTED', f'Delete {len(uids)} layers', False))
             self.state.popover = Popover('MENU', anchor, items=tuple(items))
             return
-        items = [('RENAME', 'Rename', False), ('DUPLICATE', 'Duplicate', False), ('COPY_LAYERS', 'Copy', False),
+        items = [('RENAME', 'Rename', False), ('DUPLICATE', 'Duplicate', False), ('COPY_LAYERS', 'Copy', False), ('ADD_FOLDER', 'New folder above', False),
                  ('ISOLATE', 'Show all layers' if data.isolate == layer.uid else 'Show only this layer', False)]
         if self.state.clipboard:
             items += [('PASTE_LAYERS', 'Paste layers', False), ('PASTE_MASK', 'Paste mask', False), ('PASTE_EFFECTS', 'Paste effects', False)]

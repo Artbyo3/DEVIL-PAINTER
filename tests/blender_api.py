@@ -37,6 +37,12 @@ check(len(sets) == 1 and sets[0]['resolution'] == 256 and 'base_color' in sets[0
 catalog = json.loads(api.materials())
 gold = next(item for item in catalog if item['name'] == 'Gold')
 check(len(catalog) >= 13, 'materials() lists the material library as JSON')
+from devil_painter import library
+imported = {item['name']: set(item['slots']) for item in library.texture_sets(
+    [Path('Cloth') / f'Cloth_{word}.png' for word in ('albedo', 'normal', 'specular', 'glossiness', 'displacement', 'anisotropy_level', 'anisotropy_angle',
+                                                       'transmission', 'scattering', 'sheen', 'coat', 'ior')])}
+check(imported.get('Cloth', set()) >= {'base_color', 'normal', 'specular', 'glossiness', 'displacement', 'anisotropy_level', 'anisotropy_angle',
+                                       'transmission', 'scattering', 'sheen', 'coat', 'ior'}, 'a texture set with the PBR channel files fills every channel on import')
 uid = api.add_fill(cube, json.dumps(gold))
 records = api.layers(cube)
 check(records[-1]['uid'] == uid and records[-1]['name'] == 'Gold' and json.loads(json.dumps(records)) == records,

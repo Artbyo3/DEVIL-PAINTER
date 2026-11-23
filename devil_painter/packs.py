@@ -355,7 +355,14 @@ def safe_members(archive):
             yield member, name
 
 
-def unpack(path, target):
+def set_aside(folder):
+    aside = folder.with_name(folder.name + '.old')
+    shutil.rmtree(aside, ignore_errors=True)
+    folder.rename(aside)
+    return aside
+
+
+def unpack(path, target, marker=None):
     temporary = target.with_name(target.name + '.partial')
     shutil.rmtree(temporary, ignore_errors=True)
     try:
@@ -374,11 +381,23 @@ def unpack(path, target):
                         if written_bytes > MAX_UNPACKED_BYTES:
                             raise OSError('the pack unpacks to more than allowed')
                         written.write(chunk)
+        if marker is not None:
+            (temporary / PACK_MARKER).write_text(marker, encoding='utf-8')
     except (zipfile.BadZipFile, OSError):
         shutil.rmtree(temporary, ignore_errors=True)
         raise
-    shutil.rmtree(target, ignore_errors=True)
-    temporary.rename(target)
+    aside = None
+    try:
+        if target.exists():
+            aside = set_aside(target)
+        temporary.rename(target)
+    except OSError:
+        if aside is not None and not target.exists():
+            aside.rename(target)
+        shutil.rmtree(temporary, ignore_errors=True)
+        raise
+    if aside is not None:
+        shutil.rmtree(aside, ignore_errors=True)
 
 
 def finish(job):
@@ -394,20 +413,24 @@ def finish(job):
             job.update(state='failed', message='Refused: the file type does not match its kind', reported=True)
             return f'{name} was refused because its file type does not match its kind. Nothing was installed.'
         target = file_path(entry, name)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        path.replace(target)
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            path.replace(target)
+        except OSError as error:
+            path.unlink(missing_ok=True)
+            job.update(state='failed', message=f'Could not install: {error}', reported=True)
+            return f'{name} could not be installed. The previous copy, if any, was left as it was.'
         job.update(state='installed', message='Installed')
         rescan()
         return f'Installed {name} from {entry["name"]}. It is in the shelf.'
     target = folder_of(entry)
     try:
-        unpack(path, target)
+        unpack(path, target, entry['sha256'].lower())
     except (zipfile.BadZipFile, OSError) as error:
         job.update(state='failed', message=f'Could not unpack: {error}', reported=True)
-        return f'{entry["name"]} could not be unpacked.'
+        return f'{entry["name"]} could not be unpacked. The previous install, if any, was left as it was.'
     finally:
         path.unlink(missing_ok=True)
-    (target / PACK_MARKER).write_text(entry['sha256'].lower(), encoding='utf-8')
     job.update(state='installed', message='Installed')
     rescan()
     return f'Installed {entry["name"]}. Its assets are in the shelf.'
@@ -581,7 +604,13 @@ def open_entry():
 
 
 def remove(entry):
-    shutil.rmtree(folder_of(entry), ignore_errors=True)
+    folder = folder_of(entry)
+    try:
+        if folder.exists():
+            shutil.rmtree(set_aside(folder), ignore_errors=True)
+    except OSError as error:
+        rescan()
+        return f'Could not remove {entry["name"]}: {error.strerror or error}. Close whatever is using its files and try again.'
     for key in [key for key in _jobs if key == entry['name'] or key.startswith(entry['name'] + '/')]:
         _jobs.pop(key)
     rescan()
