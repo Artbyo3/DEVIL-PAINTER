@@ -223,9 +223,22 @@ def view_label(data):
     return CHANNEL[data.solo].label if data.solo else 'Material'
 
 
+def scrolled_row(layout, state, key, zone, build):
+    layout.cards.append((zone, ''))
+    start = len(layout.controls)
+    overflow = max(0.0, build(zone) - zone.w)
+    scroll = min(max(0.0, state.scroll.get(key, 0.0)), overflow)
+    state.scroll[key] = scroll
+    if overflow > 0:
+        del layout.controls[start:]
+        layout.scroll_areas[key] = (zone, overflow)
+        build(Rect(zone.x - scroll, zone.y, zone.w + overflow, zone.h))
+    for control in layout.controls[start:]:
+        control.clip = zone
+
+
 def workspace_bar(layout, zone, data, obj_name, view_2d, baking):
     s = layout.scale
-    layout.cards.append((zone, ''))
     h = min(zone.h - 12 * s, 24 * s)
     y = zone.y + (zone.h - h) / 2
     right = zone.x + zone.w - 8 * s
@@ -251,6 +264,7 @@ def workspace_bar(layout, zone, data, obj_name, view_2d, baking):
     tile = f'  ·  tile {data.id_data.devil_painter.active_tile}' if count > 1 else ''
     layout.add('SET_NAME', Rect(zone.x + 12 * s, y, max(0.0, bake.x - zone.x - 24 * s), h), 'NOTE',
                label=f'{obj_name}  ·  {data.name}  ·  {data.resolution} px{tile}')
+    return zone.x + zone.w - bake.x + 24 * s
 
 
 BRUSH_SLIDERS = (('BRUSH_FLOW', 'Flow', 'brush_flow', 1.0, 'How much paint each dab lays down; low flow builds up gradually'),
@@ -311,6 +325,7 @@ def path_strip(layout, x, y, h, color, state):
     layout.add('PATH_BACK', Rect(x, y, 90 * s, h), 'CHIP', label='Remove point', tip='Remove the last point', shortcut='Backspace')
     x += 94 * s
     layout.add('PATH_CLEAR', Rect(x, y, 60 * s, h), 'CHIP', label='Clear', tip='Start the path again')
+    return x + 66 * s
 
 
 def poly_strip(layout, x, y, h, color, state):
@@ -323,28 +338,27 @@ def poly_strip(layout, x, y, h, color, state):
         layout.add('POLY.' + mode, Rect(x, y, 78 * s, h), 'CHIP', label=label, active=state.poly_mode == mode, tip=f'Click the model to fill a whole {label.lower()}')
         x += 82 * s
     layout.add('POLY_ERASE', Rect(x, y, 70 * s, h), 'TOGGLE', label='Erase', active=state.poly_erase, tip='Clear the picked polygons instead of filling them')
+    return x + 76 * s
 
 
-def tool_strip(layout, zone, tool, brush, data, state):
+def tool_strip(layout, zone, tool, brush, data, state, room):
     s = layout.scale
     size, color = brush
-    layout.cards.append((zone, ''))
     h = min(zone.h - 12 * s, 24 * s)
     y = zone.y + (zone.h - h) / 2
     x = zone.x + 12 * s
     right = quick_controls(layout, zone, y, h, data)
+    quick = zone.x + zone.w - right
     if state.poly_mode:
-        poly_strip(layout, x, y, h, color, state)
-        return
+        return poly_strip(layout, x, y, h, color, state) - zone.x + quick
     if state.path_mode:
-        path_strip(layout, x, y, h, color, state)
-        return
+        return path_strip(layout, x, y, h, color, state) - zone.x + quick
     label = next((name for key, name, _, _ in TOOLS if key == tool), 'Brush')
     layout.add('TOOL_NAME', Rect(x, y, 60 * s, h), 'NOTE', label=label)
     x += 62 * s
     layout.add('BRUSH_COLOR', Rect(x, y, 30 * s, h), 'SWATCH', color=color, tip='Brush color')
     x += 36 * s
-    slider = max(80 * s, min(150 * s, (zone.x + zone.w - x) / 5))
+    slider = max(80 * s, min(150 * s, (room - (x - zone.x)) / 5))
     if data.brush_size_space == 'WORLD':
         layout.add('BRUSH_SIZE', Rect(x, y, slider, h), 'SLIDER', label='Size', value=min(1.0, data.brush_world_size / MAX_WORLD_SIZE),
                    text=world_size_text(data.brush_world_size), tip='Brush size on the model, in scene units', shortcut='F')
@@ -364,6 +378,7 @@ def tool_strip(layout, zone, tool, brush, data, state):
     x += 116 * s
     layout.add('STENCIL_CARD', Rect(x, y, h, h), 'SOURCE', icon='GRID', preview=data.brush_stencil, tip='Screen stencil and projection')
     x += h + 6 * s
+    need = x - zone.x + quick
     for channel in set_channels(data):
         slot = data.brush_slots[channel.key]
         width = (46 if channel.width == 3 else 92) * s
@@ -373,6 +388,7 @@ def tool_strip(layout, zone, tool, brush, data, state):
             break
         brush_value_control(layout, channel, slot, Rect(x, y, width, h))
         x += width + 4 * s
+    return need
 
 
 def dock_layout(layout, zone, tool, state):
@@ -1202,13 +1218,15 @@ def search_row(layout, state, zone, row):
     if narrow:
         row = Rect(row.x, row.y - 26 * s, row.w, row.h)
         x = zone.x + 8 * s
-    for scope, label in shelf.SCOPES:
-        layout.add('SCOPE.' + scope, Rect(x, row.y, 62 * s, row.h), 'CHIP', label=label, active=state.shelf_scope == scope,
-                   tip={'ALL': 'Show everything', 'BUILTIN': 'Show what ships with Devil Painter', 'MINE': 'Show your saved assets and libraries'}[scope])
-        x += 66 * s
     right = zone.x + zone.w - 8 * s - 84 * s
+    limit = zone.x + zone.w - 8 * s if narrow else right - 6 * s
+    chip = max(0.0, min(62 * s, (limit - x + 4 * s) / len(shelf.SCOPES) - 4 * s))
+    for scope, label in shelf.SCOPES:
+        layout.add('SCOPE.' + scope, Rect(x, row.y, chip, row.h), 'CHIP', label=label, active=state.shelf_scope == scope,
+                   tip={'ALL': 'Show everything', 'BUILTIN': 'Show what ships with Devil Painter', 'MINE': 'Show your saved assets and libraries'}[scope])
+        x += chip + 4 * s
     layout.add('LIBRARIES', Rect(right, row.y + (26 * s if narrow else 0.0), 84 * s, row.h), 'CHIP', label='Libraries', tip='Add library folders and import files')
-    if query and state.shelf_query:
+    if query and state.shelf_query and x + 90 * s <= right - 6 * s:
         layout.add('SAVE_SEARCH', Rect(x, row.y, 90 * s, row.h), 'CHIP', label='Save search', tip='Keep this search as a chip')
         x += 96 * s
     for index, entry in enumerate(shelf.saved_searches()):
@@ -1254,39 +1272,50 @@ def drag_ghost(layout, state):
 def shelf_layout(layout, state, zone):
     s = layout.scale
     layout.cards.append((zone, ''))
-    header = Rect(zone.x, zone.top - 30 * s, zone.w, 22 * s)
-    shelf_header(layout, state, zone, header)
+    start = len(layout.controls)
     if not state.shelf_open:
+        shelf_header(layout, state, zone, Rect(zone.x, zone.top - 30 * s, zone.w, 22 * s))
+        for control in layout.controls[start:]:
+            control.clip = zone
         return
-    search = Rect(zone.x, header.y - tab_rows(zone, s)[2] * 26 * s - 2 * s, zone.w, 22 * s)
-    search_row(layout, state, zone, search)
-    lowest = search.y - (26 * s if zone.w < SEARCH_SPLIT * s else 0.0)
-    viewport = Rect(zone.x, zone.y + 4 * s, zone.w, max(0.0, lowest - 6 * s - zone.y - 4 * s))
+    tab_count = tab_rows(zone, s)[2]
+    packed = state.shelf_tab == 'PACKS'
+    head = (30 + 26 * tab_count + 2 + (26 if zone.w < SEARCH_SPLIT * s else 0) + 6 + (28 if packed else 0)) * s
     query = shelf_query(state)
     entries = shelf.visible(state.shelf_tab, query, state.shelf_scope)
-    if state.shelf_tab == 'PACKS':
-        packs_row(layout, zone, viewport)
-        viewport = Rect(viewport.x, viewport.y, viewport.w, max(0.0, viewport.h - 28 * s))
-    if not entries and state.shelf_tab == 'PACKS':
+    tile_w, tile_h = (SHELF_TILE + SHELF_GAP) * s, (SHELF_TILE + SHELF_LABEL + SHELF_GAP) * s
+    columns = max(1, int((zone.w - 2 * SHELF_GAP * s) // tile_w))
+    body = math.ceil(len(entries) / columns) * tile_h + SHELF_GAP * s if entries else 0.0
+    room = zone.h - head - 4 * s
+    stacked = room < tile_h
+    viewport = Rect(zone.x, zone.y + 4 * s, zone.w, max(0.0, zone.h - 4 * s if stacked else room))
+    overflow = max(0.0, body - room)
+    scroll = min(max(0.0, state.scroll.get('SHELF', 0.0)), overflow)
+    state.scroll['SHELF'] = scroll
+    lift = scroll if stacked else 0.0
+    header = Rect(zone.x, zone.top + lift - 30 * s, zone.w, 22 * s)
+    shelf_header(layout, state, zone, header)
+    search = Rect(zone.x, header.y - tab_count * 26 * s - 2 * s, zone.w, 22 * s)
+    search_row(layout, state, zone, search)
+    content = zone.top - head + (28 * s if packed else 0.0)
+    if packed:
+        packs_row(layout, zone, Rect(zone.x, content + lift, zone.w, 0.0))
+    for control in layout.controls[start:]:
+        control.clip = zone
+    if not entries and packed:
         return
     if not entries:
         if query or state.shelf_scope != 'ALL':
             empty = f'Nothing in {dict(shelf.TABS)[state.shelf_tab].lower()} matches this search.'
         else:
             empty = 'Pick a folder of textures to browse them here.' if state.shelf_tab == 'TEXTURES' else 'Save a layer from its right-click menu to see it here.'
-        layout.add('SHELF_EMPTY', Rect(zone.x + 16 * s, viewport.top - 30 * s, viewport.w - 32 * s, 22 * s), 'NOTE', label=empty)
+        layout.add('SHELF_EMPTY', Rect(zone.x + 16 * s, zone.top - head - 30 * s, viewport.w - 32 * s, 22 * s), 'NOTE', label=empty, clip=zone)
         return
-    tile_w, tile_h = (SHELF_TILE + SHELF_GAP) * s, (SHELF_TILE + SHELF_LABEL + SHELF_GAP) * s
-    columns = max(1, int((viewport.w - 2 * SHELF_GAP * s) // tile_w))
-    body = math.ceil(len(entries) / columns) * tile_h + SHELF_GAP * s
-    overflow = max(0.0, body - viewport.h)
-    scroll = min(max(0.0, state.scroll.get('SHELF', 0.0)), overflow)
-    state.scroll['SHELF'] = scroll
     if overflow > 0:
         layout.scroll_areas['SHELF'] = (viewport, overflow)
         layout.add('SCROLL_SHELF', Rect(zone.x + zone.w - 6 * s, viewport.y + 2 * s, 3 * s, viewport.h - 4 * s), 'SCROLLBAR',
-                   value=scroll / overflow, second=viewport.h / body)
-    first_row = max(0, int((scroll - SHELF_GAP * s) // tile_h))
+                   value=scroll / overflow, second=viewport.h / (viewport.h + overflow))
+    first_row = max(0, int((scroll - (head if stacked else 0.0) - SHELF_GAP * s) // tile_h))
     rows = int(viewport.h // tile_h) + 2
     for item in entries[(first_row + rows) * columns:(first_row + rows * (PREFETCH_SCREENS + 1)) * columns]:
         shelf.prefetch(item)
@@ -1296,7 +1325,7 @@ def shelf_layout(layout, state, zone):
         packs.focus_previews([shelf.pack_preview(item) for item in shown if not item.preview_file])
     for index, item in enumerate(shown, first_row * columns):
         row, column = divmod(index, columns)
-        top = viewport.top + scroll - SHELF_GAP * s - row * tile_h
+        top = zone.top - head + scroll - SHELF_GAP * s - row * tile_h
         rect = Rect(viewport.x + SHELF_GAP * s + column * tile_w, top - tile_h + SHELF_GAP * s, SHELF_TILE * s, tile_h - SHELF_GAP * s)
         if rect.top < viewport.y or rect.y > viewport.top:
             continue
@@ -1919,9 +1948,9 @@ def sections_layout(layout, state, data, bounds, obj_name, tool, brush):
     builders = dict(SETS=sets_panel, LAYERS=layers_panel, PROPERTIES=properties_panel, HISTORY=history_panel)
     for key, rect in found.rects.items():
         if key == 'BAR':
-            workspace_bar(layout, rect, data, obj_name, state.view_2d, state.baking)
+            scrolled_row(layout, state, key, rect, lambda area: workspace_bar(layout, area, data, obj_name, state.view_2d, state.baking))
         elif key == 'STRIP':
-            tool_strip(layout, rect, tool, brush, data, state)
+            scrolled_row(layout, state, key, rect, lambda area: tool_strip(layout, area, tool, brush, data, state, rect.w))
         elif key == 'DOCK':
             dock_layout(layout, rect, tool, state)
         elif key == 'SHELF':
