@@ -1,7 +1,7 @@
 import math
 import bpy
 from .blending import MIX_NODE_BLENDS
-from .document import PROJECTORS, TRIPLANAR_BLEND, active_tile, children, folder_mode, geometry_attribute, isolated_uids, linked_layer, set_channels, shown_layers, slot_value, uses_coordinates
+from .document import PROJECTORS, TRIPLANAR_BLEND, active_tile, children, descendants, find_layer, folder_mode, geometry_attribute, linked_layer, linked_set, set_channels, shown_layers, slot_value, uses_coordinates
 from .effects import COMPONENT_FIELDS, CONTENT_KINDS, EFFECT_FIELDS
 from .caches import revision, tile, tile_variant
 from .filters import FILTER, HEIGHT_FILTERS, filter_color, filter_value, height_normal, slope_blur, slope_weight, wrap_sampling
@@ -113,19 +113,21 @@ class Build:
 
 
 class Instance:
-    def __init__(self, link, source):
+    def __init__(self, link, source, uid=None, parent=None):
         self.link, self.source = link, source
+        self._uid = link.uid if uid is None else uid
+        self._parent = link.parent if parent is None else parent
 
     def __getattr__(self, name):
         return getattr(self.source, name)
 
     @property
     def uid(self):
-        return self.link.uid
+        return self._uid
 
     @property
     def parent(self):
-        return self.link.parent
+        return self._parent
 
     @property
     def visible(self):
@@ -144,15 +146,57 @@ class Instance:
         return False
 
 
+def expand_children(source_layers, folder_uid, prefix, parent_uid, visiting, result):
+    for child in children(source_layers, folder_uid):
+        child_uid = f'{prefix}/{child.uid}'
+        if child.kind == 'INSTANCE':
+            expand_instance(child, child_uid, parent_uid, visiting, result)
+            continue
+        result.append(Instance(child, child, child_uid, parent_uid))
+        if child.kind == 'FOLDER':
+            expand_children(source_layers, child.uid, prefix, child_uid, visiting, result)
+
+
+def expand_instance(link, uid, parent, visiting, result):
+    source_set = linked_set(link)
+    source = linked_layer(link)
+    if source_set is None or source is None:
+        return
+    key = (source_set.name, source.uid)
+    if key in visiting:
+        return
+    result.append(Instance(link, source, uid, parent))
+    if source.kind == 'FOLDER':
+        expand_children(source_set.layers, source.uid, uid, uid, visiting | {key}, result)
+
+
+def owner_set(layers):
+    first = next(iter(layers), None)
+    if first is None:
+        return None
+    return next((item for item in first.id_data.devil_painter.sets if len(item.layers) == len(layers) and item.layers[0] == first), None)
+
+
+def ancestor_keys(layers, owner, uid):
+    if owner is None:
+        return set()
+    by_uid = {item.uid: item for item in layers}
+    found = set()
+    current = by_uid.get(uid)
+    while current is not None and current.parent:
+        found.add((owner.name, current.parent))
+        current = by_uid.get(current.parent)
+    return found
+
+
 def resolved(layers):
+    owner = owner_set(layers)
     result = []
     for layer in layers:
         if layer.kind != 'INSTANCE':
             result.append(layer)
             continue
-        source = linked_layer(layer)
-        if source is not None:
-            result.append(Instance(layer, source))
+        expand_instance(layer, layer.uid, layer.parent, ancestor_keys(layers, owner, layer.uid), result)
     return result
 
 
@@ -218,7 +262,7 @@ def coverage_sampling(build, layer, key):
     chain = build.sampler.sample
     for effect in layer.effects:
         if positional(effect) and effect.target == 'CONTENT' and effect.channel in {'ALL', key} and effect.filter not in HEIGHT_FILTERS:
-            chain = anchored_sampling(build, effect, chain, wrap_sampling(build, effect, chain))
+            chain = anchored_sampling(build, layer, effect, chain, wrap_sampling(build, effect, chain))
     return lambda image: chain(image, build.sampler.uv())[1]
 
 
@@ -265,7 +309,7 @@ def height_filtered(build, layer, effect, key, content):
         source = image if height is None else height
         weight = shared_slope(build, effect, source, lambda spot: gray(build, build.sampler.sample(source, spot)[0]))
         result = slope_blur(build, effect, build.sampler.sample, image, weight, vector)[0]
-    strength = anchor_strength(build, effect)
+    strength = anchor_strength(build, layer, effect)
     return result if strength is None else mix_color(build, content, result, strength)
 
 
@@ -276,7 +320,7 @@ def filtered_content(build, layer, effect, key, content):
     if image is None:
         return content
     result = wrap_sampling(build, effect, build.sampler.sample)(image, build.sampler.uv())[0]
-    strength = anchor_strength(build, effect)
+    strength = anchor_strength(build, layer, effect)
     return result if strength is None else mix_color(build, content, result, strength)
 
 
@@ -296,7 +340,7 @@ def filtered_mask(build, layer, effect, value):
         result = slope_blur(build, effect, taps, image, weight, build.sampler.uv())[1]
     else:
         result = wrap_sampling(build, effect, taps)(image, build.sampler.uv())[1]
-    strength = anchor_strength(build, effect)
+    strength = anchor_strength(build, layer, effect)
     return result if strength is None else mix_value(build, value, result, strength)
 
 
@@ -423,32 +467,38 @@ def fill_vector(build, effect):
     return mapping.outputs['Vector']
 
 
-def anchor_input(build, uid, channel):
-    results = build.anchors.get(uid)
+def scoped_uid(layer, uid):
+    if '/' not in layer.uid or not uid:
+        return uid
+    return f'{layer.uid.rsplit("/", 1)[0]}/{uid}'
+
+
+def anchor_input(build, layer, uid, channel):
+    results = build.anchors.get(scoped_uid(layer, uid)) or build.anchors.get(uid)
     if results is None:
         return None
     key = channel if channel in results else next(iter(results), None)
     return gray(build, results[key]) if key is not None else None
 
 
-def anchor_value(build, effect):
-    return anchor_input(build, effect.other, effect.channel)
+def anchor_value(build, layer, effect):
+    return anchor_input(build, layer, effect.other, effect.channel)
 
 
-def anchor_strength(build, effect):
-    value = anchor_input(build, effect.anchor, effect.anchor_channel) if effect.anchor else None
+def anchor_strength(build, layer, effect):
+    value = anchor_input(build, layer, effect.anchor, effect.anchor_channel) if effect.anchor else None
     return None if value is None else mix_value(build, 1.0, value, effect.anchor_weight)
 
 
-def anchor_detail(build, effect):
-    value = anchor_input(build, effect.anchor, effect.anchor_channel) if effect.anchor else None
+def anchor_detail(build, layer, effect):
+    value = anchor_input(build, layer, effect.anchor, effect.anchor_channel) if effect.anchor else None
     if value is None:
         return None
     return math_node(build.nodes, build.links, 'MULTIPLY', math_node(build.nodes, build.links, 'SUBTRACT', value, .5), effect.anchor_weight * 2)
 
 
-def anchored_sampling(build, effect, inner, chain):
-    strength = anchor_strength(build, effect)
+def anchored_sampling(build, layer, effect, inner, chain):
+    strength = anchor_strength(build, layer, effect)
     if strength is None:
         return chain
 
@@ -486,7 +536,7 @@ def mask_value(build, layer):
                 continue
             elif effect.kind == 'FILTER':
                 other = filter_value(build, value, effect)
-                strength = anchor_strength(build, effect) if other is not None else None
+                strength = anchor_strength(build, layer, effect) if other is not None else None
                 if strength is not None:
                     other = mix_value(build, value, other, strength)
             elif effect.kind == 'FILL':
@@ -494,12 +544,12 @@ def mask_value(build, layer):
             elif effect.kind == 'ID_COLOR':
                 other = id_selection(build, effect, sample)
             elif effect.kind == 'GENERATOR':
-                other = generator_mask(nodes, links, effect, generator_name(layer, effect), build, sample, anchor_detail(build, effect))
+                other = generator_mask(nodes, links, effect, generator_name(layer, effect), build, sample, anchor_detail(build, layer, effect))
             elif effect.kind == 'COMPARE':
-                target = build.layer_map.get(effect.other)
+                target = build.layer_map.get(scoped_uid(layer, effect.other)) or build.layer_map.get(effect.other)
                 other = mask_value(build, target) if target is not None and target.uid != layer.uid else None
             else:
-                other = anchor_value(build, effect)
+                other = anchor_value(build, layer, effect)
             if other is not None:
                 value = combine_mask(build, value, other, effect.blend, effect.opacity)
     build.masks[layer.uid] = value
@@ -650,7 +700,7 @@ def content_source(build, layer, effect, colored, generated):
     if effect.kind == 'FILL':
         return fill_content(build, effect, colored), effect.opacity
     if effect.uid not in generated:
-        generated[effect.uid] = generator_mask(build.nodes, build.links, effect, generator_name(layer, effect), build, sample, anchor_detail(build, effect))
+        generated[effect.uid] = generator_mask(build.nodes, build.links, effect, generator_name(layer, effect), build, sample, anchor_detail(build, layer, effect))
     return generated[effect.uid], effect.opacity
 
 
@@ -661,7 +711,7 @@ def content_effect(build, layer, content, effect, key, colored, generated):
         return levels_color(build, content, effect)
     if effect.kind == 'FILTER':
         result = filter_color(build, content, effect)
-        strength = anchor_strength(build, effect)
+        strength = anchor_strength(build, layer, effect)
         return result if strength is None else mix_color(build, content, result, strength)
     other, factor = content_source(build, layer, effect, colored, generated)
     if other is None:
@@ -982,9 +1032,9 @@ def isolated_tree(data, tree, roots, key, mask_uid=''):
 
 def stack_layers(data, raw):
     layers = resolved(data.layers) if data.visible else []
-    kept = None if raw else isolated_uids(data)
-    if kept is None:
+    if raw or find_layer(data, data.isolate) is None:
         return layers
+    kept = {data.isolate, *descendants(layers, data.isolate)}
     return [Rooted(layer) if layer.uid == data.isolate else layer for layer in layers if layer.uid in kept]
 
 

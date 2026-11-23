@@ -496,12 +496,16 @@ def geometry_attribute(data, layer):
     return f'dp_geo_{data.slot}_{layer.uid}'
 
 
-def linked_layer(layer):
+def linked_set(layer):
     project = layer.id_data.devil_painter
-    source = next((item for item in project.sets if item.name == layer.link_set), None)
+    return next((item for item in project.sets if item.name == layer.link_set), None)
+
+
+def linked_layer(layer):
+    source = linked_set(layer)
     if source is None:
         return None
-    return next((item for item in source.layers if item.uid == layer.link_uid and item.kind not in {'FOLDER', 'INSTANCE'}), None)
+    return next((item for item in source.layers if item.uid == layer.link_uid and item.kind != 'INSTANCE'), None)
 
 
 def register():

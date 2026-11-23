@@ -1449,8 +1449,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             items.append(('EXPORT_MASK', 'Export mask', False))
         if layer.mask is not None or any(effect.target == 'MASK' for effect in layer.effects):
             items.append(('SAVE_SMART_MASK', 'Save mask as smart mask', False))
-        if layer.kind != 'FOLDER':
-            items += [(f'INSTANCE_INTO.{index}', 'Instance into ' + item.name, False) for index, item in enumerate(project.sets) if index != project.active_set]
+        items += [(f'INSTANCE_INTO.{index}', 'Instance into ' + item.name, False) for index, item in enumerate(project.sets)]
         if layer.mask is None:
             items += [('ADD_MASK_WHITE', 'Add white mask', False), ('ADD_MASK_BLACK', 'Add black mask', False)]
         else:

@@ -449,12 +449,21 @@ def paste_effects(context, obj, project, source_index, uid):
 def instance_into(context, obj, project, index):
     source = project.sets[project.active_set]
     layer = active_layer(source)
+    if layer is None or layer.kind == 'INSTANCE':
+        return 'Select a layer or folder to instance.'
+    name, uid, parent, position = layer.name, layer.uid, layer.parent, layer_index(source, layer.uid)
     target = project.sets[index]
     target.serial += 1
+    new_uid = f'L{target.serial}'
     link = target.layers.add()
-    link.uid, link.kind, link.name = f'L{target.serial}', 'INSTANCE', layer.name
-    link.link_set, link.link_uid = source.name, layer.uid
-    return refresh(context, obj, source, f'{layer.name} is now instanced in {target.name}.')
+    link.uid, link.kind, link.name = new_uid, 'INSTANCE', name
+    link.link_set, link.link_uid = source.name, uid
+    if index == project.active_set:
+        link.parent = parent
+        target.layers.move(len(target.layers) - 1, position + 1)
+        source.active_uid = new_uid
+        source.target = 'CONTENT'
+    return refresh(context, obj, source, f'{name} is now instanced in {target.name}.')
 
 
 def geometry_values(obj, data, layer):
