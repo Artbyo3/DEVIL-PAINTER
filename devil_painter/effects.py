@@ -21,7 +21,7 @@ LEVEL_FIELDS = ('in_low', 'in_high', 'gamma', 'out_low', 'out_high')
 COMPONENT_FIELDS = tuple('comp_' + field for field in LEVEL_FIELDS)
 EFFECT_FIELDS = ('kind', 'target', 'enabled', 'blend', 'opacity', 'source', 'value', 'pattern', 'scale', 'detail', 'contrast', 'texture',
                  'in_low', 'in_high', 'gamma', 'out_low', 'out_high', 'filter', 'amount', 'radius', 'angle', 'hue', 'saturation', 'brightness',
-                 'color', 'color_b', 'other', 'channel', 'anchor', 'anchor_channel', 'anchor_weight', 'clamp', 'levels_component', 'projection', 'tiling', 'offset_u', 'offset_v') + COMPONENT_FIELDS + GENERATOR_FIELDS
+                 'color', 'color_b', 'other', 'channel', 'anchor', 'anchor_channel', 'anchor_weight', 'clamp', 'levels_component', 'projection', 'tiling', 'offset_u', 'offset_v', 'triplanar_blend', 'wrap', 'filtering') + COMPONENT_FIELDS + GENERATOR_FIELDS
 
 
 def mask_effects(layer):

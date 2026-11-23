@@ -10,7 +10,7 @@ from .brushes import world_size_text
 from pathlib import Path
 from .blending import BLEND_MODES, CHANNEL, CHANNELS, FOLDER_BLENDS, linear_to_srgb
 from .canvas import Layout, Rect
-from .compositing import triplanar_textured
+from .compositing import fill_projection, triplanar_textured
 from .document import (BAKE_ANTIALIAS_LABELS, BAKE_CURVATURE_LABELS, BAKE_ID_LABELS, DEPTH_LABELS, DISPLACEMENT_SCALE_MAX, DISPLACEMENT_SUBDIVISION_MAX, DYNAMICS, NORMAL_FORMATS, PROJECTORS, STROKE_METHODS, TEXTURE_SAMPLING, TRANSPARENCY, NORMAL_SPACES, PROJECTIONS, RESOLUTIONS, SHADERS, active_effect, active_layer, children, editing_mask, find_layer, isolated_uids,
                        linked_layer, map_extrusion, map_samples, set_channels, slot_value, uses_coordinates)
 from .effects import ANCHORED_KINDS, CONTENT_SOURCES, EFFECT_ICONS, EFFECT_KINDS, FILL_PROJECTIONS, LEVEL_COMPONENTS, MASK_BLEND_LABEL, LevelsView, effect_label
@@ -673,6 +673,12 @@ def effect_section(flow, data, layer, w):
             x, y, h = flow.field()
             flow.add('FX_PROJECTION', Rect(x, y, w, h), 'DROPDOWN', label='Projection', text=dict(FILL_PROJECTIONS)[effect.projection],
                      tip='Map the fill by UV or from three sides without seams; Automatic uses UV for textures and object space for patterns')
+        if fill_textured(effect) and fill_projection(effect) == 'TRIPLANAR':
+            x, y, h = flow.field()
+            flow.add('FX_TRIPLANAR_HARDNESS', Rect(x, y, w, h), 'SLIDER', label='Hardness', value=1.0 - effect.triplanar_blend, text=f'{1.0 - effect.triplanar_blend:.2f}',
+                     tip='Sharpen or soften where the three projections meet')
+        if fill_textured(effect):
+            sampling_line(flow, 'FX_', '', effect, w)
     if effect.kind == 'LEVELS':
         x, y, h = flow.field()
         width = half if effect.target == 'CONTENT' else w
@@ -739,9 +745,14 @@ def anchor_lines(data, effect):
     return 1 + bool(effect.anchor and find_layer(data, effect.anchor) is not None) if effect.kind in ANCHORED_KINDS else 0
 
 
+def fill_textured(effect):
+    return effect.kind == 'FILL' and effect.source == 'IMAGE' and effect.texture is not None
+
+
 def effect_lines(data):
     effect = active_effect(data)
     lines = 2 + (effect.kind in {'PAINT', 'FILL', 'FILTER', 'COMPARE', 'ANCHOR', 'LEVELS'}) + (effect.kind == 'FILL' and effect.source != 'VALUE')
+    lines += fill_textured(effect) + (fill_textured(effect) and fill_projection(effect) == 'TRIPLANAR')
     lines += anchor_lines(data, effect)
     lines += (len(effect_sliders(effect)) + 1) // 2
     if effect.kind == 'GENERATOR':
@@ -787,14 +798,14 @@ def pattern_line(flow, channel, slot, w):
         flow.add(f'{name}.{channel.key}', Rect(x + index * (third + 4 * s), y, third, h), 'SLIDER', label=label, value=value, text=text)
 
 
-def sampling_line(flow, channel, slot, w):
+def sampling_line(flow, prefix, suffix, holder, w):
     s = flow.layout.scale
     x, y, h = flow.field()
     half = (w - 4 * s) / 2
     for index, (field, label, tip) in enumerate((('wrap', 'Wrap', 'Repeat the texture, stretch its edge pixels, or flip it past the edge of the UVs'),
                                                  ('filtering', 'Filtering', 'Blend between texels smoothly or keep them as hard squares'))):
         options = {key: name for key, name, _ in TEXTURE_SAMPLING[field]}
-        flow.add(f'{field.upper()}.{channel.key}', Rect(x + index * (half + 4 * s), y, half, h), 'DROPDOWN', label=label, text=options[getattr(slot, field)], tip=tip)
+        flow.add(f'{prefix}{field.upper()}{suffix}', Rect(x + index * (half + 4 * s), y, half, h), 'DROPDOWN', label=label, text=options[getattr(holder, field)], tip=tip)
 
 
 def channels_section(flow, data, layer, w):
@@ -832,7 +843,7 @@ def channels_section(flow, data, layer, w):
         if fill and slot.source == 'PATTERN':
             pattern_line(flow, channel, slot, w)
         elif fill and slot.source == 'IMAGE' and slot.image is not None:
-            sampling_line(flow, channel, slot, w)
+            sampling_line(flow, '', '.' + channel.key, slot, w)
 
 
 def projection_section(flow, data, layer, w):

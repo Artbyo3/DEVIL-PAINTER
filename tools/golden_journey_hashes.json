@@ -2417,5 +2417,6 @@
  "gui_history.py": [],
  "gui_displacement.py": [],
  "gui_env_rotate.py": [],
- "gui_numeric_fields.py": []
+ "gui_numeric_fields.py": [],
+ "gui_effect_sampling.py": []
 }
