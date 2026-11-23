@@ -14,7 +14,7 @@ LIGHT_PATTERNS = (
 )
 TIER_NAMES = ('light', 'standard', 'full')
 EXPECTED_EXPORTS = {
-    'blender_api.py': (22, ''),
+    'blender_api.py': (34, ''),
     'gui_anchors.py': (80, ''),
     'gui_baking.py': (0, 'verifies background mesh-map baking, cage/skew maps, and bake cancel rather than texture export'),
     'gui_clone_surface.py': (0, 'verifies surface-space clone source picking and seam-crossing strokes directly on layer pixels'),
