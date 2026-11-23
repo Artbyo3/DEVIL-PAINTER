@@ -516,47 +516,6 @@ def journey():
     mix = nodes(body)[f'{same_link_uid}.base_color']
     value = constant.outputs[0].default_value if constant else next(item for item in mix.inputs if item.name == 'B' and item.type == 'RGBA').default_value
     check(value[2] > .9 and value[1] < .1, 'editing the source layer updates its same-set instance')
-
-    click(window, region, 'ADD_FOLDER')
-    yield from settle()
-    inst_folder = body.active_uid
-    inst_folder_name = find_layer(body, inst_folder).name
-    click(window, region, 'ADD_FILL')
-    yield from settle()
-    inst_child = body.active_uid
-    yield from set_hex(window, region, 'SWATCH.base_color', '#00FFFF')
-    yield from context_menu(window, region, inst_folder, 'INSTANCE_INTO.0')
-    same_folder = active_layer(body)
-    same_folder_uid = same_folder.uid
-    check(same_folder.kind == 'INSTANCE' and same_folder.link_set == body.name and same_folder.link_uid == inst_folder,
-          'Instance into Body instances a folder in the same texture set')
-    yield from reveal(window, region, 'ROW_' + same_folder_uid, 'LAYERS')
-    check(control('ROW_' + same_folder_uid).icon == 'FOLDER' and has('LINKED_' + same_folder_uid),
-          'an instanced folder row shows the folder icon and link badge')
-    check(f'{same_folder_uid}:opacity' in nodes(body) and f'{same_folder_uid}/{inst_child}.base_color' in nodes(body),
-          'a same-set folder instance composes the folder and its children')
-    yield from context_menu(window, region, inst_folder, 'INSTANCE_INTO.1')
-    trim_folder = next((item for item in trim.layers if item.kind == 'INSTANCE' and item.link_uid == inst_folder), None)
-    trim_folder_uid = trim_folder.uid if trim_folder is not None else ''
-    check(trim_folder is not None and trim_folder.link_set == body.name, 'Instance into Trim instances a folder into the other texture set')
-    check(f'{trim_folder_uid}:opacity' in nodes(trim) and f'{trim_folder_uid}/{inst_child}.base_color' in nodes(trim),
-          'a cross-set folder instance composes the folder and its children into Trim')
-    yield from select_row(window, region, inst_child)
-    yield from set_hex(window, region, 'SWATCH.base_color', '#FF00FF')
-    for target_set, link_uid, label in ((body, same_folder_uid, 'same-set'), (trim, trim_folder_uid, 'cross-set')):
-        mix = nodes(target_set)[f'{link_uid}/{inst_child}.base_color']
-        value = next(item for item in mix.inputs if item.name == 'B' and item.type == 'RGBA').default_value
-        check(value[0] > .9 and value[1] < .1 and value[2] > .9, f'editing a folder child updates its {label} folder instance')
-    click(window, region, 'SET.1')
-    yield from settle()
-    yield from reveal(window, region, 'ROW_' + trim_folder_uid, 'LAYERS')
-    check(control('ROW_' + trim_folder_uid).icon == 'FOLDER' and has('LINKED_' + trim_folder_uid),
-          'a cross-set folder instance row shows the folder icon and link badge')
-    yield from select_row(window, region, trim_folder_uid)
-    check(has('INSTANCE_INFO') and inst_folder_name in control('INSTANCE_INFO').label and body.name in control('INSTANCE_INFO').label,
-          'folder instance properties name the source folder and set')
-    click(window, region, 'SET.0')
-    yield from settle()
     yield from select_row(window, region, fill_uid)
 
     click(window, region, 'ADD_PAINT')
@@ -742,6 +701,47 @@ def journey():
           'an instance whose source was deleted draws a placeholder thumbnail in the Layers row')
     yield from context_menu(window, region, orphan_uid, 'DELETE')
     check(find_layer(body, orphan_uid) is None, 'the instance without a source can be deleted')
+
+    click(window, region, 'ADD_FOLDER')
+    yield from settle()
+    inst_folder = body.active_uid
+    inst_folder_name = find_layer(body, inst_folder).name
+    click(window, region, 'ADD_FILL')
+    yield from settle()
+    inst_child = body.active_uid
+    yield from set_hex(window, region, 'SWATCH.base_color', '#00FFFF')
+    yield from context_menu(window, region, inst_folder, 'INSTANCE_INTO.0')
+    same_folder = active_layer(body)
+    same_folder_uid = same_folder.uid
+    check(same_folder.kind == 'INSTANCE' and same_folder.link_set == body.name and same_folder.link_uid == inst_folder,
+          'Instance into Body instances a folder in the same texture set')
+    yield from reveal(window, region, 'ROW_' + same_folder_uid, 'LAYERS')
+    check(control('ROW_' + same_folder_uid).icon == 'FOLDER' and has('LINKED_' + same_folder_uid),
+          'an instanced folder row shows the folder icon and link badge')
+    check(f'{same_folder_uid}:opacity' in nodes(body) and f'{same_folder_uid}/{inst_child}.base_color' in nodes(body),
+          'a same-set folder instance composes the folder and its children')
+    yield from context_menu(window, region, inst_folder, 'INSTANCE_INTO.1')
+    trim_folder = next((item for item in trim.layers if item.kind == 'INSTANCE' and item.link_uid == inst_folder), None)
+    trim_folder_uid = trim_folder.uid if trim_folder is not None else ''
+    check(trim_folder is not None and trim_folder.link_set == body.name, 'Instance into Trim instances a folder into the other texture set')
+    check(f'{trim_folder_uid}:opacity' in nodes(trim) and f'{trim_folder_uid}/{inst_child}.base_color' in nodes(trim),
+          'a cross-set folder instance composes the folder and its children into Trim')
+    yield from select_row(window, region, inst_child)
+    yield from set_hex(window, region, 'SWATCH.base_color', '#FF00FF')
+    for target_set, link_uid, label in ((body, same_folder_uid, 'same-set'), (trim, trim_folder_uid, 'cross-set')):
+        mix = nodes(target_set)[f'{link_uid}/{inst_child}.base_color']
+        value = next(item for item in mix.inputs if item.name == 'B' and item.type == 'RGBA').default_value
+        check(value[0] > .9 and value[1] < .1 and value[2] > .9, f'editing a folder child updates its {label} folder instance')
+    click(window, region, 'SET.1')
+    yield from settle()
+    yield from reveal(window, region, 'ROW_' + trim_folder_uid, 'LAYERS')
+    check(control('ROW_' + trim_folder_uid).icon == 'FOLDER' and has('LINKED_' + trim_folder_uid),
+          'a cross-set folder instance row shows the folder icon and link badge')
+    yield from select_row(window, region, trim_folder_uid)
+    check(has('INSTANCE_INFO') and inst_folder_name in control('INSTANCE_INFO').label and body.name in control('INSTANCE_INFO').label,
+          'folder instance properties name the source folder and set')
+    click(window, region, 'SET.0')
+    yield from settle()
 
     click(window, region, 'CLOSE')
     yield from settle()

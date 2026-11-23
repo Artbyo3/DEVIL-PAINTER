@@ -12,7 +12,7 @@ from devil_painter import bakejob, editor
 from devil_painter.document import map_extrusion, map_samples
 from devil_painter.meshmaps import id_color
 from tools.workspace import prepare_scratch
-from tests.gui_harness import bake_landed, check, click, control, drag_slider, finish, has, keys, pixels, press, run_journey, settle, until, viewport
+from tests.gui_harness import bake_landed, check, click, control, drag_slider, finish, has, keys, pixels, press, reveal, run_journey, settle, until, viewport
 
 
 def dominant(values, count):
@@ -300,6 +300,7 @@ def journey():
 
     press(window, 'ESC', *middle)
     yield from settle()
+    yield from reveal(window, region, 'MAP.height', panel='MAPS')
     check(has('MAP.height') and control('MAP.height').preview == data.maps['height'].image, 'the mesh maps panel shows the height thumbnail')
     click(window, region, 'MAP.height')
     yield from settle()

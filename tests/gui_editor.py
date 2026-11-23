@@ -640,6 +640,7 @@ def journey():
     drag_to('VALUE.metallic', .02)
     yield from settle()
     check(copper.slots['metallic'].value < .1, 'editing the material layer changes its channel')
+    yield from reveal(window, region, 'RESET_MATERIAL')
     click(window, region, 'RESET_MATERIAL')
     yield from settle()
     check(copper.slots['metallic'].value == 1.0, 'Reset restores the material values')
