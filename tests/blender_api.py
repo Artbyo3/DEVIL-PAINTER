@@ -106,6 +106,25 @@ check('Baked 1' in api.bake(two, maps=('ao',)) and tuple(two.devil_painter.sets[
 check(any('AO' in path for path in api.export(two, clash_dir, template='Standard PBR')),
       'exporting still reads baked AO whose resolution differs from the texture set')
 two.devil_painter.sets[0].bake_resolution = 0
+api.add_paint(two, set_index=1)
+check(two.devil_painter.active_set == 1, 'an edit on another texture set switches to that set')
+body_layer = api.add_paint(two, set_index=0)
+trim_layer = api.add_paint(two, set_index=1)
+api.layers(two, set_index=0)
+api.selected(two, 0)
+api.material_of(two, body_layer, 0)
+check(two.devil_painter.active_set == 1, 'read-only API calls on another texture set leave the active set alone')
+trim_faces = numpy.empty(len(two.data.polygons), dtype=bool)
+two.data.polygons.foreach_get('select', trim_faces)
+trim_slots = numpy.array([polygon.material_index for polygon in two.data.polygons]) == two.devil_painter.sets[1].slot
+check(numpy.array_equal(trim_faces, trim_slots), 'face masking still belongs to the active texture set after read-only API calls')
+api.set_channel(two, body_layer, 'roughness', .4, set_index=0)
+body_faces = numpy.empty(len(two.data.polygons), dtype=bool)
+two.data.polygons.foreach_get('select', body_faces)
+body_slots = numpy.array([polygon.material_index for polygon in two.data.polygons]) == two.devil_painter.sets[0].slot
+check(two.devil_painter.active_set == 0 and numpy.array_equal(body_faces, body_slots),
+      'an edit on another texture set switches face masking to that set the way the UI does')
+check(api.selected(two, 1) == trim_layer and api.selected(two, 0) == body_layer, 'each texture set keeps its own selected layer')
 try:
     api.layers(bpy.data.objects.new('Empty', bpy.data.meshes.new('Empty')))
     check(False, 'an object without a project is refused')
