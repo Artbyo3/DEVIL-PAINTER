@@ -493,18 +493,21 @@ def fill_layers(layout, state, data, flow):
             effect_row(flow, state, data, layer, effect, row)
             drop_marker(flow, state, f'FX_{uid}.{effect.uid}', row)
             continue
+        source = linked_layer(layer) if layer.kind == 'INSTANCE' else None
+        is_folder = layer.kind == 'FOLDER' or (source is not None and source.kind == 'FOLDER')
         selected = uid == data.active_uid or uid in state.multi
         editing = state.text is not None and state.text.key == f'NAME_{uid}'
         flow.add(f'ROW_{uid}', row, 'ROW', label=state.text.text if editing else layer.name, text=f'{layer.opacity * 100:.0f}%',
                  active=selected, second=1.0 if uid == data.active_uid and target in {'LAYER', 'INSTANCE'} else 0.0,
                  preview=layer_preview(layer), mask=layer.mask if layer.kind != 'INSTANCE' else None,
-                 icon='FOLDER' if layer.kind == 'FOLDER' else '', color=layer_color(layer),
+                 icon='FOLDER' if is_folder else '', color=layer_color(layer),
                  caret=state.text.cursor if editing else -1,
                  tip='Click to select, Ctrl or Shift-click to select several, drag to reorder, double-click to rename, right-click for more')
         drop_marker(flow, state, f'ROW_{uid}', row)
         if layer.kind == 'INSTANCE':
+            noun = 'folder' if source is not None and source.kind == 'FOLDER' else 'layer'
             flow.add('LINKED_' + uid, Rect(row.x + row.w - 64 * s, row.y + 8 * s, 22 * s, row.h - 16 * s), 'ICON', icon='INTERNAL',
-                     tip=f'Instance of a layer from {layer.link_set}; edits to the source show here')
+                     tip=f'Instance of a {noun} from {layer.link_set}; edits to the source show here')
         if len(layer.effects):
             opened = 'FX_OPEN_' + uid not in state.collapsed
             flow.add('FX_OPEN_' + uid, Rect(row.x + row.w - 90 * s, row.y + 8 * s, 22 * s, row.h - 16 * s), 'ICON',
