@@ -125,11 +125,12 @@ def journey():
     tabs = {key.removeprefix('SHELF_TAB.') for key in keys('SHELF_TAB.')}
     check({'MATERIALS', 'SMART', 'TEXTURES', 'PATTERNS', 'MASKS', 'GENERATORS', 'FILTERS', 'BRUSHES', 'ALPHAS', 'ENVIRONMENTS'} <= tabs,
           'the shelf browses materials, smart materials, textures, patterns, masks, generators, filters, brushes, alphas, and lighting')
-    masks_tab = control('SHELF_TAB.MASKS')
-    check(masks_tab.icon == 'MASK' and masks_tab.rect.w == masks_tab.rect.h
+    materials_tab, masks_tab = control('SHELF_TAB.MATERIALS'), control('SHELF_TAB.MASKS')
+    check(materials_tab.icon == 'LAYER_MATERIAL' and materials_tab.rect.w == materials_tab.rect.h
+          and masks_tab.icon == 'MASK' and masks_tab.rect.w == masks_tab.rect.h
           and control('SHELF_TAB.GENERATORS').rect.x - (masks_tab.rect.x + masks_tab.rect.w)
-          == control('SHELF_TAB.SMART').rect.x - (control('SHELF_TAB.MATERIALS').rect.x + control('SHELF_TAB.MATERIALS').rect.w),
-          'the Masks tab is a square icon chip and the tabs after it close the gap')
+          == control('SHELF_TAB.SMART').rect.x - (materials_tab.rect.x + materials_tab.rect.w),
+          'the Materials and Masks tabs are square icon chips and the tabs after them close the gap')
     for tab in ('MATERIALS', 'SMART', 'MASKS', 'GENERATORS', 'FILTERS', 'PATTERNS', 'BRUSHES', 'ENVIRONMENTS'):
         yield from open_tab(window, region, tab)
         shown = yield from wait_preview('ITEM.0')

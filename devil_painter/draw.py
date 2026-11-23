@@ -5,7 +5,7 @@ import blf
 import gpu
 from gpu_extras.batch import batch_for_shader
 from .canvas import Rect
-from .icons import ICON_LEVELS, icon_pixels, icon_spans
+from .icons import ICON_LEVELS, icon_bounds, icon_fit_size, icon_pixels, icon_spans
 from .minimal import THUMBNAIL
 from .previews import draw_image
 from .privacy import masked
@@ -293,7 +293,11 @@ class Renderer:
             self.round_rect_outline(rect, ACCENT_BORDER, radius=metrics.regular)
         color = ACCENT if control.active else TEXT_PRIMARY if hover else TEXT_SECONDARY
         if control.icon:
-            self.draw_icon(control.icon, rect.x + rect.w / 2, rect.y + rect.h / 2, CHIP_ICON_SIZE, color)
+            pixels = icon_fit_size(control.icon, max(1, round(CHIP_ICON_SIZE * self.s)))
+            gx, gy, gw, gh = icon_bounds(control.icon, pixels)
+            cx = rect.x + rect.w / 2 + (pixels / 2 - (gx + gw / 2))
+            cy = rect.y + rect.h / 2 + (pixels / 2 - (gy + gh / 2))
+            self.draw_icon(control.icon, cx, cy, pixels / self.s, color)
         else:
             self.text(rect.x + rect.w / 2, rect.y + (rect.h - 10 * self.s) / 2, control.label, 10, color, True, max_width=rect.w - 8 * self.s)
 

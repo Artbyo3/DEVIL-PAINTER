@@ -4,6 +4,7 @@ import io
 import json
 import unittest
 from unittest.mock import patch
+from devil_painter.icons import glyph_extent, icon_fit_size
 from tools.prepare_blender_icons import fetch_dat, rasterize_dat
 
 
@@ -32,6 +33,11 @@ class NativeIconSourceTests(unittest.TestCase):
         for content in (b'version https://git-lfs.github.com/spec/v1\n', b'VCO\x00', b'VCO\x00\xff\xff\x00\x00junk'):
             with self.subTest(content=content), self.assertRaises(ValueError):
                 rasterize_dat(content)
+
+    def test_chip_icons_fit_uniform_twenty_pixel_glyph_standard(self):
+        for name in ('MASK', 'LAYER_MATERIAL', 'FOLDER', 'DELETE'):
+            with self.subTest(name=name):
+                self.assertEqual(glyph_extent(name, icon_fit_size(name, 20)), 20)
 
 
 if __name__ == '__main__':
