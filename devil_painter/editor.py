@@ -2338,17 +2338,51 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             return None
         return sets.locate(obj, obj.devil_painter, face)
 
+    def slot_drop_target(self, data, item):
+        if data is None or self.state.popover is not None:
+            return None
+        controls = {control.key: control for control in self.workspace.controls}
+        px, py = self.pointer
+
+        def over(left, right):
+            area = Rect(left.rect.x, left.rect.y, right.rect.x + right.rect.w - left.rect.x, left.rect.h)
+            return area.contains(px, py) and (left.clip is None or left.clip.contains(px, py))
+
+        if item.kind in {'TEXTURE', 'PATTERN'}:
+            layer = active_layer(data)
+            if layer is not None and layer.kind == 'FILL':
+                for control in self.workspace.controls:
+                    if control.key.startswith('SOURCE.'):
+                        channel = control.key.removeprefix('SOURCE.')
+                        if over(controls.get('USE.' + channel, control), controls.get('BLEND.' + channel, control)):
+                            return channel
+            effect = active_effect(data)
+            if effect is not None and effect.kind == 'FILL' and 'FX_SOURCE' in controls:
+                source = controls['FX_SOURCE']
+                if over(source, controls.get('FX_SOURCE_NAME', source)):
+                    return EFFECT_TARGET
+        if item.kind == 'MATERIAL':
+            layer = active_layer(data)
+            if layer is not None and layer.kind == 'FILL' and 'MATERIAL_THUMB' in controls:
+                thumb = controls['MATERIAL_THUMB']
+                if over(thumb, controls.get('REPLACE_MATERIAL', thumb)):
+                    return REPLACE_TARGET
+        return None
+
     def track_item(self, context, key, release):
         item = self.shelf_item('ITEM.' + key.removeprefix('DRAG_ITEM.'))
         moved = math.dist(self.pointer, self.drag_origin) > DRAG_START * self.workspace.scale
         obj, data = self.painted()
         target = self.drop_target('ROW_') if moved else None
-        mesh_hit = None if target is not None or not moved else self.mesh_drop_target(obj, data, item)
+        slot = None if target is not None or not moved else self.slot_drop_target(data, item)
+        mesh_hit = None if target is not None or slot is not None or not moved else self.mesh_drop_target(obj, data, item)
         if target is not None:
             height = (self.pointer[1] - target.rect.y) / target.rect.h
             folder = find_layer(data, target.key.removeprefix('ROW_')).kind == 'FOLDER'
             mode = 'INTO' if item.kind in ONTO_KINDS or (folder and .33 <= height <= .66) else 'ABOVE' if height >= .5 else 'BELOW'
             self.state.drop = (target.key, mode)
+        elif slot is not None:
+            self.state.drop = ('SLOT', slot)
         elif mesh_hit is not None:
             self.state.drop = ('MESH', mesh_hit[0], mesh_hit[1])
         else:
@@ -2360,6 +2394,8 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         drop, self.state.drop = self.state.drop, ()
         if not moved:
             self.message = self.use_shelf_item(context, obj, data, item)
+        elif drop and drop[0] == 'SLOT':
+            self.message = self.use_shelf_item(context, obj, data, item, drop[1])
         elif drop and drop[0] == 'MESH':
             self.message = self.drop_on_mesh(context, obj, item, drop[1], drop[2])
         elif drop:
@@ -2385,17 +2421,23 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         actions.drop_layer(context, obj, data, data.active_uid, target_uid, mode)
         return message
 
-    def use_shelf_item(self, context, obj, data, item):
-        armed = self.state.armed
+    def use_shelf_item(self, context, obj, data, item, slot=None):
+        armed = self.state.armed if slot is None else slot
         self.state.armed = ''
         layer = active_layer(data)
         if item.kind == 'MATERIAL':
             item = shelf.Item(item.label, item.kind, shelf.resolved(item.payload), item.user_index, item.preview_file, item.managed, item.mine)
         if armed == REPLACE_TARGET and item.kind == 'MATERIAL' and layer is not None and layer.kind == 'FILL':
             return actions.replace_material(context, obj, data, item.payload)
-        if armed == EFFECT_TARGET and item.kind == 'TEXTURE' and active_effect(data) is not None:
-            actions.edit_effect(context, obj, data, 'texture', library.load_image(item.payload, CHANNEL['roughness']), False)
-            return actions.edit_effect(context, obj, data, 'source', 'IMAGE', True)
+        if armed == EFFECT_TARGET:
+            effect = active_effect(data)
+            if effect is not None and effect.kind == 'FILL':
+                if item.kind == 'TEXTURE':
+                    actions.edit_effect(context, obj, data, 'texture', library.load_image(item.payload, CHANNEL['roughness']), False)
+                    return actions.edit_effect(context, obj, data, 'source', 'IMAGE', True)
+                if item.kind == 'PATTERN':
+                    actions.edit_effect(context, obj, data, 'source', 'PATTERN', False)
+                    return actions.edit_effect(context, obj, data, 'pattern', item.payload, True)
         armed = '' if armed in {REPLACE_TARGET, EFFECT_TARGET} else armed
         target = armed if armed and layer is not None and layer.kind == 'FILL' else ''
         if item.kind == 'SMART':
