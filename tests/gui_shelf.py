@@ -1,4 +1,5 @@
 import sys
+import time
 from pathlib import Path
 import bpy
 import numpy
@@ -10,11 +11,11 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(ROOT))
 import devil_painter
-from devil_painter import editor, library, shelf
+from devil_painter import editor, library, shelf, thumbnails
 from devil_painter.document import active_layer, find_layer
 from devil_painter.minimal import EFFECT_TARGET, REPLACE_TARGET
 from tools.workspace import prepare_scratch
-from tests.gui_harness import bake_landed, check, click, context_menu, control, drag_slider, finish, has, keys, move, nodes, png, press, reveal, run_journey, select_row, settle, shown, spot, type_text, until, viewport
+from tests.gui_harness import _seen, bake_landed, check, click, context_menu, control, drag_slider, finish, has, keys, move, nodes, png, press, reveal, run_journey, select_row, settle, shown, spot, type_text, until, viewport, wait_for
 
 
 def generators(layer):
@@ -139,6 +140,19 @@ def journey():
     check(len(shelf.visible('FILTERS')) >= 60, 'the filters shelf lists the whole catalog')
     yield from open_tab(window, region, 'GENERATORS')
     check(len(shelf.visible('GENERATORS')) >= 21, 'the generators shelf lists every generator')
+    yield from open_tab(window, region, 'MATERIALS')
+    first, second = spot(region, 'ITEM.0', .3), spot(region, 'ITEM.1')
+    move(window, *first)
+    yield from wait_for(lambda: not thumbnails.waiting() and time.monotonic() > editor._active.toast_until + .5, 'the shelf to finish loading and the toast to fade', 30)
+    yield from settle()
+    drawn = _seen['draws']
+    for step in range(1, 9):
+        move(window, first[0] + step, first[1])
+        yield .05
+    still = _seen['draws'] - drawn
+    move(window, *second)
+    yield .3
+    check(still == 0 and _seen['draws'] > drawn, f'moving the pointer inside one shelf item redraws nothing ({still} redraws), moving onto the next item redraws it')
 
     yield from open_tab(window, region, 'MATERIALS')
     yield from search(window, region, 'gold')
