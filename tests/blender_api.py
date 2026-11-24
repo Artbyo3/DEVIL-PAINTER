@@ -154,6 +154,14 @@ painted_stamp = compositing.below_stamp(two_body)
 check(painted_stamp != fresh_stamp, 'a stroke on a layer under a Blur marks the texture under the Blur stale')
 api.set_channel(two, blurred_uid, 'roughness', .3, set_index=0)
 check(compositing.below_stamp(two_body) != painted_stamp, 'an edit on the blurred layer marks the texture under the Blur stale')
+canvas = numpy.random.default_rng(3).random((1024, 1024, 4), dtype=numpy.float32)
+ys, xs = numpy.ogrid[:1024, :1024]
+dab = numpy.clip(1.0 - numpy.hypot(xs - 300, ys - 700) / 40, 0.0, 1.0).astype(numpy.float32)
+whole = canvas + dab[..., None] * (strokes.box_blur(canvas, 6.0) - canvas)
+local = canvas.copy()
+strokes.blur_touched(local, dab, 6.0)
+check(numpy.abs(local - whole).max() < 1e-4 and numpy.array_equal(local[dab == 0], canvas[dab == 0]),
+      'the Blur brush blurs only around its stroke and matches a whole-image blur there')
 try:
     api.layers(bpy.data.objects.new('Empty', bpy.data.meshes.new('Empty')))
     check(False, 'an object without a project is refused')
