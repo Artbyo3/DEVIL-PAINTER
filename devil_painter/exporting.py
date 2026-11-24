@@ -452,10 +452,14 @@ def export(context, obj, project, template, wanted, directory, pattern, override
     for key in channels:
         for (index, number), values in baking.bake_channel(context, obj, project, wanted, CHANNEL[key], margin, style).items():
             baked.setdefault((index, number), {})[key] = values
+    converting = [index for index in wanted if 'normal' in needed and any(compositing.converts_height(project.sets[index], layer)
+                                                                         for layer in compositing.resolved(project.sets[index].layers))]
+    unconverted = baking.bake_channel(context, obj, project, converting, CHANNEL['height'], margin, style, True) if converting else {}
     for (index, number), maps in baked.items():
         if 'normal' in needed and 'height' in maps:
             normal = maps.get('normal', numpy.full(maps['height'].shape, CHANNEL['normal'].default, dtype=numpy.float32))
-            maps['normal'] = fold_height(normal, maps['height'][..., 0], project.sets[index].bump_strength, project.normal_format)
+            height = unconverted.get((index, number), maps['height'])
+            maps['normal'] = fold_height(normal, height[..., 0], project.sets[index].bump_strength, project.normal_format)
     islands = island_coverage(context, obj, project, wanted) if style == 'TRANSPARENT' or uses_maps else {}
     coverage = islands if style == 'TRANSPARENT' else {}
     meshes = {}
