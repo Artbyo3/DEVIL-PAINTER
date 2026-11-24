@@ -5,15 +5,19 @@ from .tiles import variant
 KEY = 'devil_painter_below'
 PREFIX = 'DP Below '
 _state = dict(revision=0)
+_painted = {}
 _fresh = {}
 
 
-def touch():
-    _state['revision'] += 1
+def touch(image=None):
+    if image is None:
+        _state['revision'] += 1
+    else:
+        _painted[image.name_full] = _painted.get(image.name_full, 0) + 1
 
 
-def revision():
-    return _state['revision']
+def revision(images):
+    return _state['revision'], tuple(_painted.get(image.name_full, 0) for image in images)
 
 
 def owner(data):
