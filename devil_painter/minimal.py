@@ -8,7 +8,7 @@ from .post import POST_SLIDERS
 from .bridge import command as bridge_command
 from .brushes import world_size_text
 from pathlib import Path
-from .blending import BLEND_MODES, CHANNEL, CHANNELS, FOLDER_BLENDS, linear_to_srgb
+from .blending import BLEND_MODES, CHANNEL, CHANNELS, FOLDER_BLENDS, USER_CHANNELS, linear_to_srgb
 from .canvas import Layout, Rect
 from .compositing import fill_projection, triplanar_textured
 from .document import (BAKE_ANTIALIAS_LABELS, BAKE_CURVATURE_LABELS, BAKE_ID_LABELS, DEPTH_LABELS, DISPLACEMENT_SCALE_MAX, DISPLACEMENT_SUBDIVISION_MAX, DYNAMICS, NORMAL_FORMATS, PROJECTORS, STROKE_METHODS, TEXTURE_SAMPLING, TRANSPARENCY, NORMAL_SPACES, PROJECTIONS, RESOLUTIONS, SHADERS, active_effect, active_layer, children, editing_mask, find_layer, isolated_uids,
@@ -306,8 +306,9 @@ BRUSH_TOGGLES = (('BRUSH_PRESSURE_SIZE', 'Pressure size', 'brush_pressure_size')
 SIZE_SPACE_CHOICES = (('SCREEN', 'Screen size', 'Size the brush in screen pixels; it covers more of the model as you zoom out'),
                       ('WORLD', 'World size', 'Size the brush in scene units; each dab covers the same area of the model at any zoom'))
 SHORT_NAMES = {'roughness': 'Rough', 'metallic': 'Metal', 'normal': 'Normal', 'height': 'Height', 'emission': 'Emit', 'opacity': 'Alpha',
-               'glossiness': 'Gloss', 'displacement': 'Disp', 'anisotropy_level': 'Aniso', 'anisotropy_angle': 'Aniso°', 'transmission': 'Trans',
-               'scattering': 'Scatter', 'sheen': 'Sheen', 'coat': 'Coat', 'ior': 'IOR'}
+               'ambient_occlusion': 'AO', 'glossiness': 'Gloss', 'displacement': 'Disp', 'anisotropy_level': 'Aniso', 'anisotropy_angle': 'Aniso°',
+               'transmission': 'Trans', 'scattering': 'Scatter', 'sheen': 'Sheen', 'coat': 'Coat', 'ior': 'IOR',
+               **{f'user{number}': f'User {number}' for number in range(1, USER_CHANNELS + 1)}}
 
 
 def brush_value_control(layout, channel, slot, rect):

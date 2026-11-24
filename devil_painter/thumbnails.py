@@ -418,9 +418,20 @@ def release():
     _assigned.clear()
     _failed.clear()
     _owned.clear()
-    for process in rendering():
+    processes = rendering()
+    _state['processes'] = []
+    for process in processes:
         try:
             process.stdin.close()
         except OSError:
             pass
-    _state['processes'] = []
+    for process in processes:
+        try:
+            process.wait(timeout=2.0)
+        except subprocess.TimeoutExpired:
+            process.terminate()
+            try:
+                process.wait(timeout=2.0)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()

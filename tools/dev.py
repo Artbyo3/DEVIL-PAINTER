@@ -5,6 +5,7 @@ import time
 import ctypes
 import shutil
 import argparse
+import signal
 import threading
 import traceback
 import subprocess
@@ -153,11 +154,26 @@ def print_tail(path, lines=TAIL_LINES):
         print(f'    | {line}')
 
 
+def kill_process_tree(process):
+    if os.name == 'nt':
+        subprocess.run(['taskkill', '/T', '/F', '/PID', str(process.pid)], capture_output=True)
+    else:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except OSError:
+            pass
+    try:
+        process.kill()
+    except OSError:
+        pass
+
+
 def run_process(command, log, environment, timeout, echo):
     started = time.time()
     with log.open('w', encoding='utf-8', errors='replace') as handle:
         process = subprocess.Popen(command, cwd=ROOT, env=environment, stdin=subprocess.DEVNULL, stderr=subprocess.STDOUT,
-                                   stdout=subprocess.PIPE if echo else handle, text=True, encoding='utf-8', errors='replace')
+                                   stdout=subprocess.PIPE if echo else handle, text=True, encoding='utf-8', errors='replace',
+                                   start_new_session=os.name != 'nt')
         reader = None
         if echo:
             def copy():
@@ -170,7 +186,7 @@ def run_process(command, log, environment, timeout, echo):
         try:
             code, timed_out = process.wait(timeout=timeout), False
         except subprocess.TimeoutExpired:
-            process.kill()
+            kill_process_tree(process)
             code, timed_out = process.wait(), True
         if reader:
             reader.join(30)

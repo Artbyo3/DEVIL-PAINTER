@@ -655,7 +655,7 @@ def add_smart_material(context, obj, data, definition):
     folder = new_layer(data, 'FOLDER')
     folder.name = definition['name']
     folder_uid = folder.uid
-    smart.build(obj, data, definition, folder, image_for)
+    smart.build(obj, data, definition, folder_uid, image_for)
     data.active_uid = folder_uid
     return refresh(context, obj, data, f'Added the {definition["name"]} smart material.')
 

@@ -7,7 +7,7 @@ from pathlib import Path
 import bpy
 import numpy
 from mathutils import Quaternion
-from devil_painter import bakejob, editor, shelf
+from devil_painter import bakejob, editor, shelf, thumbnails
 from devil_painter.document import active_layer
 from tools.workspace import FAILURE_RECORD_VARIABLE
 
@@ -160,6 +160,14 @@ def check(condition, message):
 
 
 def finish(code):
+    try:
+        thumbnails.release()
+    except Exception:
+        pass
+    try:
+        bakejob.cancel()
+    except Exception:
+        pass
     sys.stdout.flush()
     sys.stderr.flush()
     os._exit(code)
@@ -195,8 +203,17 @@ def keys(prefix):
 
 
 def spot(region, key, fx=.5, fy=.5):
-    rect = control(key).rect
-    return region.x + rect.x + rect.w * fx, region.y + rect.y + rect.h * fy
+    item = control(key)
+    rect = item.rect
+    lx, ly = rect.x + rect.w * fx, rect.y + rect.h * fy
+    if 0.0 <= fx <= 1.0 and 0.0 <= fy <= 1.0:
+        if item.clip is not None and not item.clip.contains(lx, ly):
+            raise AssertionError(f'{key} is clipped out of view at ({lx:.1f}, {ly:.1f}) (rect={rect}, clip={item.clip}); scroll it into view with reveal() first')
+        hit = editor._active.workspace.hit(lx, ly)
+        if hit is None or hit.key != key:
+            found = 'nothing' if hit is None else hit.key
+            raise AssertionError(f'{key} is not clickable at ({lx:.1f}, {ly:.1f}); workspace.hit returned {found} (rect={rect}, clip={item.clip})')
+    return region.x + lx, region.y + ly
 
 
 def click(window, region, key, kind='LEFTMOUSE', fx=.5, fy=.5, **modifiers):
@@ -204,8 +221,8 @@ def click(window, region, key, kind='LEFTMOUSE', fx=.5, fy=.5, **modifiers):
 
 
 def type_text(window, text, x, y):
-    for _ in range(editor._active.state.text.cursor):
-        window.event_simulate(type='BACK_SPACE', value='PRESS', x=int(x), y=int(y))
+    window.event_simulate(type='A', value='PRESS', x=int(x), y=int(y), ctrl=True)
+    window.event_simulate(type='BACK_SPACE', value='PRESS', x=int(x), y=int(y))
     for character in text:
         window.event_simulate(type='A', value='PRESS', x=int(x), y=int(y), unicode=character)
     window.event_simulate(type='RET', value='PRESS', x=int(x), y=int(y))

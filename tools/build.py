@@ -15,6 +15,8 @@ from tools.check_dead_code import check_source_rules
 
 PACKAGE = 'devil_painter'
 ROOT_FILES = ('README.md', 'LICENSE', 'SPEC.md')
+TEXT_SUFFIXES = frozenset({'.py', '.toml', '.md', '.txt', '.json', '.svg'})
+TEXT_NAMES = frozenset({'LICENSE'})
 
 
 def glob_expression(pattern):
@@ -83,6 +85,10 @@ def package_files():
     return files + [(root / name, name) for name in ROOT_FILES]
 
 
+def is_text_asset(name):
+    return name in TEXT_NAMES or PurePosixPath(name).suffix.lower() in TEXT_SUFFIXES
+
+
 def build_extension(scanned):
     if not scanned:
         check_source_rules(root)
@@ -94,6 +100,9 @@ def build_extension(scanned):
             if name in VERSIONED_DOCS:
                 text = source.read_text(encoding='utf-8').replace(VERSION_PLACEHOLDER, version)
                 archive.writestr(name, text.encode('utf-8'))
+            elif is_text_asset(name):
+                data = source.read_bytes().replace(b'\r\n', b'\n').replace(b'\r', b'\n')
+                archive.writestr(name, data)
             else:
                 archive.write(source, name)
     print(output)

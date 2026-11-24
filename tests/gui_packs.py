@@ -215,6 +215,8 @@ def journey():
     entry['files'].remove('evil-shirt.blend')
     del entry['fileHashes']['evil-shirt.blend']
     del entry['fileTags']['evil-shirt.blend']
+    settled = yield from wait_for(lambda: not packs.active(), 30)
+    check(settled, 'pack preview workers finish before checking an oversized preview')
     huge = packs.preview_folder() / tag / 'huge-test.webp'
     huge.parent.mkdir(parents=True, exist_ok=True)
     huge.write_bytes(b'RIFF' + (22).to_bytes(4, 'little') + b'WEBP' + b'VP8X' + (10).to_bytes(4, 'little') + bytes(4)

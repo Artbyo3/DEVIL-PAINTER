@@ -51,6 +51,27 @@ class BuildTests(unittest.TestCase):
         with patch.object(build, 'check_source_rules', side_effect=ValueError('comment')), self.assertRaises(ValueError):
             build.build_extension(scanned=False)
 
+    def test_text_files_normalize_crlf_to_lf_while_binary_files_stay_verbatim(self):
+        with tempfile.TemporaryDirectory(dir=workspace.prepare_scratch()) as folder:
+            root = Path(folder)
+            git(root, 'init', '-q')
+            for name in ('README.md', 'LICENSE', 'SPEC.md'):
+                (root / name).write_bytes(b'line1\r\nline2\r\n')
+            package = root / 'devil_painter'
+            (package / 'assets' / 'icons' / 'set').mkdir(parents=True, exist_ok=True)
+            (package / 'blender_manifest.toml').write_bytes(MANIFEST.replace('\n', '\r\n').encode('utf-8'))
+            (package / '__init__.py').write_bytes(b'x = 1\r\ny = 2\r\n')
+            png_bytes = b'\x89PNG\r\n\x1a\nfake\r\ndata'
+            (package / 'assets' / 'icons' / 'set' / 'brush.png').write_bytes(png_bytes)
+            git(root, 'add', '-f', '.')
+            archive = root / 'dist' / 'devil_painter-0.0.1.zip'
+            with patch.object(build, 'root', root), patch.object(build, 'extension_archive', return_value=archive), patch('builtins.print'):
+                build.build_extension(scanned=True)
+            with ZipFile(archive) as packaged:
+                for name in ('__init__.py', 'blender_manifest.toml', 'README.md', 'LICENSE', 'SPEC.md'):
+                    self.assertNotIn(b'\r\n', packaged.read(name), name)
+                self.assertEqual(packaged.read('assets/icons/set/brush.png'), png_bytes)
+
 
 class InstallTests(unittest.TestCase):
     def test_install_replaces_the_old_copy_with_exactly_the_zip(self):

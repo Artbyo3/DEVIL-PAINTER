@@ -51,6 +51,16 @@ def process_alive(pid):
             return False
         except PermissionError:
             return True
+        if Path('/proc').is_dir():
+            try:
+                text = Path(f'/proc/{pid}/stat').read_text(encoding='utf-8', errors='replace')
+            except FileNotFoundError:
+                return False
+            except OSError:
+                return True
+            state = text.rpartition(')')[2].split()
+            if state and state[0] in {'Z', 'X'}:
+                return False
         return True
     kernel = ctypes.windll.kernel32
     handle = kernel.OpenProcess(QUERY_LIMITED_INFORMATION, False, pid)

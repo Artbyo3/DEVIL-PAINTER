@@ -263,6 +263,54 @@ class ScratchWorkspaceTests(unittest.TestCase):
         self.assertIn('partial', log_text)
         self.assertIn('[gate] killed after 3s without finishing', log_text)
 
+    def test_journey_timeout_kills_child_processes(self):
+        run = dev.Run('test', workspace.prepare_scratch(self.scratch / 'run-test'))
+        run.logs.mkdir()
+        child_pid = run.folder / 'child.pid'
+        script = (
+            'import pathlib, subprocess, sys, time; '
+            'child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"]); '
+            f'pathlib.Path({str(child_pid)!r}).write_text(str(child.pid), encoding="utf-8"); '
+            'time.sleep(60)'
+        )
+        with patch('builtins.print'):
+            passed = dev.step(run, 'Journey 97 hung_tree.py', [sys.executable, '-c', script], workspace.child_environment(run.folder),
+                              timeout=3, echo=False, failure_record=run.folder / 'hung_tree.failures')
+        self.assertFalse(passed)
+        self.assertTrue(child_pid.is_file())
+        deadline = time.monotonic() + 5.0
+        pid = int(child_pid.read_text(encoding='utf-8'))
+        while time.monotonic() < deadline and dev.gate_state.process_alive(pid):
+            time.sleep(0.1)
+        self.assertFalse(dev.gate_state.process_alive(pid))
+
+    def test_posix_kill_process_tree_kills_process_group(self):
+        killed = []
+        process = SimpleNamespace(pid=4242, kill=lambda: killed.append('self'))
+        with patch.object(dev.os, 'name', 'posix'), \
+                patch.object(dev.os, 'killpg', side_effect=lambda pgid, sig: killed.append((pgid, sig)), create=True), \
+                patch.object(dev.signal, 'SIGKILL', 9, create=True):
+            dev.kill_process_tree(process)
+        self.assertEqual(killed, [(4242, 9), 'self'])
+
+    def test_linux_zombie_process_counts_as_dead(self):
+        state = {'text': '42 (py)thon) Z 1 42 42 0 -1 0\n'}
+
+        def fake_path(value):
+            def read_text(**_):
+                if isinstance(state['text'], type):
+                    raise state['text']()
+                return state['text']
+            return SimpleNamespace(is_dir=lambda: value == '/proc', read_text=read_text)
+
+        with patch.object(dev.gate_state.os, 'name', 'posix'), patch.object(dev.gate_state.os, 'kill', return_value=None), \
+                patch.object(dev.gate_state, 'Path', side_effect=fake_path):
+            self.assertFalse(dev.gate_state.process_alive(42))
+            state['text'] = '42 (python) S 1 42 42 0 -1 0\n'
+            self.assertTrue(dev.gate_state.process_alive(42))
+            state['text'] = FileNotFoundError
+            self.assertFalse(dev.gate_state.process_alive(42))
+
     def test_journey_fails_when_the_editor_recorded_a_failure_despite_exit_zero(self):
         run = dev.Run('test', workspace.prepare_scratch(self.scratch / 'run-test'))
         run.logs.mkdir()
