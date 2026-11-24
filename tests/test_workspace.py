@@ -284,6 +284,33 @@ class ScratchWorkspaceTests(unittest.TestCase):
             time.sleep(0.1)
         self.assertFalse(dev.gate_state.process_alive(pid))
 
+    def test_posix_kill_process_tree_kills_process_group(self):
+        killed = []
+        process = SimpleNamespace(pid=4242, kill=lambda: killed.append('self'))
+        with patch.object(dev.os, 'name', 'posix'), \
+                patch.object(dev.os, 'killpg', side_effect=lambda pgid, sig: killed.append((pgid, sig)), create=True), \
+                patch.object(dev.signal, 'SIGKILL', 9, create=True):
+            dev.kill_process_tree(process)
+        self.assertEqual(killed, [(4242, 9), 'self'])
+
+    def test_linux_zombie_process_counts_as_dead(self):
+        state = {'text': '42 (py)thon) Z 1 42 42 0 -1 0\n'}
+
+        def fake_path(value):
+            def read_text(**_):
+                if isinstance(state['text'], type):
+                    raise state['text']()
+                return state['text']
+            return SimpleNamespace(is_dir=lambda: value == '/proc', read_text=read_text)
+
+        with patch.object(dev.gate_state.os, 'name', 'posix'), patch.object(dev.gate_state.os, 'kill', return_value=None), \
+                patch.object(dev.gate_state, 'Path', side_effect=fake_path):
+            self.assertFalse(dev.gate_state.process_alive(42))
+            state['text'] = '42 (python) S 1 42 42 0 -1 0\n'
+            self.assertTrue(dev.gate_state.process_alive(42))
+            state['text'] = FileNotFoundError
+            self.assertFalse(dev.gate_state.process_alive(42))
+
     def test_journey_fails_when_the_editor_recorded_a_failure_despite_exit_zero(self):
         run = dev.Run('test', workspace.prepare_scratch(self.scratch / 'run-test'))
         run.logs.mkdir()
