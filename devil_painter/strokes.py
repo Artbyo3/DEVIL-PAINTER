@@ -85,6 +85,16 @@ def box_blur(pixels, radius):
     return result
 
 
+def blur_touched(pixels, added, radius):
+    rows, columns = numpy.flatnonzero(added.max(1) > 0), numpy.flatnonzero(added.max(0) > 0)
+    if not rows.size:
+        return
+    reach = max(1, int(round(radius))) + 1
+    area = (slice(max(rows[0] - reach, 0), rows[-1] + 1 + reach), slice(max(columns[0] - reach, 0), columns[-1] + 1 + reach))
+    window = pixels[area]
+    window += added[area][..., None] * (box_blur(window, radius) - window)
+
+
 def shifted(pixels, dx, dy):
     result = pixels.copy()
     height, width = pixels.shape[:2]
@@ -266,7 +276,7 @@ def apply_tool(data, tool, key, pixels, stroke, added, gesture, sources=None):
     if tool == 'ERASE':
         pixels[..., 3] *= 1 - added
     elif tool == 'BLUR':
-        pixels += added[..., None] * (box_blur(pixels, max(1.0, gesture.radius / 2)) - pixels)
+        blur_touched(pixels, added, max(1.0, gesture.radius / 2))
     elif tool == 'SMEAR':
         smear(pixels, gesture, added)
     elif tool == 'CLONE':
