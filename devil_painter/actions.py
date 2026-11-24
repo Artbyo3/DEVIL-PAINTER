@@ -15,7 +15,6 @@ from .document import DEPTH_LABELS, PROJECTIONS, PROJECTORS, SLOT_FIELDS, TEXTUR
 KIND_NAMES = {'PAINT': 'Paint', 'FILL': 'Fill', 'FOLDER': 'Folder'}
 LAYER_FIELDS = ('kind', 'visible', 'opacity', 'projection', 'tiling', 'proj_offset', 'proj_rotation', 'proj_size', 'proj_bend', 'proj_warp', 'uv_offset', 'uv_rotation', 'triplanar_blend', 'tile_match', 'material', 'folder_blend', 'geo_mask', 'link_set', 'link_uid')
 ID_TOLERANCE = .15
-LAST_LAYER = 'A texture set keeps at least one layer. Add another layer before removing this one.'
 SAME_AS_FOLDER = 'FOLDER'
 EFFECT_BLENDS = {'PAINT': 'MIX', 'FILL': 'MULTIPLY', 'COMPARE': 'MULTIPLY', 'ANCHOR': 'MULTIPLY', 'LEVELS': 'MIX', 'FILTER': 'MIX', 'ID_COLOR': 'MULTIPLY', 'GENERATOR': 'MULTIPLY'}
 
@@ -220,7 +219,6 @@ def move_to_set(context, obj, project, index):
     source = project.sets[project.active_set]
     target = project.sets[index]
     layer = active_layer(source)
-    doomed_layers(source, [layer.uid])
     name = layer.name
     uid = transfer(obj, source, target, layer, '')
     remove_layers(source, [layer.uid])
@@ -368,8 +366,6 @@ def doomed_layers(data, uids):
     doomed = set(uids)
     for uid in uids:
         doomed |= set(descendants(data.layers, uid))
-    if all(layer.uid in doomed for layer in data.layers):
-        raise ValueError(LAST_LAYER)
     return doomed
 
 
@@ -680,6 +676,8 @@ def owned_images(layer):
 
 
 def delete_layer(context, obj, data):
+    if active_layer(data) is None:
+        return 'There is no layer to delete.'
     name = active_layer(data).name
     remove_layers(data, [data.active_uid])
     return refresh(context, obj, data, f'Deleted {name}.')
@@ -808,6 +806,7 @@ def toggle_slot(context, obj, data, key):
     layer = active_layer(data)
     slot = layer.slots[key]
     slot.enabled = not slot.enabled
+    slot.switched_off = not slot.enabled
     return refresh(context, obj, data, f'{CHANNEL[key].label} {"on" if slot.enabled else "off"} for {layer.name}.')
 
 
@@ -894,7 +893,7 @@ def pick_id_color(context, obj, data, effect_uid, face, location, add):
     item = data.maps.get('id')
     if item is None or item.image is None:
         return 'Bake the ID map first.'
-    mesh = obj.data
+    mesh = sets.surface_mesh(obj)
     uv = sets.uv_at(mesh, obj.devil_painter.uv_map, sets.triangle_at(mesh, face, location), location)
     tile = tiles.FIRST_TILE + int(uv.x // 1) + 10 * int(uv.y // 1)
     image = tiles.variant(data, item.image, tile)

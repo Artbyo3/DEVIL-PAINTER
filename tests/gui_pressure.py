@@ -13,10 +13,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(ROOT))
 import devil_painter
-from devil_painter import brushes, editor, library, painting
+from devil_painter import actions, brushes, editor, library, painting
 from devil_painter.document import active_layer, find_layer
 from tools.workspace import prepare_scratch
-from tests.gui_harness import check, click, close_cards, control, drag_slider, finish, has, move, native_dab, press, run_journey, settle, shelf_index, top_view, viewport
+from tests.gui_harness import check, click, close_cards, control, drag_slider, finish, has, move, native_dab, press, reveal, run_journey, settle, shelf_index, top_view, viewport
 
 LOW, MIDDLE, HIGH = .25, .5, 1.0
 DAB_SPOTS = (-.6, -.2, .2, .6)
@@ -104,6 +104,47 @@ def path_samples(alpha, start, end):
     count = max(1, int(math.dist(start, end)))
     return [float(alpha[int(round(start[1] + (end[1] - start[1]) * index / count)),
                         int(round(start[0] + (end[0] - start[0]) * index / count))]) for index in range(count + 1)]
+
+
+def paint_channel_checks(window, area, region, cube, middle):
+    project = cube.devil_painter
+    data = project.sets[0]
+    click(window, region, 'SHELF_TAB.BRUSHES')
+    yield from settle()
+    click(window, region, f'ITEM.{shelf_index("Soft Round")}')
+    yield from settle()
+    with bpy.context.temp_override(window=window, area=area, region=region):
+        for key in ('ambient_occlusion', 'user1'):
+            actions.set_channel_enabled(bpy.context, cube, project, key, True, False)
+            data.brush_slots[key].enabled = True
+        actions.set_channel_depth(bpy.context, cube, project, 'height', '16', False)
+        data.brush_slots['height'].enabled = True
+        data.brush_slots['height'].value = 1.0
+        data.brush_slots['roughness'].enabled = True
+        painting.set_brush_value(bpy.context.scene, 'size', 120)
+    yield from settle()
+    click(window, region, 'BRUSH_CARD')
+    yield from settle()
+    check(has('BRUSHVAL.ambient_occlusion') and has('BRUSHVAL.user1') and control('BRUSHVAL.ambient_occlusion').label == 'AO' and control('BRUSHVAL.user1').label == 'User 1',
+          'the Brush card draws short labels for Ambient Occlusion and User 1')
+    yield from close_cards(window, middle)
+    click(window, region, 'ADD_PAINT')
+    yield from settle()
+    layer = active_layer(data)
+    yield from reveal(window, region, 'USE.roughness')
+    click(window, region, 'USE.roughness')
+    yield from settle()
+    check(not layer.slots['roughness'].enabled and not layer.slots['ambient_occlusion'].enabled, 'roughness is switched off on the new paint layer')
+    native_dab(window, region, screen_point(area, region, .2))
+    for _ in range(3):
+        yield from settle()
+    check(not layer.slots['roughness'].enabled, 'a brush stroke keeps roughness off on the layer where it was switched off')
+    check(layer.slots['ambient_occlusion'].enabled, 'a brush stroke still switches on a channel the layer never had switched off')
+    height = layer_pixels(type('Canvas', (), {'image': layer.slots['height'].image}))[..., 0]
+    falloff = height[(height > .5 + 1e-6) & (height < 1.0 - 1e-6)]
+    levels = numpy.unique(falloff).size
+    check(data.stroke.is_float and levels > 1024, f'one soft stroke on a 16-bit height channel keeps {levels} levels in {falloff.size} falloff texels')
+    print('PAINT CHANNEL EVIDENCE', dict(height_levels=levels, falloff_texels=int(falloff.size)))
 
 
 def journey():
@@ -361,6 +402,7 @@ def journey():
                                                low_to_high=round(low_to_high, 3), expected_low_to_middle=round(angle * (MIDDLE - LOW), 3),
                                                expected_low_to_high=round(angle * (HIGH - LOW), 3)),
                                     stroke_ms=dict(points=TIMED_POINTS, mapped=round(mapped_ms, 1), unmapped=round(plain_ms, 1))))
+    yield from paint_channel_checks(window, area, region, cube, middle)
 
     click(window, region, 'CLOSE')
     yield from settle()

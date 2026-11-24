@@ -431,7 +431,7 @@ def capture(layer):
         if not slot.enabled:
             continue
         channel = CHANNEL[slot.name]
-        values = {field: getattr(slot, field) for field in SLOT_FIELDS if field not in {'enabled', 'color', 'value', 'color_b', 'value_b'}}
+        values = {field: getattr(slot, field) for field in SLOT_FIELDS if field not in {'enabled', 'switched_off', 'color', 'value', 'color_b', 'value_b'}}
         values['value'] = list(slot.color) if channel.width == 3 else slot.value
         values['second'] = list(slot.color_b) if channel.width == 3 else slot.value_b
         if slot.source == 'IMAGE':

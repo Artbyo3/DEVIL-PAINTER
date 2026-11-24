@@ -1,3 +1,4 @@
+import bpy
 import numpy
 from bpy_extras import view3d_utils
 from mathutils import geometry
@@ -5,6 +6,7 @@ from .document import active_tile
 from .tiles import FIRST_TILE, face_slots, face_tiles, numbers, slot_tiles
 
 UV_SCALE = 100000
+FACE_INDEX = '.devil_painter_face'
 
 
 def uv_name(obj):
@@ -85,7 +87,7 @@ def face_under(region, view, obj, coord):
     direction = view3d_utils.region_2d_to_vector_3d(region, view, coord)
     inverse = obj.matrix_world.inverted()
     hit, _, _, face = obj.ray_cast(inverse @ origin, (inverse.to_3x3() @ direction).normalized())
-    return face if hit and face < len(obj.data.polygons) else -1
+    return face if hit else -1
 
 
 def hit_under(region, view, obj, coord):
@@ -93,7 +95,24 @@ def hit_under(region, view, obj, coord):
     direction = view3d_utils.region_2d_to_vector_3d(region, view, coord)
     inverse = obj.matrix_world.inverted()
     hit, location, _, face = obj.ray_cast(inverse @ origin, (inverse.to_3x3() @ direction).normalized())
-    return (face, location) if hit and face < len(obj.data.polygons) else (-1, None)
+    return (face, location) if hit else (-1, None)
+
+
+def surface_mesh(obj):
+    return obj.evaluated_get(bpy.context.evaluated_depsgraph_get()).data
+
+
+def original_face(obj, face):
+    mesh = obj.data
+    stored = mesh.attributes.get(FACE_INDEX) or mesh.attributes.new(FACE_INDEX, 'INT', 'FACE')
+    indices = numpy.arange(len(mesh.polygons), dtype=numpy.int32)
+    values = numpy.empty_like(indices)
+    stored.data.foreach_get('value', values)
+    if not numpy.array_equal(values, indices):
+        stored.data.foreach_set('value', indices)
+        mesh.update()
+    carried = surface_mesh(obj).attributes.get(FACE_INDEX)
+    return carried.data[face].value if carried is not None else -1
 
 
 def triangle_at(mesh, face, location):
@@ -138,7 +157,7 @@ def uv_island_labels(mesh, uv_name):
 
 
 def locate(obj, project, face):
-    mesh = obj.data
+    mesh = surface_mesh(obj)
     slot = mesh.polygons[face].material_index
     index = next((position for position, data in enumerate(project.sets) if data.slot == slot), project.active_set)
     tile = int(face_tiles(mesh, project.uv_map)[face])

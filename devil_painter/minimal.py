@@ -443,6 +443,8 @@ def dock_layout(layout, zone, tool, state):
 
 def selection(data):
     layer = active_layer(data)
+    if layer is None:
+        return 'EMPTY'
     if layer.kind == 'INSTANCE':
         return 'INSTANCE'
     if active_effect(data) is not None:
@@ -526,7 +528,12 @@ def fill_layers(layout, state, data, flow):
     target = selection(data)
     size = THUMBNAIL * s
     isolated = isolated_uids(data)
-    for layer, depth, effect in layer_rows(data, state.collapsed):
+    rows = layer_rows(data, state.collapsed)
+    if not rows:
+        x, y, h = flow.field()
+        flow.add('LAYERS_EMPTY', Rect(x, y, flow.viewport.w - 2 * flow.pad, h), 'NOTE', label='No layers. Add a paint or fill layer to start.')
+        return
+    for layer, depth, effect in rows:
         uid = layer.uid
         line = flow.line(ROW_HEIGHT * s)
         if not flow.visible(line):
@@ -575,7 +582,7 @@ def layers_panel(layout, state, data):
                ('ADD_FOLDER', '', HEADER - 8, 'New folder above the selected layer', 'FOLDER'),
                ('ADD_FILL', '+ Fill', 52, 'New fill layer above the selected one', ''),
                ('ADD_PAINT', '+ Paint', 64, 'New paint layer above the selected one', ''))
-    return ColumnPanel('LAYERS', 'Layers', len(layer_rows(data, state.collapsed)) * ROW_HEIGHT * s + 8 * s, fill_layers, 4 * s, actions)
+    return ColumnPanel('LAYERS', 'Layers', max(1, len(layer_rows(data, state.collapsed))) * ROW_HEIGHT * s + 8 * s, fill_layers, 4 * s, actions)
 
 
 def effects_add_section(flow, data, layer, w):

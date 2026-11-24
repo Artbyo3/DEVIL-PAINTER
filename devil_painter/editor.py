@@ -858,7 +858,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         face, location = sets.hit_under(self._region, self._area.spaces.active.region_3d, obj, tuple(center) if center else self.pointer)
         if face < 0:
             return 'Move the projector over the model first.'
-        rotation = obj.data.polygons[face].normal.to_track_quat('Z', 'Y').to_euler()
+        rotation = sets.surface_mesh(obj).polygons[face].normal.to_track_quat('Z', 'Y').to_euler()
         return actions.set_projector(context, obj, data, dict(proj_offset=tuple(location), proj_rotation=tuple(rotation)), True)
 
     def toggle_path_traced(self, context):
@@ -992,7 +992,8 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         return None if face < 0 else self.surface_point(obj, data, face, location)
 
     def surface_point(self, obj, data, face, location):
-        uv = sets.uv_at(obj.data, obj.devil_painter.uv_map, sets.triangle_at(obj.data, face, location), location)
+        mesh = sets.surface_mesh(obj)
+        uv = sets.uv_at(mesh, obj.devil_painter.uv_map, sets.triangle_at(mesh, face, location), location)
         tile = FIRST_TILE + int(uv.x // 1) + 10 * int(uv.y // 1)
         return tile, uv.x % 1 * data.resolution, uv.y % 1 * data.resolution
 
@@ -1275,11 +1276,15 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         if face < 0:
             return 'Click on the model to fill polygons.'
         color = strokes.rgb(tuple(painting.brush_value(self.scene, 'color')))
+        face = sets.original_face(obj, face)
+        if face < 0:
+            return 'Click on the model to fill polygons.'
         return polyfill.polygon_fill(obj, data, self.state.poly_mode, face, location, color, self.state.poly_erase)
 
     def pick_geometry(self, context):
         obj, data = self.painted()
         face = sets.face_under(self._region, self._area.spaces.active.region_3d, obj, self.pointer)
+        face = sets.original_face(obj, face) if face >= 0 else -1
         if face < 0:
             return 'Click on the model to pick faces.'
         return actions.pick_geometry(context, obj, data, face, self.state.geo_pick == 'ISLAND')

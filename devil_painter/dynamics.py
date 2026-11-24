@@ -2,7 +2,7 @@ import math
 import numpy
 from bpy_extras import view3d_utils
 from mathutils import Vector
-from .sets import hit_under
+from .sets import hit_under, surface_mesh
 
 DRIP_EVERY = 5
 DRIP_STEPS = 40
@@ -56,7 +56,7 @@ def drips(region, view, obj, points, seed):
         face, location = hit_under(region, view, obj, point)
         if face < 0:
             continue
-        position, normal = Vector(location), obj.data.polygons[face].normal
+        position, normal = Vector(location), surface_mesh(obj).polygons[face].normal
         trail = []
         length = int(DRIP_STEPS * random.uniform(.4, 1.0))
         for index in range(length):
