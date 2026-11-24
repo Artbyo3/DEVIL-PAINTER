@@ -326,10 +326,27 @@ def height_filtered(build, layer, effect, key, content):
     return result if strength is None else mix_color(build, content, result, strength)
 
 
+def height_converters(data, layer):
+    if (layer.kind == 'FOLDER' or 'normal' not in {channel.key for channel in set_channels(data)} or not blended(layer.slots['normal'])
+            or not blended(layer.slots['height'])):
+        return []
+    return [effect for effect in content_effects_for(layer, 'normal')
+            if effect.kind == 'FILTER' and effect.filter == 'HEIGHT_NORMAL' and effect.channel in {'ALL', 'height'}]
+
+
 def converts_height(data, layer):
-    return (layer.kind != 'FOLDER' and 'normal' in {channel.key for channel in set_channels(data)} and blended(layer.slots['normal'])
-            and blended(layer.slots['height']) and any(effect.kind == 'FILTER' and effect.filter == 'HEIGHT_NORMAL' and effect.channel in {'ALL', 'height'}
-                                                       for effect in content_effects_for(layer, 'normal')))
+    return bool(height_converters(data, layer))
+
+
+def unconverted_height(build, layer, content, name, blend):
+    flat = build.nodes.new('ShaderNodeRGB')
+    flat.name = name + '.flat'
+    flat.outputs[0].default_value = rgba((NEUTRAL_HEIGHT.get(blend, FLAT_HEIGHT),))
+    for effect in height_converters(build.data, layer):
+        strength = anchor_strength(build, layer, effect)
+        converted = effect.opacity if strength is None else math_node(build.nodes, build.links, 'MULTIPLY', strength, effect.opacity)
+        content = mix_color(build, flat.outputs[0] if content is None else content, flat.outputs[0], converted)
+    return content
 
 
 def filtered_content(build, layer, effect, key, content):
@@ -974,11 +991,8 @@ def compose_layer(build, channels, layer, results, x):
             content = constant.outputs[0]
         for effect in effects:
             content = content_effect(build, layer, content, effect, channel.key, channel.width == 3, generated)
-        if channel.key == 'height' and build.unconverted_height and converts_height(build.data, layer):
-            flat = nodes.new('ShaderNodeRGB')
-            flat.name = name + '.flat'
-            flat.outputs[0].default_value = rgba((NEUTRAL_HEIGHT.get(slot.blend, FLAT_HEIGHT),))
-            content = flat.outputs[0]
+        if channel.key == 'height' and build.unconverted_height:
+            content = unconverted_height(build, layer, content, name, slot.blend)
         if not native:
             content = custom_blend(build, slot.blend, results[channel.key], content)
         if content is not None:

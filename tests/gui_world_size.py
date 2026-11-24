@@ -191,8 +191,8 @@ def journey():
     for _ in range(3):
         window.event_simulate(type='WHEELUPMOUSE', value='PRESS', x=int(region.x + x + 2), y=int(region.y + y))
         yield from settle()
-    yield from until(lambda: native_size() != still_px, 'the brush cursor to follow the wheel zoom')
     zoomed = world * pixels_per_unit(area, region)
+    yield from until(lambda: abs(native_size() / zoomed - 1) < .05, 'the brush cursor to follow the wheel zoom')
     check(abs(native_size() / zoomed - 1) < .05, f'a wheel zoom with the pointer still resizes the cursor from {still_px} px to {native_size()} px for {zoomed:.1f} px of world size')
     view = area.spaces.active.region_3d
     stroke = brushes.stroke_size(data, region, view, cube, [(screen_point(area, region, 0.0, 0.0), 1.0)], 7)
