@@ -12,6 +12,7 @@ DUMMY_SIZE = 8
 GPU_BACKENDS = ('OPTIX', 'CUDA', 'HIP', 'ONEAPI', 'METAL')
 NEIGHBORS = ((-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1))
 TILE_BAKED = []
+_session = dict(open=False)
 
 
 def usable_gpu(preferences):
@@ -175,7 +176,21 @@ def resync(project):
         compositing.sync(data)
 
 
+@contextmanager
+def bake_session(context, obj, project):
+    refresh_below(context, obj, project)
+    with bake_scene(context, obj):
+        _session['open'] = True
+        try:
+            yield
+        finally:
+            _session['open'] = False
+            resync(project)
+
+
 def bake_pass(context, obj, project, wanted, prepare, bake_type='EMIT', samples=BAKE_SAMPLES, extra=(), margin=BAKE_MARGIN, scale=1, resolution=0, **options):
+    if _session['open'] and samples == BAKE_SAMPLES and not extra:
+        return bake_tiles(obj, project, wanted, prepare, bake_type, margin, scale, resolution, **options)
     refresh_below(context, obj, project)
     with bake_scene(context, obj, samples, extra):
         try:

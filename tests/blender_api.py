@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(ROOT))
 import devil_painter
-from devil_painter import api, compositing, strokes
+from devil_painter import api, baking, compositing, strokes
 from devil_painter.actions import new_effect
 from devil_painter.document import find_layer
 from tools.workspace import prepare_scratch
@@ -162,6 +162,20 @@ local = canvas.copy()
 strokes.blur_touched(local, dab, 6.0)
 check(numpy.abs(local - whole).max() < 1e-4 and numpy.array_equal(local[dab == 0], canvas[dab == 0]),
       'the Blur brush blurs only around its stroke and matches a whole-image blur there')
+resyncs = []
+original_resync = baking.resync
+
+
+def counted_resync(project):
+    resyncs.append(project)
+    original_resync(project)
+
+
+baking.refresh_below(bpy.context, two, two.devil_painter)
+baking.resync = counted_resync
+session_files = api.export(two, clash_dir)
+baking.resync = original_resync
+check(session_files and len(resyncs) == 1, f'one export bakes every channel in one session and rebuilds the viewport materials once ({len(resyncs)} rebuilds)')
 try:
     api.layers(bpy.data.objects.new('Empty', bpy.data.meshes.new('Empty')))
     check(False, 'an object without a project is refused')
