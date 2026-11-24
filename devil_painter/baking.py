@@ -238,10 +238,10 @@ def diffuse(values, outside, rings):
     return colors[1:-1, 1:-1], ~filled[1:-1, 1:-1]
 
 
-def bake_channel(context, obj, project, wanted, channel, margin=BAKE_MARGIN, style='DILATION'):
+def bake_channel(context, obj, project, wanted, channel, margin=BAKE_MARGIN, style='DILATION', unconverted_height=False):
     def prepare(data):
         if channel in set_channels(data):
-            compositing.rebuild(data, solo=channel, raw=True)
+            compositing.rebuild(data, solo=channel, raw=True, unconverted_height=unconverted_height)
             compositing.update_values(data, raw=True)
         else:
             emission_tree(data.material.node_tree, rgba(channel.default))

@@ -28,6 +28,9 @@ ALBEDO = {'PRINCIPLED': 'base_color', 'UNLIT': 'base_color', 'SPECULAR_GLOSSINES
 DIELECTRIC_F0 = .04
 IOR_RANGE = (1.0, 3.0)
 DISPLACEMENT_MIDLEVEL = .5
+FLAT_HEIGHT = .5
+NEUTRAL_HEIGHT = {'MULTIPLY': 1.0, 'DIVIDE': 1.0, 'DARKEN': 1.0, 'BURN': 1.0, 'LINEAR_BURN': 1.0, 'LIGHTEN': 0.0, 'SCREEN': 0.0, 'DODGE': 0.0,
+                  'ADD': 0.0, 'SUBTRACT': 0.0, 'DIFFERENCE': 0.0, 'EXCLUSION': 0.0}
 DISPLACEMENT_MODIFIER = 'DP Displacement Preview'
 
 
@@ -111,6 +114,7 @@ class Build:
         self.shaded = None
         self.data, self.resolution = data, resolution
         self.masks, self.anchors, self.layer_map, self.below, self.slopes = {}, {}, {}, {}, {}
+        self.unconverted_height = False
 
 
 class Instance:
@@ -320,6 +324,12 @@ def height_filtered(build, layer, effect, key, content):
         result = slope_blur(build, effect, build.sampler.sample, image, weight, vector)[0]
     strength = anchor_strength(build, layer, effect)
     return result if strength is None else mix_color(build, content, result, strength)
+
+
+def converts_height(data, layer):
+    return (layer.kind != 'FOLDER' and 'normal' in {channel.key for channel in set_channels(data)} and blended(layer.slots['normal'])
+            and blended(layer.slots['height']) and any(effect.kind == 'FILTER' and effect.filter == 'HEIGHT_NORMAL' and effect.channel in {'ALL', 'height'}
+                                                       for effect in content_effects_for(layer, 'normal')))
 
 
 def filtered_content(build, layer, effect, key, content):
@@ -964,6 +974,11 @@ def compose_layer(build, channels, layer, results, x):
             content = constant.outputs[0]
         for effect in effects:
             content = content_effect(build, layer, content, effect, channel.key, channel.width == 3, generated)
+        if channel.key == 'height' and build.unconverted_height and converts_height(build.data, layer):
+            flat = nodes.new('ShaderNodeRGB')
+            flat.name = name + '.flat'
+            flat.outputs[0].default_value = rgba((NEUTRAL_HEIGHT.get(slot.blend, FLAT_HEIGHT),))
+            content = flat.outputs[0]
         if not native:
             content = custom_blend(build, slot.blend, results[channel.key], content)
         if content is not None:
@@ -1317,10 +1332,11 @@ def ensure_material(obj, data):
     return True
 
 
-def rebuild(data, solo=None, raw=False):
+def rebuild(data, solo=None, raw=False, unconverted_height=False):
     ensure_material(data.id_data, data)
     material = data.material
     build = set_build(data, material.node_tree, raw)
+    build.unconverted_height = unconverted_height
     channels = set_channels(data)
     output = build_tree(build, channels, stack_layers(data, raw), solo or solo_channel(data), raw)
     if not raw and solo is None and data.bake_paint:
