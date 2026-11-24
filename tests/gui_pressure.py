@@ -194,7 +194,8 @@ def journey():
     yield from card_click(window, region, 'BRUSH_PRESSURE_FLOW')
     check(data.brush_pressure_flow, 'Pressure flow turns on')
     yield from close_cards(window, middle)
-    check(editor._active.wants_gesture(bpy.context), 'a pressure-mapped Paint stroke goes through the pressure replay')
+    check(not editor._active.wants_gesture(bpy.context) and bpy.context.tool_settings.image_paint.brush.use_pressure_strength,
+          'with only Pressure flow on, a Paint stroke stays one native Blender stroke whose strength follows pressure')
     dab(window, area, region, [(points[0], LOW)])
     dab(window, area, region, [(points[1], HIGH)])
     yield from settle()

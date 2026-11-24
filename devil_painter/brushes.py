@@ -144,8 +144,12 @@ def set_hardness(brush, hardness):
     brush.curve_distance_falloff.update()
 
 
-def pressure_mapped(data):
-    return any(getattr(data, 'brush_' + field) for field in PRESSURE_FIELDS)
+def native_flow(data, tool):
+    return data.brush_pressure_flow and tool == 'PAINT'
+
+
+def pressure_mapped(data, tool):
+    return data.brush_pressure_hardness or data.brush_pressure_angle or (data.brush_pressure_flow and not native_flow(data, tool))
 
 
 def jittered(data, tool):
@@ -249,7 +253,7 @@ def textured(data):
 
 
 def per_dab(data, tool):
-    return pressure_mapped(data) or per_point(data, tool)
+    return pressure_mapped(data, tool) or per_point(data, tool)
 
 
 def path_angles(points):
@@ -282,7 +286,8 @@ def pressure_response(curve, pressure, mapped):
 
 def sync_pressure(context, data, pressure, flow_scale=1.0, angle_offset=0.0):
     brush = context.tool_settings.image_paint.brush
-    flow = data.brush_flow * pressure_response(brush.curve_strength, pressure, data.brush_pressure_flow) * flow_scale
+    mapped_flow = data.brush_pressure_flow and not native_flow(data, active_tool(context))
+    flow = data.brush_flow * pressure_response(brush.curve_strength, pressure, mapped_flow) * flow_scale
     setattr(brush_source(context, 'strength'), 'strength', flow if active_tool(context) in STROKE_TOOLS else data.brush_opacity)
     hardness = data.brush_hardness * pressure_response(brush.curve_hardness, pressure, data.brush_pressure_hardness)
     if abs(brush.get('dp_hardness', -1.0) - hardness) > 1e-4:
@@ -307,7 +312,7 @@ def sync(context, data):
     brush.smooth_stroke_factor = .5 + .49 * data.brush_smoothing
     brush.jitter = data.brush_jitter
     brush.use_pressure_size = data.brush_pressure_size
-    brush.use_pressure_strength = data.brush_pressure_opacity and not (data.brush_pressure_flow and active_tool(context) == 'PAINT')
+    brush.use_pressure_strength = data.brush_pressure_opacity or native_flow(data, active_tool(context))
     brush.stroke_method = data.brush_stroke
     if data.brush_alpha is None:
         brush.mask_texture = None
