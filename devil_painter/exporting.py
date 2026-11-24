@@ -449,18 +449,19 @@ def export(context, obj, project, template, wanted, directory, pattern, override
     channels = (needed | ({'height'} if shaded else set())) & present_anywhere
     margin = max(project.sets[index].resolution for index in wanted) if padding == INFINITE_PADDING else padding
     baked = {}
-    for key in channels:
-        for (index, number), values in baking.bake_channel(context, obj, project, wanted, CHANNEL[key], margin, style).items():
-            baked.setdefault((index, number), {})[key] = values
     converting = [index for index in wanted if 'normal' in needed and any(compositing.converts_height(project.sets[index], layer)
                                                                          for layer in compositing.resolved(project.sets[index].layers))]
-    unconverted = baking.bake_channel(context, obj, project, converting, CHANNEL['height'], margin, style, True) if converting else {}
+    with baking.bake_session(context, obj, project):
+        for key in channels:
+            for (index, number), values in baking.bake_channel(context, obj, project, wanted, CHANNEL[key], margin, style).items():
+                baked.setdefault((index, number), {})[key] = values
+        unconverted = baking.bake_channel(context, obj, project, converting, CHANNEL['height'], margin, style, True) if converting else {}
+        islands = island_coverage(context, obj, project, wanted) if style == 'TRANSPARENT' or uses_maps else {}
     for (index, number), maps in baked.items():
         if 'normal' in needed and 'height' in maps:
             normal = maps.get('normal', numpy.full(maps['height'].shape, CHANNEL['normal'].default, dtype=numpy.float32))
             height = unconverted.get((index, number), maps['height'])
             maps['normal'] = fold_height(normal, height[..., 0], project.sets[index].bump_strength, project.normal_format)
-    islands = island_coverage(context, obj, project, wanted) if style == 'TRANSPARENT' or uses_maps else {}
     coverage = islands if style == 'TRANSPARENT' else {}
     meshes = {}
     for path, index, number, item in planned:
