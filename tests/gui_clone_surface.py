@@ -1,4 +1,5 @@
 import json
+import math
 import sys
 from pathlib import Path
 import bmesh
@@ -11,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(ROOT))
 import devil_painter
-from devil_painter import editor, painting, shelf
+from devil_painter import editor, painting, sets, shelf
 from devil_painter.document import active_layer, find_layer
 from tools.workspace import prepare_scratch
 from tests.gui_harness import check, click, drag_slider, finish, has, move, press, run_journey, settle, top_view, viewport
@@ -284,6 +285,20 @@ def journey():
         check(measured['texels'] > MEASURED_TEXELS, f'{name}: {measured["texels"]} core texels were measured')
         check(measured['broken_share'] <= BROKEN_SHARE,
               f'{name}: cloned texels sample the surface offset (median {measured["median_texels"]}, p95 {measured["p95_texels"]} texels, {measured["broken_share"]:.2%} off)')
+
+    view = area.spaces.active.region_3d
+    spots = [tuple(view3d_utils.location_3d_to_region_2d(region, view, (x, y, 0.0))) for x in (-.8, -.4, .4, .8) for y in (-.7, 0.0, .7)]
+    plain_texels = [editor._active.texture_point(cube, data, spot) for spot in spots]
+    plain_faces = [sets.face_under(region, view, cube, spot) for spot in spots]
+    triangulate = cube.modifiers.new('Triangulate', 'TRIANGULATE')
+    yield from settle()
+    texels = [editor._active.texture_point(cube, data, spot) for spot in spots]
+    faces = [sets.original_face(cube, sets.face_under(region, view, cube, spot)) for spot in spots]
+    drift = float(numpy.abs(numpy.subtract(texels, plain_texels)).max()) if None not in texels else math.inf
+    check(len(sets.surface_mesh(cube).polygons) > len(cube.data.polygons) and drift < 1e-3 and faces == plain_faces,
+          f'with a Triangulate modifier every surface hit keeps its texel (drift {drift:.4f}) and its original face {faces}')
+    cube.modifiers.remove(triangulate)
+    yield from settle()
 
     click(window, region, 'PAINT')
     yield from settle()

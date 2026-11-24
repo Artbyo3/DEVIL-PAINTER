@@ -12,7 +12,6 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, str(ROOT))
 import devil_painter
 from devil_painter import editor
-from devil_painter.actions import LAST_LAYER
 from devil_painter.document import active_layer, find_layer
 from tools.workspace import prepare_scratch
 from tests.gui_harness import check, control, finish, has, move, press, run_journey, settle, viewport
@@ -150,8 +149,20 @@ def journey():
           'the Layers header delete button sits immediately to the right of the folder icon button')
     click(window, region, 'DELETE_LAYER')
     yield from settle()
-    check(uids(body) == [first] and editor._active.message == LAST_LAYER,
-          'clicking the header delete button on the only layer is refused with the same message')
+    check(uids(body) == [] and active_layer(body) is None, 'clicking the header delete button on the only layer leaves an empty stack')
+    check(has('LAYERS_EMPTY') and has('ADD_PAINT') and has('ADD_FILL') and 'PROPERTIES' not in editor._active.workspace.zones.rects,
+          'the empty stack draws a Layers note and the add buttons, and hides Properties')
+    yield from stays_responsive(window, region, body)
+    click(window, region, 'DELETE_LAYER')
+    yield from settle()
+    check(uids(body) == [] and editor._active.message == 'There is no layer to delete.', 'deleting on an empty stack says there is nothing to delete')
+    stroke(window, *front_point)
+    yield from settle()
+    check(uids(body) == [] and healthy(body), 'a brush stroke on an empty stack keeps the workspace running')
+    click(window, region, 'ADD_PAINT')
+    yield from settle()
+    first = body.active_uid
+    check(uids(body) == [first] and active_layer(body).kind == 'PAINT' and not has('LAYERS_EMPTY'), 'adding a paint layer to the empty stack starts it again')
     click(window, region, 'ADD_FOLDER')
     yield from settle()
     header_folder = body.active_uid
@@ -161,14 +172,15 @@ def journey():
     check(uids(body) == [first] and body.active_uid == first and header_folder not in uids(body),
           'clicking the header delete icon button deletes the active layer')
 
-    yield from layer_menu(window, region, first, 'DELETE')
-    check(uids(body) == [first] and body.active_uid == first and editor._active.message == LAST_LAYER,
-          f'deleting the default layer first is refused with a plain message: {editor._active.message!r}')
-    yield from stays_responsive(window, region, body)
-    check(active_layer(body) is not None, 'the texture set still has an active layer')
-
+    trim = len(project.sets[1].layers)
     yield from layer_menu(window, region, first, 'MOVE_TO_SET.1')
-    check(uids(body) == [first] and editor._active.message == LAST_LAYER, 'moving the only layer to another set is refused the same way')
+    check(uids(body) == [] and len(project.sets[1].layers) == trim + 1, 'moving the only layer to another set leaves this set empty')
+    click(window, region, 'UNDO')
+    yield from settle()
+    cube = bpy.data.objects['Cube']
+    project = cube.devil_painter
+    body = project.sets[0]
+    check(uids(body) == [first] and len(project.sets[1].layers) == trim, f'undo moves the layer back: {uids(body)}')
     yield from stays_responsive(window, region, body)
 
     click(window, region, 'ADD_PAINT')
@@ -202,22 +214,32 @@ def journey():
     yield from stays_responsive(window, region, body)
     remaining = uids(body)
     yield from layer_menu(window, region, remaining[0], 'DELETE')
-    check(uids(body) == remaining and editor._active.message == LAST_LAYER, 'deleting the last remaining layer is refused')
+    check(uids(body) == [] and has('LAYERS_EMPTY'), 'deleting the last remaining layer leaves an empty stack')
     yield from stays_responsive(window, region, body)
+    click(window, region, 'ADD_FILL')
+    yield from settle()
+    check(len(body.layers) == 1 and active_layer(body).kind == 'FILL' and not has('LAYERS_EMPTY') and has('ROW_' + body.active_uid),
+          'adding a layer to the empty stack starts a new stack')
 
     click(window, region, 'ADD_PAINT')
     yield from settle()
-    click(window, region, 'ROW_' + remaining[0], ctrl=True)
+    other = next(uid for uid in uids(body) if uid != body.active_uid)
+    click(window, region, 'ROW_' + other, ctrl=True)
     yield from settle()
     check(len(editor._active.chosen(body)) == 2, 'both layers are selected')
-    yield from layer_menu(window, region, remaining[0], 'DELETE_SELECTED')
-    check(len(body.layers) == 2 and editor._active.message == LAST_LAYER, 'deleting every selected layer at once is refused without removing any')
+    yield from layer_menu(window, region, other, 'DELETE_SELECTED')
+    check(uids(body) == [] and has('LAYERS_EMPTY'), 'deleting every selected layer at once empties the stack')
     yield from stays_responsive(window, region, body)
+    click(window, region, 'ADD_PAINT')
+    yield from settle()
+    click(window, region, 'ADD_PAINT')
+    yield from settle()
     other = next(uid for uid in uids(body) if uid != body.active_uid)
-    check(len(editor._active.chosen(body)) == 2, 'the refused delete keeps both layers selected')
+    click(window, region, 'ROW_' + other, ctrl=True)
+    yield from settle()
+    trim = len(project.sets[1].layers)
     yield from layer_menu(window, region, other, 'MOVE_SELECTED.1')
-    check(len(body.layers) == 1 and len(project.sets[1].layers) == 2 and editor._active.message == LAST_LAYER,
-          'moving every selected layer to another set keeps one layer behind')
+    check(uids(body) == [] and len(project.sets[1].layers) == trim + 2, 'moving every selected layer to another set empties this set')
     yield from stays_responsive(window, region, body)
 
     kept = uids(body)
@@ -227,10 +249,12 @@ def journey():
     press(window, 'P', *middle, ctrl=True, alt=True)
     yield from settle()
     check(editor._active is not None and uids(body) == kept and healthy(body), 'Devil Painter reopens on the same stack with a working workspace')
-    before = alpha(active_layer(body).image).max()
+    check(has('LAYERS_EMPTY'), 'the reopened empty stack still shows its empty note')
+    click(window, region, 'ADD_PAINT')
+    yield from settle()
     stroke(window, *front_point)
     yield from settle()
-    check(alpha(active_layer(body).image).max() > max(before, .5), 'painting works after reopening')
+    check(alpha(active_layer(body).image).max() > .5, 'painting works after reopening on an empty stack and adding a layer')
     click(window, region, 'CLOSE')
     yield from settle()
     devil_painter.unregister()

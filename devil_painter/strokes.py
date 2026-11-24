@@ -4,6 +4,7 @@ import bpy
 import numpy
 from mathutils.bvhtree import BVHTree
 from . import caches, compositing
+from .blending import linear_to_srgb
 from .document import active_tile, channel_depth, find_layer, set_channels, slot_value
 from .tiles import FIRST_TILE, blank, conform, create, face_slots, variant
 
@@ -21,8 +22,12 @@ class Fill:
 
 def ensure_buffer(obj, data):
     image = data.stroke
+    float_buffer = any(channel_depth(data, channel.key) != '8' for channel in set_channels(data))
+    if image is not None and image.is_float != float_buffer:
+        bpy.data.images.remove(image)
+        image = None
     if image is None or tuple(image.size) != (data.resolution, data.resolution):
-        data.stroke = blank(f'DP {obj.name} {data.name} stroke', data.resolution, (0.0, 0.0, 0.0, 0.0))
+        data.stroke = blank(f'DP {obj.name} {data.name} stroke', data.resolution, (0.0, 0.0, 0.0, 0.0), float_buffer=float_buffer)
     return data.stroke
 
 
@@ -56,6 +61,7 @@ def ensure_canvases(obj, data):
                 conform(data, slot.image, float_buffer)
                 continue
             slot.source, slot.image = 'IMAGE', create(data, f'DP {obj.name} {data.name} {layer.uid} {slot.name}', (*rgb(slot_value(slot)), 1.0), True, float_buffer)
+    ensure_buffer(obj, data)
 
 
 @dataclass
@@ -290,6 +296,8 @@ def merge(obj, data, gesture=None, tool=None):
     if layer is None or data.stroke is None or layer.image is None:
         return None
     stroke = read(data.stroke)
+    if data.stroke.is_float:
+        stroke[..., :3] = linear_to_srgb(stroke[..., :3] / numpy.maximum(stroke[..., 3:], 1e-6))
     coverage = numpy.minimum(stroke[..., 3], data.brush_opacity)
     rows, columns = numpy.flatnonzero(coverage.max(1) > 0), numpy.flatnonzero(coverage.max(0) > 0)
     if not rows.size:
@@ -297,8 +305,9 @@ def merge(obj, data, gesture=None, tool=None):
     tool = tool or (data.stroke_tool if data.stroke_tool in MERGE_TOOLS else 'PAINT')
     if tool in {'PAINT', 'FILL'}:
         for channel in set_channels(data):
-            if data.brush_slots[channel.key].enabled and not layer.slots[channel.key].enabled:
-                layer.slots[channel.key].enabled = True
+            slot = layer.slots[channel.key]
+            if data.brush_slots[channel.key].enabled and not slot.enabled and not slot.switched_off:
+                slot.enabled = True
         ensure_canvases(obj, data)
     reach = 0 if tool in {'PAINT', 'FILL', 'ERASE'} else int(gesture.radius * 2 + 2) if gesture is not None else 0
     height, width = coverage.shape
