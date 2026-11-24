@@ -8,7 +8,7 @@ import numpy
 from . import baking, compositing, tiles
 from .blending import CHANNEL, USER_CHANNELS, linear_to_srgb
 from .compositing import DIELECTRIC_F0
-from .document import channel_depth, set_channels, shown_layers
+from .document import channel_depth, children, folder_mode, set_channels
 from .filters import NORMAL_DEPTH
 from .library import save_settings, settings
 from .meshmaps import MESH_MAP, MESH_MAPS
@@ -34,6 +34,8 @@ SOURCES = {'base_color.r': ('Base R', 'base_color', 0), 'base_color.g': ('Base G
            'transmission': ('Transmission', 'transmission', 0), 'scattering': ('Scattering', 'scattering', 0), 'sheen': ('Sheen', 'sheen', 0),
            'coat': ('Coat', 'coat', 0), 'ior': ('IOR', 'ior', 0),
            **{f'user{number}': (f'User {number}', f'user{number}', 0) for number in range(1, USER_CHANNELS + 1)}, 'white': ('White', None, 0), 'black': ('Black', None, 0)}
+LEGACY_SOURCES = {'map:ao': 'ao'}
+MAP_BACKGROUND = {'normal': (0.5, 0.5, 1.0, 0.0), 'height': (0.5, 0.5, 0.5, 0.0)}
 GRAY_MESH_MAPS = frozenset({'ao', 'curvature', 'thickness', 'height', 'uv_border'})
 SHORT_MESH_LABELS = {'ao': 'AO', 'world_normal': 'World N', 'uv_border': 'UV border'}
 
@@ -45,7 +47,7 @@ def mesh_source_entries(item):
     return [(f'map:{item.key}.{letter}', f'{label} {letter.upper()}', item.key, component) for component, letter in enumerate('rgb')]
 
 
-MESH_SOURCES = tuple(entry for item in MESH_MAPS for entry in mesh_source_entries(item))
+MESH_SOURCES = tuple(entry for item in MESH_MAPS if item.key != 'ao' for entry in mesh_source_entries(item))
 MAP_SOURCES = {key: (map_key, component) for key, _, map_key, component in MESH_SOURCES}
 SOURCES.update({key: (label, None, component) for key, label, _, component in MESH_SOURCES})
 
@@ -82,7 +84,13 @@ PSD_BLENDS = {'MIX': b'norm', 'MULTIPLY': b'mul ', 'DIVIDE': b'fdiv', 'DARKEN': 
               'DODGE': b'div ', 'SOFT_LIGHT': b'sLit', 'HARD_LIGHT': b'hLit', 'VIVID_LIGHT': b'vLit', 'LINEAR_LIGHT': b'lLit', 'PIN_LIGHT': b'pLit',
               'HUE': b'hue ', 'SATURATION': b'sat ', 'COLOR': b'colr', 'VALUE': b'lum '}
 PSD_NORMAL = b'norm'
+PSD_PASSTHROUGH = b'pass'
 PSD_HIDDEN = 2
+PSD_LAYER = 0
+PSD_GROUP_OPEN = 1
+PSD_GROUP_END = 3
+PSD_GROUP_END_NAME = '</Layer group>'
+PSD_EMPTY = numpy.zeros((0, 0, 4), dtype=numpy.uint8)
 TOKENS = ('{mesh}', '{set}', '{output}', '{udim}', '{material}', '{resolution}')
 BASE = ['base_color.r', 'base_color.g', 'base_color.b']
 NORMAL_GL = ['normal.r', 'normal.g', 'normal.b']
@@ -126,7 +134,11 @@ BUILTIN_TEMPLATES = (
 
 
 def custom_templates():
-    return settings().setdefault('export_templates', [])
+    templates = settings().setdefault('export_templates', [])
+    for template in templates:
+        for item in template['outputs']:
+            item['sources'] = [LEGACY_SOURCES.get(key, key) for key in item['sources']]
+    return templates
 
 
 def all_templates():
@@ -231,11 +243,15 @@ def source_available(data, key, ao):
     if key == 'ao':
         return ao is not None or 'ambient_occlusion' in present
     channels = source_channels(key)
-    return not channels or any(channel in present for channel in channels)
+    return not channels or any(channel in present for channel in channels) or (channels == ('normal',) and 'height' in present)
 
 
 def needed_channels(template):
     return {channel for item in template['outputs'] for key in item['sources'] for channel in source_channels(key)}
+
+
+def needed_maps(template):
+    return {MAP_SOURCES[key][0] for item in template['outputs'] for key in item['sources'] if key in MAP_SOURCES}
 
 
 def map_image(data, key, number):
@@ -249,21 +265,33 @@ def ao_image(data, number):
     return map_image(data, 'ao', number)
 
 
-def ao_pixels(data, number, size):
-    image = ao_image(data, number)
-    return None if image is None else baking.resized(baking.read_pixels(image)[..., 0], (size, size))
-
-
 def unbaked_maps(data, number, item):
     keys = dict.fromkeys(MAP_SOURCES[key][0] for key in item['sources'] if key in MAP_SOURCES)
     return [MESH_MAP[key].label for key in keys if map_image(data, key, number) is None]
 
 
-def mesh_pixels(data, number, item, cache, size):
-    for key in item['sources']:
-        if key in MAP_SOURCES and MAP_SOURCES[key][0] not in cache:
-            map_key = MAP_SOURCES[key][0]
-            cache[map_key] = baking.resized(baking.read_pixels(map_image(data, map_key, number)), (size, size))
+def item_maps(data, number, item):
+    keys = [MAP_SOURCES[key][0] for key in item['sources'] if key in MAP_SOURCES]
+    if 'ao' in item['sources'] and ao_image(data, number) is not None:
+        keys.append('ao')
+    return dict.fromkeys(keys)
+
+
+def padded(values, inside, margin, background):
+    values = values.copy()
+    values[~inside] = background
+    values, outside = baking.diffuse(values, ~inside, margin)
+    values[outside] = background
+    return values
+
+
+def mesh_pixels(data, number, item, cache, size, inside, margin, height):
+    for map_key in item_maps(data, number, item):
+        if map_key not in cache:
+            values = baking.resized(baking.read_pixels(map_image(data, map_key, number)), (size, size))
+            if map_key == 'normal' and height is not None:
+                values[..., :3] = fold_height(values[..., :3], height, data.bump_strength, 'OPENGL')
+            cache[map_key] = values if inside is None else padded(values, inside, margin, MAP_BACKGROUND.get(map_key, (0.0, 0.0, 0.0, 0.0)))
     return cache
 
 
@@ -280,7 +308,7 @@ def converted_plane(key, baked, size, encode, present):
     return numpy.clip(linear_to_srgb(values) if encode and CHANNEL[target].srgb else values, 0, 1)
 
 
-def plane(key, baked, ao, size, srgb, linear_file, present, normal_format, meshes):
+def plane(key, baked, size, srgb, linear_file, present, normal_format, meshes):
     _, channel, component = SOURCES[key]
     if key in CONVERTED:
         return converted_plane(key, baked, size, srgb and not linear_file, present)
@@ -292,7 +320,7 @@ def plane(key, baked, ao, size, srgb, linear_file, present, normal_format, meshe
     if key == 'black':
         return numpy.zeros((size, size), dtype=numpy.float32)
     if key == 'ao' and channel not in present:
-        return ao if ao is not None else numpy.ones((size, size), dtype=numpy.float32)
+        return meshes['ao'][..., 0] if 'ao' in meshes else numpy.ones((size, size), dtype=numpy.float32)
     if channel not in present:
         return numpy.full((size, size), CHANNEL[channel].default[component], dtype=numpy.float32)
     values = baked[channel][..., component]
@@ -309,8 +337,8 @@ def unit(vectors):
 
 
 def fold_height(normal, height, strength, normal_format):
-    across = numpy.roll(height, -1, 1) - numpy.roll(height, 1, 1)
-    up = numpy.roll(height, -1, 0) - numpy.roll(height, 1, 0)
+    across = 2 * numpy.gradient(height, axis=1)
+    up = 2 * numpy.gradient(height, axis=0)
     if strength == 0 or not (across.any() or up.any()):
         return normal
     gain = -strength * NORMAL_DEPTH * height.shape[0] / 2
@@ -416,28 +444,32 @@ def export(context, obj, project, template, wanted, directory, pattern, override
     refuse_collisions(planned, project)
     present_anywhere = {item.key for index in wanted for item in set_channels(project.sets[index])}
     needed = needed_channels(template)
-    channels = (needed | ({'height'} if 'normal' in needed else set())) & present_anywhere
+    shaded = 'normal' in needed or 'normal' in needed_maps(template)
+    uses_maps = any(item_maps(project.sets[index], number, item) for _, index, number, item in planned)
+    channels = (needed | ({'height'} if shaded else set())) & present_anywhere
+    margin = max(project.sets[index].resolution for index in wanted) if padding == INFINITE_PADDING else padding
     baked = {}
     for key in channels:
-        margin = max(project.sets[index].resolution for index in wanted) if padding == INFINITE_PADDING else padding
         for (index, number), values in baking.bake_channel(context, obj, project, wanted, CHANNEL[key], margin, style).items():
             baked.setdefault((index, number), {})[key] = values
     for (index, number), maps in baked.items():
-        if 'normal' in maps and 'height' in maps:
-            maps['normal'] = fold_height(maps['normal'], maps['height'][..., 0], project.sets[index].bump_strength, project.normal_format)
-    coverage = island_coverage(context, obj, project, wanted) if style == 'TRANSPARENT' else {}
-    ao = {}
+        if 'normal' in needed and 'height' in maps:
+            normal = maps.get('normal', numpy.full(maps['height'].shape, CHANNEL['normal'].default, dtype=numpy.float32))
+            maps['normal'] = fold_height(normal, maps['height'][..., 0], project.sets[index].bump_strength, project.normal_format)
+    islands = island_coverage(context, obj, project, wanted) if style == 'TRANSPARENT' or uses_maps else {}
+    coverage = islands if style == 'TRANSPARENT' else {}
     meshes = {}
     for path, index, number, item in planned:
         data = project.sets[index]
-        if (index, number) not in ao:
-            ao = {(index, number): ao_pixels(data, number, data.resolution)}
-            meshes = {}
+        if (index, number) not in meshes:
+            meshes = {(index, number): {}}
         file_format = item['format']
-        present = {channel.key for channel in set_channels(data)}
-        mesh = mesh_pixels(data, number, item, meshes, data.resolution)
-        planes = [plane(key, baked.get((index, number), {}), ao[(index, number)], data.resolution, item['srgb'], file_format == 'OPEN_EXR', present, project.normal_format, mesh)
-                  for key in item['sources']]
+        values = baked.get((index, number), {})
+        present = {channel.key for channel in set_channels(data)} | ({'normal'} if 'normal' in values else set())
+        inside = islands[(index, number)] >= .5 if uses_maps else None
+        height = values['height'][..., 0] if 'height' in values else None
+        mesh = mesh_pixels(data, number, item, meshes[(index, number)], data.resolution, inside, margin if style != 'TRANSPARENT' else 0, height)
+        planes = [plane(key, values, data.resolution, item['srgb'], file_format == 'OPEN_EXR', present, project.normal_format, mesh) for key in item['sources']]
         if coverage:
             planes = with_alpha(planes, coverage[(index, number)])
         write(path, planes, file_format, effective_depth(file_format, deepest(data, item, present), override), size)
@@ -488,6 +520,8 @@ class PsdLayer:
     opacity: int
     blend: bytes
     hidden: bool
+    mask: numpy.ndarray = None
+    section: int = 0
 
 
 def contribution_tree(data, layer, key, background):
@@ -530,10 +564,45 @@ def contribution(context, obj, project, index, layer, channel, margin):
     return {number: unmixed(dark, passes[1][(index, number)], channel) for (_, number), dark in passes[0].items()}
 
 
+def psd_tree(layers, parent, key):
+    entries = []
+    for layer in children(layers, parent):
+        if layer.kind != 'FOLDER':
+            entries += [(PSD_LAYER, layer)] if compositing.blended(layer.slots[key]) else []
+            continue
+        inner = psd_tree(layers, layer.uid, key)
+        entries += [(PSD_GROUP_END, layer), *inner, (PSD_GROUP_OPEN, layer)] if inner else []
+    return entries
+
+
 def psd_stack(data, key):
-    layers = compositing.resolved(data.layers)
-    shown = {layer.uid for layer in shown_layers(layers)}
-    return [(layer, layer.uid not in shown) for layer in layers if layer.kind != 'FOLDER' and compositing.blended(layer.slots[key])]
+    return psd_tree(compositing.resolved(data.layers), '', key)
+
+
+def has_mask(layer):
+    return layer.mask is not None or layer.geo_mask or any(effect.enabled and effect.target == 'MASK' for effect in layer.effects)
+
+
+def folder_mask(context, obj, project, index, layer, margin):
+    def prepare(data):
+        compositing.isolated_tree(data, data.material.node_tree, [], 'MASK', layer.uid)
+    return {number: pixels[..., 0] for (_, number), pixels in baking.bake_pass(context, obj, project, [index], prepare, margin=margin).items()}
+
+
+def folder_blend(layer, key):
+    mode = folder_mode(layer, key)
+    return PSD_PASSTHROUGH if mode == 'PASSTHROUGH' else PSD_BLENDS.get(mode, PSD_NORMAL)
+
+
+def psd_layer(entry, render, mask, key, number):
+    kind, layer = entry
+    if kind == PSD_GROUP_END:
+        return PsdLayer(PSD_GROUP_END_NAME, PSD_EMPTY, 255, PSD_NORMAL, False, section=PSD_GROUP_END)
+    if kind == PSD_GROUP_OPEN:
+        return PsdLayer(layer.name, PSD_EMPTY, round(255 * layer.opacity), folder_blend(layer, key), not layer.visible,
+                        None if mask is None else bytes8(mask[number]), PSD_GROUP_OPEN)
+    return PsdLayer(layer.name, bytes8(render[number]), round(255 * layer.opacity * layer.slots[key].opacity),
+                    PSD_BLENDS.get(layer.slots[key].blend, PSD_NORMAL), not layer.visible)
 
 
 def bytes8(values):
@@ -553,17 +622,35 @@ def unicode_name(name):
     return b'8BIMluni' + struct.pack('>I', len(body)) + body
 
 
+def section_info(layer):
+    if not layer.section:
+        return b''
+    return b'8BIMlsct' + struct.pack('>II', 12, layer.section) + b'8BIM' + layer.blend
+
+
+def mask_info(layer):
+    if layer.mask is None:
+        return struct.pack('>I', 0)
+    height, width = layer.mask.shape
+    return struct.pack('>IiiiiBB2x', 20, 0, 0, height, width, 0, 0)
+
+
 def layer_record(layer):
     height, width = layer.pixels.shape[:2]
     channels = b''.join(struct.pack('>hI', ident, height * width + 2) for ident in (-1, 0, 1, 2))
-    extra = struct.pack('>II', 0, 0) + pascal_name(layer.name) + unicode_name(layer.name)
+    count = 4
+    if layer.mask is not None:
+        channels += struct.pack('>hI', -2, layer.mask.size + 2)
+        count += 1
+    extra = mask_info(layer) + struct.pack('>I', 0) + pascal_name(layer.name) + unicode_name(layer.name) + section_info(layer)
     flags = PSD_HIDDEN if layer.hidden else 0
-    return (struct.pack('>iiiiH', 0, 0, height, width, 4) + channels + b'8BIM' + layer.blend + struct.pack('>BBBB', layer.opacity, 0, flags, 0)
+    return (struct.pack('>iiiiH', 0, 0, height, width, count) + channels + b'8BIM' + layer.blend + struct.pack('>BBBB', layer.opacity, 0, flags, 0)
             + struct.pack('>I', len(extra)) + extra)
 
 
 def layer_pixels(layer):
-    return b''.join(bytes(2) + numpy.ascontiguousarray(layer.pixels[..., index]).tobytes() for index in (3, 0, 1, 2))
+    planes = [layer.pixels[..., index] for index in (3, 0, 1, 2)] + ([] if layer.mask is None else [layer.mask])
+    return b''.join(bytes(2) + numpy.ascontiguousarray(values).tobytes() for values in planes)
 
 
 def write_psd(path, layers, composite):
@@ -583,13 +670,14 @@ def export_psd(context, obj, project, index, key, directory, pattern, padding, s
     channel = CHANNEL[key]
     margin = data.resolution if padding == INFINITE_PADDING else padding
     stack = psd_stack(data, key)
-    renders = [contribution(context, obj, project, index, layer, channel, margin if style == 'DILATION' else 0) for layer, _ in stack]
+    layer_margin = margin if style == 'DILATION' else 0
+    renders = [contribution(context, obj, project, index, layer, channel, layer_margin) if kind == PSD_LAYER else None for kind, layer in stack]
+    masks = [folder_mask(context, obj, project, index, layer, layer_margin) if kind == PSD_GROUP_OPEN and has_mask(layer) else None for kind, layer in stack]
     flat = baking.bake_channel(context, obj, project, [index], channel, margin, style)
     set_tiles = tiles.numbers(data)
     written = []
     for number in set_tiles:
-        layers = [PsdLayer(layer.name, bytes8(render[number]), round(255 * layer.opacity * layer.slots[key].opacity),
-                           PSD_BLENDS.get(layer.slots[key].blend, PSD_NORMAL), hidden) for (layer, hidden), render in zip(stack, renders)]
+        layers = [psd_layer(entry, render, mask, key, number) for entry, render, mask in zip(stack, renders, masks)]
         tokens = dict(mesh=bpy.path.clean_name(obj.name), set=bpy.path.clean_name(data.name), output=channel.suffix, udim=number,
                       material=bpy.path.clean_name(data.material.name), resolution=data.resolution)
         path = Path(directory) / (file_name(pattern, tokens, len(set_tiles) > 1) + '.psd')

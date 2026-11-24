@@ -5,6 +5,7 @@ import numpy
 from .blending import CHANNEL
 from .document import add_slots, children, find_layer, texture_set
 from .effects import EFFECT_FIELDS
+from .exporting import write
 from .tiles import adopt
 from .library import (BUILTIN_MATERIALS, apply_definition, capture, definition_effects, library_root, load_image, material, pattern, plain,
                       save_settings, settings)
@@ -43,10 +44,15 @@ def smart_materials():
     return settings().setdefault('smart_materials', [])
 
 
-def write_png(image, path, data_values):
+def write_image(image, path, data_values):
     width, height = image.size
     pixels = numpy.empty(width * height * 4, dtype=numpy.float32)
     image.pixels.foreach_get(pixels)
+    if image.is_float:
+        deep = path.with_suffix('.exr')
+        planes = pixels.reshape(height, width, 4)
+        write(deep, [planes[..., index] for index in range(4)], 'OPEN_EXR', '32', 0)
+        return str(deep)
     return write_pixels(pixels, width, height, path, data_values)
 
 
@@ -75,7 +81,7 @@ def plain_value(value):
 def effect_entry(effect, folder, places):
     values = {field: plain_value(getattr(effect, field)) for field in EFFECT_FIELDS if field != 'texture'}
     values['anchor'] = f'{ANCHOR_REF}{places[effect.anchor]}' if effect.anchor in places else ''
-    values['image'] = write_png(effect.image, folder / f'{effect.uid}.png', False) if effect.image is not None else ''
+    values['image'] = write_image(effect.image, folder / f'{effect.uid}.png', False) if effect.image is not None else ''
     values['texture'] = bpy.path.abspath(effect.texture.filepath) if effect.texture is not None and effect.texture.filepath else ''
     values['id_colors'] = [list(item.color) for item in effect.id_colors]
     return values
@@ -115,7 +121,7 @@ def save_mask(layer, preview):
     folder = library_root() / 'smart_masks' / f'{slug}_{int(time.time() * 1000)}'
     folder.mkdir(parents=True)
     definition = dict(name=unique_name(smart_masks(), layer.name + ' mask'),
-                      mask=write_png(layer.mask, folder / 'mask.png', False) if layer.mask is not None else '',
+                      mask=write_image(layer.mask, folder / 'mask.png', False) if layer.mask is not None else '',
                       effects=[effect_entry(effect, folder, {}) for effect in layer.effects if effect.target == 'MASK' and portable(effect)],
                       preview=write_pixels(preview.ravel(), preview.shape[1], preview.shape[0], folder / 'preview.png', True))
     smart_masks().append(definition)
@@ -155,15 +161,15 @@ def layer_entry(layer, folder, parent, places):
         result = dict(name=layer.name, projection=layer.projection, tiling=layer.tiling, slots={})
     result.update(kind=layer.kind, parent=parent, opacity=layer.opacity, visible=layer.visible, mask='', paint='')
     if layer.kind == 'PAINT':
-        result['paint'] = write_png(layer.image, folder / f'{layer.uid}.png', False)
+        result['paint'] = write_image(layer.image, folder / f'{layer.uid}.png', False)
         for slot in layer.slots:
             if slot.enabled:
                 values = dict(source='VALUE', value=list(slot.color) if CHANNEL[slot.name].width == 3 else slot.value, blend=slot.blend, opacity=slot.opacity)
                 if slot.source == 'IMAGE' and slot.image is not None:
-                    values.update(source='IMAGE', image=write_png(slot.image, folder / f'{layer.uid}_{slot.name}.png', True))
+                    values.update(source='IMAGE', image=write_image(slot.image, folder / f'{layer.uid}_{slot.name}.png', True))
                 result['slots'][slot.name] = values
     if layer.mask is not None:
-        result['mask'] = write_png(layer.mask, folder / f'{layer.uid}_mask.png', False)
+        result['mask'] = write_image(layer.mask, folder / f'{layer.uid}_mask.png', False)
     result['effects'] = [effect_entry(effect, folder, places) for effect in layer.effects if portable(effect)]
     return result
 
@@ -177,7 +183,7 @@ def save_smart(layer):
     entries = [layer_entry(item, folder, places.get(item.parent, -1), places) for item in layers]
     definition = dict(name=layer.name, layers=entries)
     if layer.kind == 'FOLDER':
-        definition['root'] = dict(opacity=layer.opacity, mask=write_png(layer.mask, folder / 'root_mask.png', False) if layer.mask else '',
+        definition['root'] = dict(opacity=layer.opacity, mask=write_image(layer.mask, folder / 'root_mask.png', False) if layer.mask else '',
                                   effects=[effect_entry(effect, folder, places) for effect in layer.effects if effect.kind == 'GENERATOR'])
     definition['name'] = unique_name(smart_materials(), definition['name'])
     smart_materials().append(definition)

@@ -292,11 +292,20 @@ def wrap_sampling(build, effect, inner):
     return sample
 
 
-def height_slope(build, height, vector):
+def inside_tile(build, vector, dx, dy):
+    nodes, links = build.nodes, build.links
+    half = .5 / max(build.resolution, 1)
+    tile = vector_math(nodes, links, 'FLOOR', vector)
+    local = vector_math(nodes, links, 'SUBTRACT', offset(build, vector, dx, dy), tile)
+    held = vector_math(nodes, links, 'MINIMUM', vector_math(nodes, links, 'MAXIMUM', local, (half,) * 3), (1 - half,) * 3)
+    return vector_math(nodes, links, 'ADD', held, tile)
+
+
+def height_slope(build, height, vector, tap=offset):
     texel = 1.0 / max(build.resolution, 1)
     nodes, links = build.nodes, build.links
-    across = math_node(nodes, links, 'SUBTRACT', height(offset(build, vector, texel, 0.0)), height(offset(build, vector, -texel, 0.0)))
-    up = math_node(nodes, links, 'SUBTRACT', height(offset(build, vector, 0.0, texel)), height(offset(build, vector, 0.0, -texel)))
+    across = math_node(nodes, links, 'SUBTRACT', height(tap(build, vector, texel, 0.0)), height(tap(build, vector, -texel, 0.0)))
+    up = math_node(nodes, links, 'SUBTRACT', height(tap(build, vector, 0.0, texel)), height(tap(build, vector, 0.0, -texel)))
     return across, up
 
 
@@ -321,7 +330,7 @@ def slope_blur(build, effect, inner, image, weight, vector):
 
 def height_normal(build, effect, height, vector):
     nodes, links = build.nodes, build.links
-    across, up = height_slope(build, height, vector)
+    across, up = height_slope(build, height, vector, inside_tile)
     gain = -effect.amount * NORMAL_DEPTH * build.resolution / 2
     tilt = join_xyz(build, math_node(nodes, links, 'MULTIPLY', across, gain), math_node(nodes, links, 'MULTIPLY', up, gain))
     normal = vector_math(nodes, links, 'NORMALIZE', vector_math(nodes, links, 'ADD', tilt, (0.0, 0.0, 1.0)))
