@@ -22,7 +22,7 @@
   ],
   [
    "api_export/Cube_Material_AO.png",
-   "56387d2df30dbb9830c36316559df9d0cdf6cc275e693c8ec9f8934a582b6e24"
+   "1551b161089d47d2e91befe7a4d6a249a8ed9d02fbff3f067873385951d91d3b"
   ],
   [
    "api_export/Cube_Material_BaseColor.png",
@@ -46,7 +46,7 @@
   ],
   [
    "api_export/Cube_Material_AO.png",
-   "56387d2df30dbb9830c36316559df9d0cdf6cc275e693c8ec9f8934a582b6e24"
+   "1551b161089d47d2e91befe7a4d6a249a8ed9d02fbff3f067873385951d91d3b"
   ],
   [
    "api_export_clash/Two_Body_BaseColor.png",
@@ -62,7 +62,7 @@
   ],
   [
    "api_export_clash/Two_Body_Normal.png",
-   "de4d1a447942138aead0e3ba8330c44c1fc88c0e1b863d211a5cc7fe80a0b194"
+   "156f6eeca481c733bcdec80c828fd8b39faa40ac78bd75d0fad983a89f87bed9"
   ],
   [
    "api_export_clash/Two_Body_Height.png",
@@ -102,7 +102,7 @@
   ],
   [
    "api_export_clash/Two_Body_Normal.png",
-   "de4d1a447942138aead0e3ba8330c44c1fc88c0e1b863d211a5cc7fe80a0b194"
+   "156f6eeca481c733bcdec80c828fd8b39faa40ac78bd75d0fad983a89f87bed9"
   ],
   [
    "api_export_clash/Two_Body_Height.png",
@@ -110,7 +110,7 @@
   ],
   [
    "api_export_clash/Two_Body_AO.png",
-   "ed1695fcd9d90113ffc65334a9b6ca3af587bc7494a746406839bb3553d80700"
+   "6b1bdcd5ac384ed760b57dd410ff5aaca4a4147bced1049b8127748859596f31"
   ],
   [
    "api_export_clash/Two_Trim_BaseColor.png",
@@ -134,7 +134,55 @@
   ],
   [
    "api_export_clash/Two_Trim_AO.png",
-   "a9aa4dfe798351872ab74bad7be9f6d43e12c72fe3fbe80ade0290ac3a5e548b"
+   "45b61bfd346e24c44cb97aa75cd3140418ab6e482026753c589450fce71166a0"
+  ],
+  [
+   "api_export_clash/Two_Body_BaseColor.png",
+   "283ab9c3a955da6ee6695e1c1aa4da6d6746d51b3778e109ba3184d37edf026d"
+  ],
+  [
+   "api_export_clash/Two_Body_Roughness.png",
+   "49055eba4f8548667eb27877a1702c2c435a70f7cafc36edddffa62b13550003"
+  ],
+  [
+   "api_export_clash/Two_Body_Metallic.png",
+   "9d37faf066335e054f30998b5ecdd8d158edce45fc92d7796989721eddf75be5"
+  ],
+  [
+   "api_export_clash/Two_Body_Normal.png",
+   "156f6eeca481c733bcdec80c828fd8b39faa40ac78bd75d0fad983a89f87bed9"
+  ],
+  [
+   "api_export_clash/Two_Body_Height.png",
+   "5afd338c49cf98c0048d36c4e7165eefcb39333c6623d564111283afdc126177"
+  ],
+  [
+   "api_export_clash/Two_Body_AO.png",
+   "6b1bdcd5ac384ed760b57dd410ff5aaca4a4147bced1049b8127748859596f31"
+  ],
+  [
+   "api_export_clash/Two_Trim_BaseColor.png",
+   "3af395b8e938e346de91491d598be24d69fada49e48c39a4f02ac08ade4f9984"
+  ],
+  [
+   "api_export_clash/Two_Trim_Roughness.png",
+   "38a6ea9fcffa1c39128bcfcd7b419a1cc74b1d1b9c14e321a9c209ea7b8a77be"
+  ],
+  [
+   "api_export_clash/Two_Trim_Metallic.png",
+   "10e4455b50da1a8b2fd5dca5337b7fd7eb74cf1a4e330766e1fb8eee4319edd5"
+  ],
+  [
+   "api_export_clash/Two_Trim_Normal.png",
+   "ed2ffb1406d8c0dba0763ac249396684942df19a05075494d0e56fdb39f94c70"
+  ],
+  [
+   "api_export_clash/Two_Trim_Height.png",
+   "c0b8097a84bb826d881248cf9bf96283ae79df6020ea317b1209164d62a06c9f"
+  ],
+  [
+   "api_export_clash/Two_Trim_AO.png",
+   "45b61bfd346e24c44cb97aa75cd3140418ab6e482026753c589450fce71166a0"
   ]
  ],
  "gui_editor.py": [
@@ -152,7 +200,7 @@
   ],
   [
    "export/Cube_Material_Normal.png",
-   "e1c17d70b1ff714a3a24b59cc24f1ad3427206186183d1804e4c5545a4c7f782"
+   "b8013c836b49f0f8f26694943ed025bfbc45bca9edebf1049d697e1d42e93e0d"
   ],
   [
    "export/Cube_Material_Height.png",
@@ -176,7 +224,7 @@
   ],
   [
    "export_shelf/Cube_Material_Normal.png",
-   "a9d2539dcf646a0efd5a41077d5bcf6b9abd9065aa1ebd63ab5867ab051fe4ac"
+   "6d599365dcbb48928cb519b5d9a7f11c661e21cb51ff138d2eeda82455719365"
   ],
   [
    "export_shelf/Cube_Material_Height.png",
@@ -198,7 +246,7 @@
   ],
   [
    "project_export/Cube_Body_Normal.1001.png",
-   "7e13043a68cac8aacd28d8838ea437faaa602dce42003324c67fc755afd399d0"
+   "9642badbba8ee5a6f90929171b4725086d10c103a193eb653e256ecfbee8d69a"
   ],
   [
    "project_export/Cube_Body_Emissive.1001.png",
@@ -230,7 +278,7 @@
   ],
   [
    "project_export/Cube_Trim_Normal.png",
-   "49070ef2863f1c3c0daefdfe3a8dd585806e17ef43d4ac38ada322dc18800547"
+   "768d76a1765177cb239ab5ec3caa0da6fbdcec89ceebe16d568d2b03f5f48d36"
   ],
   [
    "project_export/Cube_Trim_Emissive.png",
@@ -246,7 +294,7 @@
   ],
   [
    "custom_export/Body-Normal-1001.png",
-   "fea28601e30b0891d690d9a27a0032bb36ede3d0229358583867c8186e093a38"
+   "8d312a818a22fc710d386249b91ad26546ed0833c0c601cf8a424ee9053a46a9"
   ],
   [
    "custom_export/Body-Emissive-1001.png",
@@ -1559,7 +1607,7 @@
   ],
   [
    "slope_normal_export/Cube_Material_Normal.png",
-   "27305e0627198ff2fb47b8ef0742ad82a2fa99200cf08a15e490d9f56b9e0089"
+   "527520c717d08d50806dd9e5be81cbd585eb11360a2591858e4e4034d332a815"
   ],
   [
    "slope_normal_export/Cube_Material_Height.png",
@@ -1579,7 +1627,7 @@
   ],
   [
    "slope_normal_export/Cube_Material_Normal.png",
-   "f45f2bed73ff76381550d2682cd7b6033887e23287b140c2861d4b4bb08362a4"
+   "b834e44cbf56c3c042796b3017c21f3a2ed0c65a1d712853b92c440617dbc3dc"
   ],
   [
    "slope_normal_export/Cube_Material_Height.png",
@@ -1599,7 +1647,7 @@
   ],
   [
    "slope_normal_export/Cube_Material_Normal.png",
-   "e15a9b4385a07425a55178febab2d061d01d23e34d6b33d5c23837ca31f91850"
+   "7461c1e50cec0e1337198a238915360cd788cca43cddb6961ac3fe1ac92846b0"
   ],
   [
    "slope_normal_export/Cube_Material_Height.png",
@@ -1619,7 +1667,7 @@
   ],
   [
    "slope_normal_export/Cube_Material_Normal.png",
-   "75fc94b5ade3f333c2ff4d5d624806e5629facdd91eea7865a907d3d88f3439c"
+   "71eac7d70fc36f210cb8dcd60d64d310b829c6185a4dcb44f7ece9335035ac43"
   ],
   [
    "slope_normal_export/Cube_Material_Height.png",
@@ -1639,7 +1687,7 @@
   ],
   [
    "slope_normal_export/Cube_Material_Normal.png",
-   "93bb4a2a85f3408baaee5dcd13f36554384ab49323037cf238dd5668b4a34b40"
+   "3a9e447e4ea734bde4205f631d17b9b421fcbce9427f085faa92e4d6c2283a0c"
   ],
   [
    "slope_normal_export/Cube_Material_Height.png",
@@ -1659,7 +1707,7 @@
   ],
   [
    "slope_normal_export/Cube_Material_Normal.png",
-   "e0af7d51e52e7ee98122b168c2bb50383fbe45ef775715ac3e07c91a2ba94337"
+   "3d9d9a4cc78f18f81f4a4c0d1ea1e71eb6281ee8c9463d0bfb580d197393ac46"
   ],
   [
    "slope_normal_export/Cube_Material_Height.png",
@@ -1679,7 +1727,7 @@
   ],
   [
    "slope_normal_export/Cube_Material_Normal.png",
-   "5768da74ef38e171c29e1a37ee515c7caf3e0084d4f4c89ea67cdc9ef524dee9"
+   "f07140e6e1f60d8b20d59bb1292ad8284a3962082c42da655cfda619c5e22b03"
   ],
   [
    "slope_normal_export/Cube_Material_Height.png",
@@ -1699,7 +1747,7 @@
   ],
   [
    "slope_normal_export/Cube_Material_Normal.png",
-   "f21732f9c80e5dad692ed5ee2cff90719097e221cd9717d4d2e734ed68aafe4c"
+   "474ac0d2ba6a6c64db8fe8cda9125c7fa26599d2862d9b81b82d392ac6ef79c4"
   ],
   [
    "slope_normal_export/Cube_Material_Height.png",
@@ -1719,7 +1767,7 @@
   ],
   [
    "slope_normal_export/Cube_Material_Normal.png",
-   "a29583553b8235fd43defa349deca58941828406a9851b403b166da326beedd5"
+   "a7117628439d7a36977aca14be0bfca101dc30e5d66e2d79d2d6239467b9cd7b"
   ],
   [
    "slope_normal_export/Cube_Material_Height.png",
