@@ -193,6 +193,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         self._window_address = context.window.as_pointer()
         self._region = next(r for r in context.area.regions if r.type == 'WINDOW')
         self.pointer = (0, 0)
+        self.hovered = None
         self.message = ''
         self.toast_text = None
         self.toast_until = 0.0
@@ -391,6 +392,11 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         gpu.state.depth_test_set('NONE')
         gpu.state.blend_set('NONE')
 
+    def hover_state(self):
+        layout = self.workspace
+        under = tuple(control.key for control in layout.controls if control.hit(*self.pointer))
+        return under, layout.popover is not None and layout.popover.contains(*self.pointer)
+
     def update_highlight(self, event, control):
         obj, data = self.painted()
         if data is None:
@@ -582,8 +588,12 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.cleanup()
             return {'FINISHED'}
         if event.type == 'MOUSEMOVE':
-            self._area.tag_redraw()
+            sized = self.world_pixels
             self.track_world_size()
+            hovered = self.hover_state()
+            if hovered != self.hovered or sized != self.world_pixels or self.state.text is not None:
+                self.hovered = hovered
+                self._area.tag_redraw()
         if self.state.text is not None:
             result = self.text_event(context, event, pointer_event)
             if result is not None:
