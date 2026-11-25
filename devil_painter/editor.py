@@ -230,6 +230,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         self.drag_moved = False
         self.engine_before = ''
         self.world_pixels = (0, 0)
+        self.brush_ring = None
         self.fonts = []
         self.flat_area = None
         self.saved_mask = None
@@ -417,6 +418,17 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         layout = self.workspace
         under = tuple(control.key for control in layout.controls if control.hit(*self.pointer))
         return under, layout.popover is not None and layout.popover.contains(*self.pointer)
+
+    def sync_brush_ring(self, over_interface):
+        paint = self.scene.tool_settings.image_paint
+        if over_interface and self.brush_ring is None:
+            self.brush_ring = paint.show_brush
+            paint.show_brush = False
+            self._window.cursor_modal_set('DEFAULT')
+        elif not over_interface and self.brush_ring is not None:
+            paint.show_brush = self.brush_ring
+            self.brush_ring = None
+            self._window.cursor_modal_restore()
 
     def update_highlight(self, event, control):
         obj, data = self.painted()
@@ -615,6 +627,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             sized = self.world_pixels
             self.track_world_size()
             hovered = self.hover_state()
+            self.sync_brush_ring(bool(hovered[0]) or self.workspace.covers(*self.pointer))
             if sized != self.world_pixels:
                 self.layout_stale = True
             if hovered != self.hovered or sized != self.world_pixels or self.state.text is not None:
@@ -3228,6 +3241,10 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.restore_mask()
         except ReferenceError:
             self.saved_mask = None
+        try:
+            self.sync_brush_ring(False)
+        except (ReferenceError, RuntimeError):
+            self.brush_ring = None
         if self._handle is not None:
             bpy.types.SpaceView3D.draw_handler_remove(self._handle, 'WINDOW')
         if self._view_handle is not None:
