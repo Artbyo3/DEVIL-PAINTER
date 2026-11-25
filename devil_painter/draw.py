@@ -26,17 +26,24 @@ class Renderer:
         self.s = 1
         self.offset = (0, 0)
         self.icon_batches = {}
+        self.shapes = {}
+        self.shapes_owner = None
+
+    def fill_batch(self, points, indices):
+        if self.shader is None:
+            self.shader = gpu.shader.from_builtin('UNIFORM_COLOR')
+        return batch_for_shader(self.shader, 'TRIS', {"pos": points}, indices=indices)
+
+    def paint(self, batch, color):
+        gpu.state.blend_set('ALPHA')
+        self.shader.bind()
+        self.shader.uniform_float("color", color)
+        batch.draw(self.shader)
 
     def triangles(self, points, color, indices=None):
         if not points:
             return
-        if self.shader is None:
-            self.shader = gpu.shader.from_builtin('UNIFORM_COLOR')
-        gpu.state.blend_set('ALPHA')
-        batch = batch_for_shader(self.shader, 'TRIS', {"pos": points}, indices=indices)
-        self.shader.bind()
-        self.shader.uniform_float("color", color)
-        batch.draw(self.shader)
+        self.paint(self.fill_batch(points, indices), color)
 
     def rect(self, r, color):
         x = round(r.x)
@@ -54,6 +61,11 @@ class Renderer:
         rad = min(radius * self.s, w / 2, h / 2)
         if rad <= 1.5:
             self.rect(Rect(x, y, w, h), color)
+            return
+        key = ('fill', x, y, w, h, rad)
+        batch = self.shapes.get(key)
+        if batch is not None:
+            self.paint(batch, color)
             return
         pts = [
             (x + rad, y), (x + w - rad, y), (x + w - rad, y + h), (x + rad, y + h),
@@ -76,7 +88,8 @@ class Renderer:
                 pts.append((cx + math.cos(angle) * rad, cy + math.sin(angle) * rad))
                 if i > 0:
                     indices.append((c_idx, len(pts) - 2, len(pts) - 1))
-        self.triangles(pts, color, indices)
+        self.shapes[key] = self.fill_batch(pts, indices)
+        self.paint(self.shapes[key], color)
 
     def round_rect_outline(self, r, color, radius=8, width=1):
         x = round(r.x)
@@ -107,21 +120,26 @@ class Renderer:
             (x_out + w_out - rad_out, y_out + h_out - rad_out, 0, 0.5 * math.pi),
             (x_out + rad_out, y_out + h_out - rad_out, 0.5 * math.pi, math.pi),
         ]
-        pts = []
-        n = max(6, min(12, int(rad_out)))
-        for cx, cy, a0, a1 in corners:
-            for i in range(n + 1):
-                angle = a0 + (a1 - a0) * i / n
-                pts.append((cx + math.cos(angle) * rad_out, cy + math.sin(angle) * rad_out))
-        self.lines(pts + pts[:1], color, line_w, strip=True)
+        key = ('outline', x_out, y_out, w_out, h_out, rad_out)
+        batch = self.shapes.get(key)
+        if batch is None:
+            pts = []
+            n = max(6, min(12, int(rad_out)))
+            for cx, cy, a0, a1 in corners:
+                for i in range(n + 1):
+                    angle = a0 + (a1 - a0) * i / n
+                    pts.append((cx + math.cos(angle) * rad_out, cy + math.sin(angle) * rad_out))
+            batch = self.shapes[key] = self.line_batch(pts + pts[:1], True)
+        self.stroke(batch, color, line_w)
+
+    def line_batch(self, points, strip):
+        if self.line_shader is None:
+            self.line_shader = gpu.shader.from_builtin('POLYLINE_UNIFORM_COLOR')
+        return batch_for_shader(self.line_shader, 'LINE_STRIP' if strip else 'LINES', {"pos": points})
 
     def lines(self, points, color, width=1, strip=False):
         if len(points) < 2:
             return
-        if self.line_shader is None:
-            self.line_shader = gpu.shader.from_builtin('POLYLINE_UNIFORM_COLOR')
-        gpu.state.blend_set('ALPHA')
-        sh = self.line_shader
         is_1px = (width * self.s <= 1.2)
         if is_1px and len(points) == 2:
             p0, p1 = points
@@ -131,7 +149,11 @@ class Renderer:
             elif abs(p0[0] - p1[0]) < 1e-4:
                 x = math.floor(p0[0]) + 0.5
                 points = [(x, round(p0[1])), (x, round(p1[1]))]
-        batch = batch_for_shader(sh, 'LINE_STRIP' if strip else 'LINES', {"pos": points})
+        self.stroke(self.line_batch(points, strip), color, width)
+
+    def stroke(self, batch, color, width):
+        gpu.state.blend_set('ALPHA')
+        sh = self.line_shader
         sh.bind()
         sh.uniform_float("viewportSize", gpu.state.viewport_get()[2:])
         sh.uniform_float("lineWidth", width * self.s)
@@ -233,6 +255,9 @@ class Renderer:
 
     def draw(self, ed):
         layout = ed.workspace
+        if self.shapes_owner is not layout:
+            self.shapes.clear()
+            self.shapes_owner = layout
         self.s = s = layout.scale
         metrics = layout.metrics
         blend = gpu.state.blend_get()

@@ -61,6 +61,7 @@ DRAG_FIELDS = {key: (field, top) for key, _, field, top in (*NORMAL_SLIDERS, *ST
 DOUBLE_CLICK_SECONDS = .4
 SCROLL_STEP = 40
 POINTER_TOKENS = ('MOUSE', 'TRACKPAD', 'NDOF', 'PEN', 'ERASER')
+MOTION_EVENTS = {'MOUSEMOVE', 'INBETWEEN_MOUSEMOVE'}
 HIDDEN_REGIONS = ('show_region_header', 'show_region_tool_header', 'show_region_toolbar', 'show_region_asset_shelf', 'show_gizmo_navigate')
 FLAT_REGIONS = ('show_region_header', 'show_region_tool_header', 'show_region_toolbar', 'show_region_ui', 'show_region_asset_shelf')
 MOVES = {'MOVE_UP': 1, 'MOVE_DOWN': -1}
@@ -245,7 +246,9 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             painting.update_canvas(context, data)
             brushes.sync(context, data)
         self.renderer = Renderer()
-        self.workspace = self.make_layout()
+        self.layout_stale = True
+        self.layout_region = None
+        self.ensure_layout()
         try:
             self._handle = bpy.types.SpaceView3D.draw_handler_add(self.draw_overlay, (), 'WINDOW', 'POST_PIXEL')
             self._view_handle = bpy.types.SpaceView3D.draw_handler_add(self.draw_highlight, (), 'WINDOW', 'POST_VIEW')
@@ -275,6 +278,17 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
     def painted(self):
         obj = self._window.view_layer.objects.active
         return obj, texture_set(obj)
+
+    def ensure_layout(self):
+        region = (self._region.x, self._region.y, self._region.width, self._region.height)
+        if self.layout_stale or region != self.layout_region:
+            self.workspace = self.make_layout()
+            self.layout_region = region
+            self.layout_stale = False
+
+    def hovering(self, event):
+        return (event.type in MOTION_EVENTS and not self.stroke_pending and not self.stencil_pending
+                and self.state.drag is None and self.state.text is None and self.state.gesture is None)
 
     def make_layout(self):
         region, space = self._region, self._area.spaces.active
@@ -522,7 +536,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         try:
             with thumbnails.foreground():
                 thumbnails.begin_frame()
-                self.workspace = self.make_layout()
+                self.ensure_layout()
                 self.renderer.draw(self)
         except Exception as failure:
             traceback.print_exception(failure)
@@ -539,6 +553,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             return {'FINISHED'}
         if self.failure is not None:
             return self.fail(self.failure)
+        self.layout_stale = self.layout_stale or not self.hovering(event)
         try:
             with thumbnails.foreground():
                 return self.handle_event(context, event)
@@ -549,6 +564,8 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         except Exception as failure:
             traceback.print_exception(failure)
             return self.fail(failure)
+        finally:
+            self.layout_stale = self.layout_stale or not self.hovering(event)
 
     def handle_event(self, context, event):
         if self._area not in list(self._window.screen.areas) or self._area.type != 'VIEW_3D':
@@ -580,7 +597,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         self.sync_flat()
         self.sync_stencil_resize(context)
         self.drop_stale_anchor()
-        self.workspace = self.make_layout()
+        self.ensure_layout()
         self.pointer = (event.mouse_x - self._region.x, event.mouse_y - self._region.y)
         press = event.value == 'PRESS'
         pointer_event = any(token in event.type for token in POINTER_TOKENS)
@@ -598,6 +615,8 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             sized = self.world_pixels
             self.track_world_size()
             hovered = self.hover_state()
+            if sized != self.world_pixels:
+                self.layout_stale = True
             if hovered != self.hovered or sized != self.world_pixels or self.state.text is not None:
                 self.hovered = hovered
                 self._area.tag_redraw()
