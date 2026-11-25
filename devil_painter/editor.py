@@ -1518,14 +1518,6 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         self.state.drag = (f'DRAG_FX.{uid}.{effect_uid}', control.rect)
         return actions.select_effect(context, obj, data, uid, effect_uid)
 
-    def open_add_menu(self, control, data):
-        layer = active_layer(data)
-        if layer is None or layer.kind == 'INSTANCE':
-            self.message = 'Select a layer or mask to add effects to.'
-            return
-        masks = (('ADD_MASK_WHITE', 'Add white mask', False), ('ADD_MASK_BLACK', 'Add black mask', False)) if layer.mask is None else ()
-        self.state.popover = Popover('MENU', control.rect, items=masks + add_effect_items(STACK_ADDS))
-
     def open_effect_menu(self, key, control, data):
         effect = active_effect(data)
         if key == 'FX_BLEND':
@@ -1560,9 +1552,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
 
     def effect_act(self, context, obj, data, key, control):
         effect = active_effect(data)
-        if key == 'ADD_EFFECT':
-            self.open_add_menu(control, data)
-        elif key.startswith('ADD_FX.'):
+        if key.startswith('ADD_FX.'):
             kind = key.removeprefix('ADD_FX.')
             self.message = actions.add_effect(context, obj, data, kind, fitting_target(kind, stack_target(data)))
         elif key.startswith('EFFECTS_'):

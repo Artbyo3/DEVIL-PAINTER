@@ -618,8 +618,7 @@ def fill_layers(layout, state, data, flow):
 
 def layers_panel(layout, state, data):
     s = layout.scale
-    actions = (('ADD_EFFECT', '', HEADER - 8, 'Add a mask or an effect to the selected layer or mask', 'GENERATOR'),
-               ('DELETE_LAYER', '', HEADER - 8, 'Remove the selected layer, mask, or effect', 'DELETE'),
+    actions = (('DELETE_LAYER', '', HEADER - 8, 'Remove the selected layer, mask, or effect', 'DELETE'),
                ('ADD_FOLDER', '', HEADER - 8, 'New folder above the selected layer', 'FOLDER'),
                ('ADD_FILL', '+ Fill', 52, 'New fill layer above the selected one', ''),
                ('ADD_PAINT', '+ Paint', 64, 'New paint layer above the selected one', ''))
