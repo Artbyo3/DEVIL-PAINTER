@@ -1,16 +1,18 @@
 import json
+from dataclasses import dataclass
 from pathlib import Path
 import bpy
 import numpy
 from . import bakejob, baking, bridge, brushes, compositing, exporting, history, library, meshmaps, painting, projects, sets, smart, strokes, tiles
 from .blending import linear_to_srgb
 from .compositing import ensure_material
-from .effects import EFFECT_LABEL, copy_effect, find_effect, level_target, mask_effects
+from .effects import EFFECT_FIELDS, EFFECT_LABEL, copy_effect, effects_in, find_effect, fitting_target, has_mask, level_target, mask_effects
+from .filters import FILTER
 from .masks import GENERATOR, GENERATOR_FIELDS
 from .meshmaps import MESH_MAP
 from .blending import BLEND_MODES, CHANNEL, FOLDER_BLENDS, NORMAL_DETAIL
 from .procedural import PATTERN
-from .document import DEPTH_LABELS, PROJECTIONS, PROJECTORS, SLOT_FIELDS, TEXTURE_SAMPLING,geometry_attribute, active_effect, active_layer, adopt_generator_breakups, adopt_layer_generator, add_set_channels, add_slots, children, descendants, fill_slots, find_layer, layer_index, set_slot_value
+from .document import DEPTH_LABELS, PROJECTIONS, PROJECTORS, SLOT_FIELDS, TEXTURE_SAMPLING,geometry_attribute, active_effect, active_layer, adopt_generator_breakups, adopt_layer_generator, add_set_channels, add_slots, children, descendants, fill_slots, find_layer, layer_index, mask_row, set_slot_value, stack_target
 
 KIND_NAMES = {'PAINT': 'Paint', 'FILL': 'Fill', 'FOLDER': 'Folder'}
 LAYER_FIELDS = ('kind', 'visible', 'opacity', 'projection', 'tiling', 'proj_offset', 'proj_rotation', 'proj_size', 'proj_bend', 'proj_warp', 'uv_offset', 'uv_rotation', 'triplanar_blend', 'tile_match', 'material', 'folder_blend', 'geo_mask', 'link_set', 'link_uid')
@@ -262,12 +264,14 @@ def new_effect(data, layer, kind, target):
     effect = layer.effects.add()
     effect.uid, effect.kind, effect.target = f'E{data.serial}', kind, target
     effect.blend = 'MIX' if target == 'CONTENT' else EFFECT_BLENDS[kind]
-    data.target, data.active_effect = 'EFFECT', effect.uid
+    data.active_row = effect.uid
     return effect
 
 
 def add_effect(context, obj, data, kind, target):
     layer = active_layer(data)
+    if layer is None or layer.kind == 'INSTANCE':
+        return 'Select a layer or mask to add effects to.'
     effect = new_effect(data, layer, kind, target)
     if kind == 'PAINT':
         effect.image = tiles.create(data, f'DP {obj.name} {data.name} {layer.uid} {effect.uid}', (0.0, 0.0, 0.0, 0.0))
@@ -283,14 +287,18 @@ def add_effect(context, obj, data, kind, target):
 
 
 def select_effect(context, obj, data, uid, effect_uid):
-    data.active_uid, data.target, data.active_effect = uid, 'EFFECT', effect_uid
+    data.active_uid, data.active_row = uid, effect_uid
     painting.update_canvas(context, data)
     return 'Effect selected.'
 
 
 def edit_effect(context, obj, data, field, value, commit):
+    return write_effect(context, obj, data, data.active_row, field, value, commit)
+
+
+def write_effect(context, obj, data, effect_uid, field, value, commit):
     layer = active_layer(data)
-    effect = find_effect(layer, data.active_effect)
+    effect = find_effect(layer, effect_uid)
     field, index = level_target(effect, field)
     if index is not None:
         values = list(getattr(effect, field))
@@ -309,22 +317,163 @@ def toggle_effect(context, obj, data, uid, effect_uid):
     return refresh(context, obj, data, f'Effect {"enabled" if effect.enabled else "disabled"}.')
 
 
-def delete_effect(context, obj, data):
-    layer = active_layer(data)
-    index = next(position for position, effect in enumerate(layer.effects) if effect.uid == data.active_effect)
+def effect_index(layer, effect_uid):
+    return next(position for position, effect in enumerate(layer.effects) if effect.uid == effect_uid)
+
+
+def effect_count(uids):
+    return 'Effect' if len(uids) == 1 else f'{len(uids)} effects'
+
+
+def drop_effect(data, layer, effect_uid):
+    index = effect_index(layer, effect_uid)
     image = layer.effects[index].image
     layer.effects.remove(index)
     if image is not None and image.name.startswith('DP '):
         tiles.release(data, image)
-    data.target, data.active_effect = 'CONTENT', ''
-    return refresh(context, obj, data, 'Effect deleted.')
+
+
+def row_after(data, layer, uids):
+    effect = active_effect(data)
+    if effect is None or effect.uid not in uids:
+        return data.active_row
+    order = [peer.uid for peer in effects_in(layer, effect.target)]
+    below = [uid for uid in order[:order.index(effect.uid)] if uid not in uids]
+    if below:
+        return below[-1]
+    return mask_row(layer) if effect.target == 'MASK' else ''
+
+
+def remove_effects(context, obj, data, uids, verb='removed'):
+    layer = active_layer(data)
+    row = row_after(data, layer, uids)
+    for uid in uids:
+        drop_effect(data, layer, uid)
+    data.active_row = row if row != mask_row(layer) or has_mask(layer) else ''
+    return refresh(context, obj, data, f'{effect_count(uids)} {verb}.')
 
 
 def move_effect(context, obj, data, uid, effect_uid, index):
     layer = find_layer(data, uid)
-    current = next(position for position, effect in enumerate(layer.effects) if effect.uid == effect_uid)
-    layer.effects.move(current, max(0, min(len(layer.effects) - 1, index)))
+    layer.effects.move(effect_index(layer, effect_uid), max(0, min(len(layer.effects) - 1, index)))
     return refresh(context, obj, data, 'Effect reordered.')
+
+
+def order_effects(layer, target, order):
+    for position, uid in enumerate(order):
+        peers = [index for index, effect in enumerate(layer.effects) if effect.target == target]
+        layer.effects.move(effect_index(layer, uid), peers[position])
+
+
+def moved_order(order, uids, move):
+    kept, chosen = [uid for uid in order if uid not in uids], [uid for uid in order if uid in uids]
+    if move in {'TOP', 'BOTTOM'}:
+        return kept + chosen if move == 'TOP' else chosen + kept
+    order = list(order)
+    if move == 'UP':
+        for index in reversed(range(len(order) - 1)):
+            if order[index] in uids and order[index + 1] not in uids:
+                order[index], order[index + 1] = order[index + 1], order[index]
+    else:
+        for index in range(1, len(order)):
+            if order[index] in uids and order[index - 1] not in uids:
+                order[index], order[index - 1] = order[index - 1], order[index]
+    return order
+
+
+def move_effects(context, obj, data, uids, move):
+    layer = active_layer(data)
+    target = find_effect(layer, uids[0]).target
+    order = [effect.uid for effect in effects_in(layer, target)]
+    moved = moved_order(order, uids, move)
+    if moved == order:
+        return f'{effect_count(uids)} already at the {"top" if move in {"TOP", "UP"} else "bottom"} of the stack.'
+    order_effects(layer, target, moved)
+    return refresh(context, obj, data, f'{effect_count(uids)} reordered.')
+
+
+@dataclass(frozen=True)
+class CopiedEffect:
+    values: dict
+    texture: str
+    id_colors: tuple
+    painted: dict
+    is_data: bool
+    is_float: bool
+
+
+def captured_pixels(image):
+    pixels = strokes.read(image)
+    return pixels if image.is_float else numpy.round(pixels * 255).astype(numpy.uint8)
+
+
+def capture_effect(data, effect):
+    values = {}
+    for field in EFFECT_FIELDS:
+        value = getattr(effect, field)
+        if field != 'texture':
+            values[field] = value if isinstance(value, (str, bool, int, float)) else tuple(value)
+    image = effect.image if effect.kind == 'PAINT' else None
+    painted = {number: captured_pixels(tiles.variant(data, image, number)) for number in tiles.numbers(data)} if image is not None else {}
+    return CopiedEffect(values, effect.texture.name if effect.texture is not None else '', tuple(tuple(item.color) for item in effect.id_colors), painted,
+                        image is not None and image.colorspace_settings.is_data, image is not None and image.is_float)
+
+
+def capture_effects(data, uids):
+    layer = active_layer(data)
+    return tuple(capture_effect(data, find_effect(layer, uid)) for uid in uids)
+
+
+def restore_pixels(image, pixels):
+    size = tuple(image.size)
+    height, width = pixels.shape[:2]
+    if size != (width, height):
+        image.scale(width, height)
+    strokes.write(image, pixels if pixels.dtype == numpy.float32 else pixels.astype(numpy.float32) / 255)
+    if size != (width, height):
+        image.scale(*size)
+    image.pack()
+
+
+def place_effect(obj, data, layer, copied, target):
+    data.serial += 1
+    effect = layer.effects.add()
+    for field, value in copied.values.items():
+        setattr(effect, field, value)
+    effect.uid, effect.target = f'E{data.serial}', target
+    effect.texture = bpy.data.images.get(copied.texture) if copied.texture else None
+    for color in copied.id_colors:
+        effect.id_colors.add().color = color
+    uid = effect.uid
+    if effect.kind == 'PAINT':
+        image = tiles.create(data, f'DP {obj.name} {data.name} {layer.uid} {uid}', (0.0, 0.0, 0.0, 0.0), copied.is_data, copied.is_float)
+        effect.image = image
+        for number in tiles.numbers(data):
+            if number in copied.painted:
+                restore_pixels(tiles.variant(data, image, number), copied.painted[number])
+    return uid
+
+
+def paste_copied_effects(context, obj, data, copied):
+    layer = active_layer(data)
+    if layer is None or layer.kind == 'INSTANCE':
+        return 'Select a layer or mask to paste effects onto.'
+    wanted = stack_target(data)
+    for item in copied:
+        color_only = FILTER[item.values['filter']].color_only
+        data.active_row = place_effect(obj, data, layer, item, fitting_target(item.values['kind'], wanted, color_only))
+    return refresh(context, obj, data, f'{effect_count(copied)} pasted onto {layer.name}.')
+
+
+def duplicate_effects(context, obj, data, uids):
+    layer = active_layer(data)
+    target = find_effect(layer, uids[0]).target
+    order = [effect.uid for effect in effects_in(layer, target)]
+    for uid, copied in zip(uids, capture_effects(data, uids)):
+        data.active_row = place_effect(obj, data, layer, copied, target)
+        order.insert(order.index(uid) + 1, data.active_row)
+    order_effects(layer, target, order)
+    return refresh(context, obj, data, f'{effect_count(uids)} duplicated.')
 
 
 def drop_layer(context, obj, data, uid, target_uid, mode):
@@ -388,7 +537,7 @@ def remove_layers(data, uids):
             for image in owned_images(layer):
                 tiles.release(data, image)
             data.layers.remove(position)
-    data.target = 'CONTENT'
+    data.active_row = ''
 
 
 def set_layers_visible(context, obj, data, uids, visible):
@@ -456,7 +605,7 @@ def instance_into(context, obj, project, index):
         link.parent = parent
         target.layers.move(len(target.layers) - 1, position + 1)
         source.active_uid = new_uid
-        source.target = 'CONTENT'
+        source.active_row = ''
     return refresh(context, obj, source, f'{name} is now instanced in {target.name}.')
 
 
@@ -616,7 +765,7 @@ def new_layer(data, kind):
     data.layers.move(len(data.layers) - 1, index + 1)
     layer = data.layers[index + 1]
     data.active_uid = layer.uid
-    data.target = 'CONTENT'
+    data.active_row = ''
     if data.quick_mask is not None:
         layer.mask, data.quick_mask = data.quick_mask, None
         layer.mask.name = f'DP {data.id_data.name} {data.name} {layer.uid} mask'
@@ -724,9 +873,9 @@ def move_out_of_folder(context, obj, data):
 def select_layer(context, obj, data, uid, mask=False):
     layer = find_layer(data, uid)
     data.active_uid = uid
-    data.target = 'MASK' if mask and layer.mask is not None else 'CONTENT'
+    data.active_row = mask_row(layer) if mask and has_mask(layer) else ''
     painting.update_canvas(context, data)
-    return f'{layer.name}{" mask" if data.target == "MASK" else ""} selected.'
+    return f'{layer.name}{" mask" if data.active_row else ""} selected.'
 
 
 def toggle_visible(context, obj, data, uid):
@@ -798,7 +947,7 @@ def duplicate_layer(context, obj, data):
         return 'No layer to duplicate.'
     name = source.name
     data.active_uid = copy_layer(obj, data, source, source.parent, layer_index(data, source.uid) + 1)
-    data.target = 'CONTENT'
+    data.active_row = ''
     return refresh(context, obj, data, f'Duplicated {name}.')
 
 
@@ -912,7 +1061,7 @@ def pick_id_color(context, obj, data, effect_uid, face, location, add):
 
 def remove_id_color(context, obj, data, index):
     layer = active_layer(data)
-    find_effect(layer, data.active_effect).id_colors.remove(index)
+    active_effect(data).id_colors.remove(index)
     return refresh(context, obj, data, f'{layer.name} no longer keeps that ID color.')
 
 
@@ -1059,7 +1208,10 @@ def apply_smart_mask(context, obj, data, definition):
     layer = active_layer(data)
     if layer is None or layer.kind == 'INSTANCE':
         return 'Select a layer to mask.'
+    masking = stack_target(data) == 'MASK'
     smart.apply_mask(obj, data, layer, definition)
+    if masking:
+        data.active_row = mask_row(layer) if has_mask(layer) else ''
     return refresh(context, obj, data, f'{layer.name} uses the {definition["name"]} smart mask.')
 
 
@@ -1092,7 +1244,7 @@ def apply_quick_mask(context, obj, data):
 def add_mask(context, obj, data, white):
     layer = active_layer(data)
     layer.mask = image_for(obj, data, layer.uid + ' mask', white)
-    data.target = 'MASK'
+    data.active_row = mask_row(layer)
     return refresh(context, obj, data, f'{"White" if white else "Black"} mask added to {layer.name}. Painting now edits the mask.')
 
 
@@ -1102,14 +1254,10 @@ def remove_mask(context, obj, data):
     layer.mask = None
     if mask is not None:
         tiles.release(data, mask)
-    data.target = 'CONTENT'
+    for uid in [effect.uid for effect in mask_effects(layer)]:
+        drop_effect(data, layer, uid)
+    data.active_row = ''
     return refresh(context, obj, data, f'Mask removed from {layer.name}.')
-
-
-def set_target(context, obj, data, target):
-    data.target = target
-    painting.update_canvas(context, data)
-    return 'Painting edits the mask.' if target == 'MASK' else 'Painting edits the layer.'
 
 
 def export_files(context, obj, project, directory):

@@ -387,7 +387,10 @@ class Renderer:
             self.rect(rect, color)
         self.round_rect_outline(rect, ACCENT if selected else SURFACE_OUTLINE, radius=0)
 
-    def row(self, control, hover, metrics):
+    def mask_row(self, control, hover, metrics):
+        self.row(control, hover, metrics, True)
+
+    def row(self, control, hover, metrics, masked=False):
         rect, s = control.rect, self.s
         if control.active or hover:
             self.round_rect(rect, ACCENT_BG if control.active else BG_ELEVATED, radius=metrics.menu_item)
@@ -398,7 +401,7 @@ class Renderer:
             self.round_rect(Rect(x, y, size, size), BG_WELL, radius=metrics.regular)
             self.draw_icon(control.icon, x + size / 2, y + size / 2, 18, ACCENT if control.second > 0 else TEXT_SECONDARY)
         else:
-            self.thumbnail(Rect(x, y, size, size), control.preview, control.color, False, control.second > 0)
+            self.thumbnail(Rect(x, y, size, size), control.preview, control.color, masked, control.second > 0)
         if control.mask is not None:
             x += size + 4 * s
         x += size + 8 * s
@@ -414,7 +417,13 @@ class Renderer:
         self.text_right(rect.x + rect.w - 8 * s, baseline + s, control.text, 9, TEXT_MUTED)
 
     def thumb(self, control, hover, metrics):
-        self.thumbnail(control.rect, control.preview, None, True, control.active)
+        if control.preview is None:
+            rect = control.rect
+            self.round_rect(rect, BG_WELL, radius=metrics.regular)
+            self.draw_icon(control.icon, rect.x + rect.w / 2, rect.y + rect.h / 2, 18, ACCENT if control.active else TEXT_SECONDARY)
+            self.round_rect_outline(rect, ACCENT if control.active else SURFACE_OUTLINE, radius=0)
+        else:
+            self.thumbnail(control.rect, control.preview, None, True, control.active)
         if hover and not control.active:
             self.round_rect_outline(control.rect, ACCENT_BORDER, radius=0)
 
@@ -496,6 +505,8 @@ class Renderer:
         if control.active:
             self.draw_icon('CHECK', rect.x + rect.w - 14 * s, rect.y + rect.h / 2, 12, ACCENT)
         self.text(rect.x + 10 * s, rect.y + (rect.h - 10 * s) / 2, control.label, 10, ACCENT if hover else TEXT_PRIMARY)
+        if control.shortcut:
+            self.text_right(rect.x + rect.w - 10 * s, rect.y + (rect.h - 10 * s) / 2, control.shortcut, 10, TEXT_MUTED)
 
     def saturation_value(self, control, hover, metrics):
         rect, s = control.rect, self.s
@@ -544,7 +555,7 @@ class Renderer:
 
 
 DRAWERS = {'TOOL': Renderer.tool, 'ICON': Renderer.icon_button, 'CHIP': Renderer.chip, 'PRIMARY': Renderer.primary,
-           'SLIDER': Renderer.slider, 'PROGRESS': Renderer.slider, 'SWATCH': Renderer.swatch, 'TOGGLE': Renderer.toggle, 'ROW': Renderer.row, 'NOTE': Renderer.note,
+           'SLIDER': Renderer.slider, 'PROGRESS': Renderer.slider, 'SWATCH': Renderer.swatch, 'TOGGLE': Renderer.toggle, 'ROW': Renderer.row, 'MASKROW': Renderer.mask_row, 'NOTE': Renderer.note,
            'HEADER': Renderer.header, 'DROPDOWN': Renderer.dropdown, 'FIELD': Renderer.field, 'MENUITEM': Renderer.menu_item,
            'SV': Renderer.saturation_value, 'HUE': Renderer.hue, 'SCROLLBAR': Renderer.scrollbar, 'THUMB': Renderer.thumb,
            'GRIP': Renderer.grip, 'TILE': Renderer.tile, 'SOURCE': Renderer.source, 'GIZMO': Renderer.gizmo,
