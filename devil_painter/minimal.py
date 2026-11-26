@@ -11,9 +11,9 @@ from pathlib import Path
 from .blending import BLEND_MODES, CHANNEL, CHANNELS, FOLDER_BLENDS, USER_CHANNELS, linear_to_srgb
 from .canvas import Layout, Rect
 from .compositing import fill_projection, triplanar_textured
-from .document import (BAKE_ANTIALIAS_LABELS, BAKE_CURVATURE_LABELS, BAKE_ID_LABELS, DEPTH_LABELS, DISPLACEMENT_SCALE_MAX, DISPLACEMENT_SUBDIVISION_MAX, DYNAMICS, NORMAL_FORMATS, PROJECTORS, STROKE_METHODS, TEXTURE_SAMPLING, TRANSPARENCY, NORMAL_SPACES, PROJECTIONS, RESOLUTIONS, SHADERS, active_effect, active_layer, children, editing_mask, find_layer, isolated_uids,
+from .document import (BAKE_ANTIALIAS_LABELS, BAKE_CURVATURE_LABELS, BAKE_ID_LABELS, DEPTH_LABELS, DISPLACEMENT_SCALE_MAX, DISPLACEMENT_SUBDIVISION_MAX, DYNAMICS, NORMAL_FORMATS, PROJECTORS, STROKE_METHODS, TEXTURE_SAMPLING, TRANSPARENCY, NORMAL_SPACES, PROJECTIONS, RESOLUTIONS, SHADERS, active_effect, active_layer, children, editing_mask, find_layer, isolated_uids, stack_target,
                        linked_layer, map_extrusion, map_samples, set_channels, slot_value, uses_coordinates)
-from .effects import ANCHORED_KINDS, CONTENT_SOURCES, EFFECT_ICONS, EFFECT_KINDS, FILL_PROJECTIONS, LEVEL_COMPONENTS, MASK_BLEND_LABEL, LevelsView, effect_label
+from .effects import ANCHORED_KINDS, EFFECT_ICONS, EFFECT_LABEL, FILL_PROJECTIONS, LEVEL_COMPONENTS, MASK_BLEND_LABEL, LevelsView, effect_label, effects_in, has_mask, uses_blend
 from .filters import FILTER, FILTERS
 from .library import capture, libraries as library_folders, texture_folder
 from .exporting import FORMAT_LABELS, PADDING_STYLES, SOURCES, TOKENS, find_template, is_custom
@@ -36,6 +36,7 @@ HISTORY_ROW = 24
 LINE_HEIGHT = 28
 MENU_ROW = 26
 MENU_WIDTH = 196
+SHORTCUT_MENU_WIDTH = 256
 CHANNEL_COLUMN = 280
 DEPTH_CHIP = 56
 MENU_HEADING = 'HEADING.'
@@ -56,6 +57,9 @@ INDENT = 14
 CHANNEL_OPACITY_WIDTH = 44
 BLEND_WIDTH = 78
 VALUE_MINIMUM = 36
+ROW_NAME = 70
+ROW_NAME_MINIMUM = 48
+ROW_BLEND_MINIMUM = 40
 HEADER_TITLE = 40
 TOGGLE_WIDTH = 100
 BAR_MENU_WIDTH = 150
@@ -454,14 +458,28 @@ def selection(data):
     return 'FOLDER' if layer.kind == 'FOLDER' else 'LAYER'
 
 
-def layer_rows(data, collapsed):
+@dataclass(frozen=True)
+class StackRow:
+    kind: str
+    layer: object
+    depth: int
+    effect: object = None
+
+
+def context_rows(data, layer, depth):
+    target = stack_target(data)
+    header = [StackRow('MASK', layer, depth)] if target == 'MASK' else []
+    return header + [StackRow('EFFECT', layer, depth, effect) for effect in reversed(effects_in(layer, target))]
+
+
+def stack_rows(data, collapsed):
     rows = []
 
     def walk(parent, depth):
         for layer in reversed(children(data.layers, parent)):
-            rows.append((layer, depth, None))
-            if 'FX_OPEN_' + layer.uid not in collapsed:
-                rows.extend((layer, depth + 1, effect) for effect in reversed(layer.effects))
+            rows.append(StackRow('LAYER', layer, depth))
+            if layer.uid == data.active_uid:
+                rows.extend(context_rows(data, layer, depth + 1))
             if layer.kind == 'FOLDER' and 'FOLD_' + layer.uid not in collapsed:
                 walk(layer.uid, depth + 1)
     walk('', 0)
@@ -503,12 +521,34 @@ def effect_row(flow, state, data, layer, effect, row):
     s = flow.layout.scale
     key = f'{layer.uid}.{effect.uid}'
     preview = effect_preview(effect)
-    selected = layer.uid == data.active_uid and data.target == 'EFFECT' and data.active_effect == effect.uid
-    flow.add('FX_' + key, row, 'ROW', label=effect_label(effect), text=effect.target.title(), active=selected, second=1.0 if selected else 0.0,
-             preview=preview, icon='' if preview is not None else EFFECT_ICONS[effect.kind], color=(.5, .5, .5, 1.0),
-             tip='Click to edit this effect, drag to reorder it')
-    flow.add('FXEYE_' + key, Rect(row.x + 4 * s, row.y + 8 * s, 22 * s, row.h - 16 * s), 'ICON',
+    selected = data.active_row == effect.uid
+    opacity = CHANNEL_OPACITY_WIDTH * s
+    tail = opacity + 34 * s
+    blend = min(BLEND_WIDTH * s, max(ROW_BLEND_MINIMUM * s, row.w - (ROW_NAME + ROW_NAME_MINIMUM) * s - tail))
+    y, h, right = row.y + 8 * s, row.h - 16 * s, row.x + row.w - 4 * s
+    flow.add('FX_' + key, row, 'ROW', label=effect_label(effect), active=selected or {effect.uid, data.active_row} <= state.multi_effects, second=1.0 if selected else 0.0,
+             preview=preview, icon='' if preview is not None else EFFECT_ICONS[effect.kind], color=(.5, .5, .5, 1.0), value=blend + tail + 4 * s,
+             tip='Click to edit this effect, Ctrl or Shift-click to select several, drag to reorder, right-click for more')
+    flow.add('FXEYE_' + key, Rect(row.x + 4 * s, y, 22 * s, h), 'ICON',
              icon='HIDE_OFF' if effect.enabled else 'HIDE_ON', tip='Turn the effect off' if effect.enabled else 'Turn the effect on')
+    flow.add('FXDEL_' + key, Rect(right - 22 * s, y, 22 * s, h), 'ICON', icon='CLOSE', tip='Remove this effect')
+    flow.add('FXOPACITY_' + effect.uid, Rect(right - 26 * s - opacity, y, opacity, h), 'SLIDER', value=effect.opacity,
+             text=f'{effect.opacity * 100:.0f}%', tip='Opacity of this effect')
+    place = Rect(right - 30 * s - opacity - blend, y, blend, h)
+    if uses_blend(effect):
+        flow.add('FXBLEND_' + effect.uid, place, 'DROPDOWN', text=MASK_BLEND_LABEL[effect.blend], tip='How this effect combines with the rows below it')
+    else:
+        flow.add('FXFIXED_' + effect.uid, place, 'NOTE', label=MASK_BLEND_LABEL['MIX'], tip='This effect always replaces the rows below it')
+
+
+def mask_header_row(flow, data, layer, row):
+    s = flow.layout.scale
+    selected = editing_mask(data)
+    flow.add('MASKROW_' + layer.uid, row, 'MASKROW', label=layer.name + ' mask', active=selected, second=1.0 if selected else 0.0,
+             preview=layer.mask, icon='' if layer.mask is not None else 'MASK', value=30 * s,
+             tip='Click to paint the base of this mask, right-click for more')
+    flow.add('MASKDEL_' + layer.uid, Rect(row.x + row.w - 26 * s, row.y + 8 * s, 22 * s, row.h - 16 * s), 'ICON', icon='CLOSE',
+             tip='Remove this mask and its effects')
 
 
 def drop_marker(flow, state, key, row):
@@ -528,41 +568,41 @@ def fill_layers(layout, state, data, flow):
     target = selection(data)
     size = THUMBNAIL * s
     isolated = isolated_uids(data)
-    rows = layer_rows(data, state.collapsed)
+    rows = stack_rows(data, state.collapsed)
     if not rows:
         x, y, h = flow.field()
         flow.add('LAYERS_EMPTY', Rect(x, y, flow.viewport.w - 2 * flow.pad, h), 'NOTE', label='No layers. Add a paint or fill layer to start.')
         return
-    for layer, depth, effect in rows:
-        uid = layer.uid
+    for entry in rows:
+        layer, effect, uid = entry.layer, entry.effect, entry.layer.uid
         line = flow.line(ROW_HEIGHT * s)
         if not flow.visible(line):
             continue
-        indent = depth * INDENT * s
+        indent = entry.depth * INDENT * s
         row = Rect(line.x + 2 * s + indent, line.y + 1 * s, line.w - 4 * s - indent, line.h - 2 * s)
-        if effect is not None:
+        if entry.kind == 'MASK':
+            mask_header_row(flow, data, layer, row)
+            continue
+        if entry.kind == 'EFFECT':
             effect_row(flow, state, data, layer, effect, row)
             drop_marker(flow, state, f'FX_{uid}.{effect.uid}', row)
             continue
         source = linked_layer(layer) if layer.kind == 'INSTANCE' else None
         is_folder = layer.kind == 'FOLDER' or (source is not None and source.kind == 'FOLDER')
-        selected = uid == data.active_uid or uid in state.multi
+        shows_mask = has_mask(layer)
+        selected = uid in state.multi or (uid == data.active_uid and target in {'LAYER', 'FOLDER', 'INSTANCE'})
         editing = state.text is not None and state.text.key == f'NAME_{uid}'
         flow.add(f'ROW_{uid}', row, 'ROW', label=state.text.text if editing else layer.name, text=f'{layer.opacity * 100:.0f}%',
                  active=selected, second=1.0 if uid == data.active_uid and target in {'LAYER', 'INSTANCE'} else 0.0,
-                 preview=layer_preview(layer), mask=layer.mask if layer.kind != 'INSTANCE' else None,
+                 preview=layer_preview(layer), mask=shows_mask or None,
                  icon='FOLDER' if is_folder else '', color=layer_color(layer),
-                 caret=state.text.cursor if editing else -1, value=94 * s if len(layer.effects) or layer.kind in {'FOLDER', 'INSTANCE'} else 0.0,
+                 caret=state.text.cursor if editing else -1, value=68 * s if layer.kind in {'FOLDER', 'INSTANCE'} else 0.0,
                  tip='Click to select, Ctrl or Shift-click to select several, drag to reorder, double-click to rename, right-click for more')
         drop_marker(flow, state, f'ROW_{uid}', row)
         if layer.kind == 'INSTANCE':
             noun = 'folder' if source is not None and source.kind == 'FOLDER' else 'layer'
             flow.add('LINKED_' + uid, Rect(row.x + row.w - 64 * s, row.y + 8 * s, 22 * s, row.h - 16 * s), 'ICON', icon='INTERNAL',
                      tip=f'Instance of a {noun} from {layer.link_set}; edits to the source show here')
-        if len(layer.effects):
-            opened = 'FX_OPEN_' + uid not in state.collapsed
-            flow.add('FX_OPEN_' + uid, Rect(row.x + row.w - 90 * s, row.y + 8 * s, 22 * s, row.h - 16 * s), 'ICON',
-                     icon='DOWN' if opened else 'DISCLOSURE', tip='Hide the effects of this layer' if opened else 'Show the effects of this layer')
         shown = (layer.visible or uid == data.isolate) and (isolated is None or uid in isolated)
         flow.add(f'EYE_{uid}', Rect(row.x + 4 * s, row.y + 8 * s, 22 * s, row.h - 16 * s), 'ICON', icon='HIDE_OFF' if shown else 'HIDE_ON',
                  tip=('Hide layer' if layer.visible else 'Show layer') + '; Alt-click to show only this layer')
@@ -570,27 +610,19 @@ def fill_layers(layout, state, data, flow):
             folded = 'FOLD_' + uid in state.collapsed
             flow.add('FOLD_' + uid, Rect(row.x + row.w - 64 * s, row.y + 8 * s, 22 * s, row.h - 16 * s), 'ICON',
                      icon='DISCLOSURE' if folded else 'DOWN', tip='Show the layers in this folder' if folded else 'Hide the layers in this folder')
-        if layer.mask is not None:
+        if shows_mask:
             flow.add(f'MASKTHUMB_{uid}', Rect(row.x + 34 * s + size, row.y + (row.h - size) / 2, size, size), 'THUMB',
-                     preview=layer.mask, active=selected and target == 'MASK',
-                     tip='Select the mask to paint and edit it; Alt-click to show the mask in the viewport')
+                     preview=layer.mask, icon='MASK', active=uid == data.active_uid and stack_target(data) == 'MASK',
+                     tip='Select the mask to paint it and show its effects; Alt-click to show the mask in the viewport')
 
 
 def layers_panel(layout, state, data):
     s = layout.scale
-    actions = (('DELETE_LAYER', '', HEADER - 8, 'Delete Layer', 'DELETE'),
+    actions = (('DELETE_LAYER', '', HEADER - 8, 'Remove the selected layer, mask, or effect', 'DELETE'),
                ('ADD_FOLDER', '', HEADER - 8, 'New folder above the selected layer', 'FOLDER'),
                ('ADD_FILL', '+ Fill', 52, 'New fill layer above the selected one', ''),
                ('ADD_PAINT', '+ Paint', 64, 'New paint layer above the selected one', ''))
-    return ColumnPanel('LAYERS', 'Layers', max(1, len(layer_rows(data, state.collapsed))) * ROW_HEIGHT * s + 8 * s, fill_layers, 4 * s, actions)
-
-
-def effects_add_section(flow, data, layer, w):
-    s = flow.layout.scale
-    x, y, h = flow.field()
-    half = (w - 4 * s) / 2
-    flow.add('ADD_FX_MASK', Rect(x, y, half, h), 'DROPDOWN', text='+ Mask effect', tip='Add paint, fill, levels, filter, compare, anchor, ID color, or a generator to the mask')
-    flow.add('ADD_FX_CONTENT', Rect(x + half + 4 * s, y, half, h), 'DROPDOWN', text='+ Content effect', tip='Add paint, fill, levels, filter, or a generator to the layer content')
+    return ColumnPanel('LAYERS', 'Layers', max(1, len(stack_rows(data, state.collapsed))) * ROW_HEIGHT * s + 8 * s, fill_layers, 4 * s, actions)
 
 
 def geometry_section(flow, data, layer, w):
@@ -692,18 +724,10 @@ def effect_section(flow, data, layer, w):
     s = flow.layout.scale
     effect = active_effect(data)
     x, y, h = flow.field()
-    flow.add('FX_ENABLED', Rect(x, y, TOGGLE_WIDTH * s, h), 'TOGGLE', label='Enabled', active=effect.enabled, tip='Turn this effect on or off')
-    flow.add('FX_UP', Rect(x + w - 92 * s, y, 26 * s, h), 'ICON', icon='CHEVRON', tip='Move the effect up')
-    flow.add('FX_DOWN', Rect(x + w - 62 * s, y, 26 * s, h), 'ICON', icon='DOWN', tip='Move the effect down')
-    flow.add('FX_DELETE', Rect(x + w - 26 * s, y, 26 * s, h), 'ICON', icon='CLOSE', tip='Delete this effect')
-    x, y, h = flow.field()
     half = (w - 4 * s) / 2
-    if effect.target == 'MASK' and not (effect.kind == 'FILTER' and FILTER[effect.filter].sampling):
+    if uses_blend(effect):
         flow.add('FX_BLEND', Rect(x, y, half, h), 'DROPDOWN', label='Blend', text=MASK_BLEND_LABEL[effect.blend],
-                 tip='How this effect combines with the mask below it')
-    elif effect.kind in CONTENT_SOURCES:
-        flow.add('FX_BLEND', Rect(x, y, half, h), 'DROPDOWN', label='Blend', text=MASK_BLEND_LABEL[effect.blend],
-                 tip='How this effect combines with the layer content below it')
+                 tip=f'How this effect combines with the {"mask" if effect.target == "MASK" else "layer content"} below it')
     else:
         flow.add('FX_KIND', Rect(x, y, half, h), 'NOTE', label=effect_label(effect))
     flow.add('FX_opacity', Rect(x + half + 4 * s, y, half, h), 'SLIDER', label='Opacity', value=effect.opacity, text=f'{effect.opacity * 100:.0f}%')
@@ -801,7 +825,7 @@ def fill_textured(effect):
 
 def effect_lines(data):
     effect = active_effect(data)
-    lines = 2 + (effect.kind in {'PAINT', 'FILL', 'FILTER', 'COMPARE', 'ANCHOR', 'LEVELS'}) + (effect.kind == 'FILL' and effect.source != 'VALUE')
+    lines = 1 + (effect.kind in {'PAINT', 'FILL', 'FILTER', 'COMPARE', 'ANCHOR', 'LEVELS'}) + (effect.kind == 'FILL' and effect.source != 'VALUE')
     lines += fill_textured(effect) + (fill_textured(effect) and fill_projection(effect) == 'TRIPLANAR')
     lines += anchor_lines(data, effect)
     lines += (len(effect_sliders(effect)) + 1) // 2
@@ -812,8 +836,8 @@ def effect_lines(data):
     return lines + int(bool(effect_colors(effect)))
 
 
-def effect_menu(target):
-    return tuple((f'NEW_FX.{target}.{key}', label, False) for key, label, targets in EFFECT_KINDS if target in targets)
+def add_effect_items(kinds):
+    return tuple(('ADD_FX.' + kind, 'Add ' + EFFECT_LABEL[kind].lower(), False) for kind in kinds)
 
 
 def opacity_section(flow, data, layer, w):
@@ -963,17 +987,6 @@ def material_section(flow, data, layer, w):
         flow.add('DROP_SLOT', Rect(x, y, w - 68 * s, h), 'GHOST')
 
 
-def layer_mask_section(flow, data, layer, w):
-    s = flow.layout.scale
-    x, y, h = flow.field()
-    if layer.mask is None:
-        half = (w - 4 * s) / 2
-        flow.add('ADD_MASK_WHITE', Rect(x, y, half, h), 'CHIP', label='White mask', tip='Show everything, paint black areas away')
-        flow.add('ADD_MASK_BLACK', Rect(x + half + 4 * s, y, half, h), 'CHIP', label='Black mask', tip='Hide everything, paint areas in')
-    else:
-        flow.add('SELECT_MASK', Rect(x, y, w, h), 'CHIP', label='Edit mask', tip='Select the mask to paint and edit it')
-
-
 GENERATOR_SLIDERS = (('GEN_LEVEL', 'Level', 'gen_level', 1.0), ('GEN_CONTRAST', 'Contrast', 'gen_contrast', 1.0),
                      ('GEN_NOISE', 'Noise', 'gen_noise', 1.0), ('GEN_SCALE', 'Scale', 'gen_scale', 200.0))
 BREAKUP_DETAIL = ('GEN_DETAIL', 'Detail', 'gen_detail', 15.0)
@@ -1029,20 +1042,13 @@ def generator_lines(data, effect):
 
 
 def mask_section(flow, data, layer, w):
-    s = flow.layout.scale
     x, y, h = flow.field()
-    flow.add('MASK_INFO', Rect(x, y, w, h), 'NOTE', label='Paint reveals the layer, Erase hides it')
-    x, y, h = flow.field()
-    flow.add('SELECT_LAYER', Rect(x, y, w - 34 * s, h), 'CHIP', label='Back to layer', tip='Select the layer content')
-    flow.add('REMOVE_MASK', Rect(x + w - 26 * s, y, 26 * s, h), 'ICON', icon='CLOSE', tip='Remove mask')
+    flow.add('MASK_INFO', Rect(x, y, w, h), 'NOTE',
+             label='Paint reveals the layer, Erase hides it' if layer.mask is not None else 'No base to paint, effects shape this mask')
 
 
 def one_line(data):
     return 1
-
-
-def two_lines(data):
-    return 2
 
 
 def channel_lines(data):
@@ -1064,15 +1070,11 @@ def material_lines(data):
 
 
 PROPERTY_SECTIONS = {'LAYER': (Section(one_line, opacity_section), Section(material_lines, material_section), Section(projection_lines, projection_section),
-                               Section(channel_lines, channels_section, channel_stack_lines), Section(one_line, layer_mask_section),
-                               Section(geometry_lines, geometry_section),
-                               Section(one_line, effects_add_section)),
+                               Section(channel_lines, channels_section, channel_stack_lines), Section(geometry_lines, geometry_section)),
                      'FOLDER': (Section(one_line, opacity_section), Section(one_line, folder_blend_section),
-                                Section(folder_channel_lines, folder_channels_section), Section(one_line, layer_mask_section),
-                                Section(geometry_lines, geometry_section),
-                                Section(one_line, effects_add_section)),
-                     'MASK': (Section(two_lines, mask_section), Section(one_line, effects_add_section)),
-                     'EFFECT': (Section(effect_lines, effect_section), Section(one_line, effects_add_section)),
+                                Section(folder_channel_lines, folder_channels_section), Section(geometry_lines, geometry_section)),
+                     'MASK': (Section(one_line, mask_section),),
+                     'EFFECT': (Section(effect_lines, effect_section),),
                      'INSTANCE': (Section(one_line, opacity_section), Section(one_line, instance_section))}
 
 
@@ -1443,11 +1445,12 @@ def menu_popover(layout, state, bounds):
     items = state.popover.items
     rows = max(1, min(len(items), int((bounds.h - 24 * s) // (MENU_ROW * s))))
     columns = math.ceil(len(items) / rows)
-    card = place_popover(bounds, state.popover.anchor, MENU_WIDTH * columns * s, (rows * MENU_ROW + 8) * s, s)
-    for index, (key, label, active) in enumerate(items):
+    width = SHORTCUT_MENU_WIDTH if any(len(item) > 3 for item in items) else MENU_WIDTH
+    card = place_popover(bounds, state.popover.anchor, width * columns * s, (rows * MENU_ROW + 8) * s, s)
+    for index, (key, label, active, *shortcut) in enumerate(items):
         column, row = divmod(index, rows)
-        rect = Rect(card.x + (4 + column * MENU_WIDTH) * s, card.top - (4 + (row + 1) * MENU_ROW) * s, (MENU_WIDTH - 8) * s, MENU_ROW * s)
-        layout.add(key, rect, 'NOTE' if key.startswith(MENU_HEADING) else 'MENUITEM', label=label, active=active)
+        rect = Rect(card.x + (4 + column * width) * s, card.top - (4 + (row + 1) * MENU_ROW) * s, (width - 8) * s, MENU_ROW * s)
+        layout.add(key, rect, 'NOTE' if key.startswith(MENU_HEADING) else 'MENUITEM', label=label, active=active, shortcut=''.join(shortcut))
     return card
 
 

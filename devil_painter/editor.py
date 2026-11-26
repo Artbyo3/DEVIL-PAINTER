@@ -14,8 +14,8 @@ from .blending import BLEND_MODES, CHANNEL, FOLDER_BLENDS, linear_to_srgb, srgb_
 from .ui_system import ACCENT
 from .canvas import Rect
 from .document import (BAKE_ANTIALIAS_LABELS, BAKE_CURVATURE_LABELS, BAKE_ID_LABELS, BAKE_RESOLUTIONS, CHANNEL_DEPTHS, DISPLACEMENT_SCALE_MAX, DISPLACEMENT_SUBDIVISION_MAX, DYNAMICS, PROJECTIONS, PROJECTORS, RESOLUTIONS, STROKE_METHODS, TEXTURE_SAMPLING, active_effect, active_layer, active_tile, bake_map_settings, find_layer,
-                       editing_mask, map_extrusion, map_samples, paint_target, set_channels, slot_value, texture_set, uses_coordinates)
-from .effects import FILL_PROJECTIONS, LEVEL_COMPONENTS, MASK_BLENDS, LevelsView, mask_effects
+                       editing_content, editing_mask, map_extrusion, map_samples, paint_target, set_channels, slot_value, stack_target, texture_set, uses_coordinates)
+from .effects import FILL_PROJECTIONS, LEVEL_COMPONENTS, MASK_BLENDS, ROW_ADDS, STACK_ADDS, LevelsView, effects_in, find_effect, fitting_target, mask_effects
 from .filters import FILTER, FILTERS, GROUPS
 from .post import POST_SLIDERS
 from .compositing import PIN_CORNERS
@@ -28,7 +28,7 @@ from .privacy import masked
 from .masks import BREAKUPS, GENERATORS
 from .polyfill import POLY_NOUN
 from .meshmaps import MESH_MAPS
-from .minimal import MENU_HEADING, SAMPLE_TOP, EXPOSURE_RANGE, GAMMA_RANGE, PROJECTOR_RANGE, NORMAL_SLIDERS, STENCIL_SLIDERS, FX_RANGES, effect_menu, layer_rows, FOV_RANGE, RECENT_COLORS, SHADER_SLIDERS, BRUSH_SLIDERS, BRUSH_TOGGLES, BREAKUP_DETAIL, GENERATOR_SLIDERS, MAX_BRUSH_SIZE, MAX_WORLD_SIZE, REPLACE_TARGET, EFFECT_TARGET, SCALE_RANGE, TILING_RANGE, from_slider, painter_layout
+from .minimal import MENU_HEADING, SAMPLE_TOP, EXPOSURE_RANGE, GAMMA_RANGE, PROJECTOR_RANGE, NORMAL_SLIDERS, STENCIL_SLIDERS, FX_RANGES, add_effect_items, stack_rows, FOV_RANGE, RECENT_COLORS, SHADER_SLIDERS, BRUSH_SLIDERS, BRUSH_TOGGLES, BREAKUP_DETAIL, GENERATOR_SLIDERS, MAX_BRUSH_SIZE, MAX_WORLD_SIZE, REPLACE_TARGET, EFFECT_TARGET, SCALE_RANGE, TILING_RANGE, from_slider, painter_layout
 from .shell import COLUMNS, HEADER, HEIGHTS, PANELS, ROWS_ONLY, SECTIONS, SIDES, WIDTHS, clamp_length, clamp_strip, default_strips, flexible, place, resize_run
 from .state import Popover, TextEdit, WorkspaceState, format_number, parse_number
 
@@ -78,7 +78,14 @@ GENERATOR_RANGES = {**{key: (field, top) for key, _, field, top in GENERATOR_SLI
                     **{term.slider: (term.weight, 1.0) for generator in GENERATORS for term in generator.terms}}
 BAKE_OBJECTS = {'BAKE_SOURCE': ('bake_source', 'SET_SOURCE.'), 'BAKE_CAGE': ('bake_cage', 'SET_CAGE.')}
 AUTO_BAKE_DELAY = 1.0
-LAYER_KEYS = ('ROW_', 'FX_', 'EYE_', 'FXEYE_', 'MASKTHUMB_')
+PASTE_ITEM = ('EFFECTS_PASTE', 'Paste', False, 'Ctrl+V')
+EFFECT_ITEMS = (('EFFECTS_CUT', 'Cut effect(s)', False, 'Ctrl+X'), ('EFFECTS_COPY', 'Copy effect(s)', False, 'Ctrl+C'), PASTE_ITEM,
+                ('EFFECTS_DUPLICATE', 'Duplicate effect(s)', False, 'Ctrl+D'), ('EFFECTS_REMOVE', 'Remove effect(s)', False, 'Del'),
+                ('EFFECTS_MOVE.TOP', 'Move effect(s) to top', False, 'Alt+Shift+Up'), ('EFFECTS_MOVE.UP', 'Move up', False, 'Alt+Up'),
+                ('EFFECTS_MOVE.DOWN', 'Move down', False, 'Alt+Down'), ('EFFECTS_MOVE.BOTTOM', 'Move effect(s) to bottom', False, 'Alt+Shift+Down'))
+EFFECT_KEYS = {('X', True, False, False): 'EFFECTS_CUT', ('C', True, False, False): 'EFFECTS_COPY', ('D', True, False, False): 'EFFECTS_DUPLICATE',
+               ('UP_ARROW', False, True, True): 'EFFECTS_MOVE.TOP', ('UP_ARROW', False, True, False): 'EFFECTS_MOVE.UP',
+               ('DOWN_ARROW', False, True, False): 'EFFECTS_MOVE.DOWN', ('DOWN_ARROW', False, True, True): 'EFFECTS_MOVE.BOTTOM'}
 _active = None
 _pending_regions = []
 
@@ -664,8 +671,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.message = self.pick_geometry(context)
             self._area.tag_redraw()
             return {'RUNNING_MODAL'}
-        if press and event.ctrl and event.type in {'C', 'V'} and control is not None and control.key.startswith(LAYER_KEYS):
-            self.message = self.clipboard_key(context, event.type == 'V')
+        if press and not pointer_event and self.stack_key(context, event):
             self._area.tag_redraw()
             return {'RUNNING_MODAL'}
         if not over and press and event.type == 'LEFTMOUSE' and self.state.picking:
@@ -683,6 +689,20 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
                 self.state.multi.clear()
             actions.select_layer(context, obj, data, uid)
             self.open_layer_menu(control.rect, data)
+            return {'RUNNING_MODAL'}
+        if control is not None and press and event.type == 'RIGHTMOUSE' and control.kind == 'ROW' and control.key.startswith('FX_'):
+            obj, data = self.painted()
+            uid, effect_uid = control.key.removeprefix('FX_').split('.')
+            if effect_uid not in self.chosen_effects(data):
+                self.state.multi_effects.clear()
+            self.state.multi.clear()
+            actions.select_effect(context, obj, data, uid, effect_uid)
+            self.state.popover = Popover('MENU', control.rect, items=EFFECT_ITEMS + add_effect_items(ROW_ADDS))
+            return {'RUNNING_MODAL'}
+        if control is not None and press and event.type == 'RIGHTMOUSE' and control.key.startswith(('MASKTHUMB_', 'MASKROW_')):
+            obj, data = self.painted()
+            self.select_mask(context, obj, data, control.key.split('_', 1)[1])
+            self.state.popover = Popover('MENU', control.rect, items=add_effect_items(STACK_ADDS) + (PASTE_ITEM, ('REMOVE_MASK', 'Remove', False, 'Del')))
             return {'RUNNING_MODAL'}
         if control is not None and press and event.type == 'RIGHTMOUSE' and control.key.startswith('SEARCH.'):
             self.state.popover = Popover('MENU', control.rect, items=((f'DELETE_SEARCH.{control.key.removeprefix("SEARCH.")}', 'Delete saved search', False),))
@@ -790,7 +810,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
 
     def gizmo_geometry(self, obj, data, view):
         layer = active_layer(data) if data is not None else None
-        if layer is None or layer.kind != 'FILL' or layer.projection not in PROJECTORS or data.target != 'CONTENT' or not uses_coordinates(layer):
+        if layer is None or layer.kind != 'FILL' or layer.projection not in PROJECTORS or not editing_content(data) or not uses_coordinates(layer):
             return ()
         matrix = self.projector_matrix(obj, layer)
         rings = [[(math.cos(angle), math.sin(angle), height) for angle in (step * math.tau / CIRCLE_STEPS for step in range(CIRCLE_STEPS + 1))]
@@ -1255,15 +1275,72 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         self.state.multi &= {layer.uid for layer in data.layers}
         return [layer.uid for layer in data.layers if layer.uid in self.state.multi or layer.uid == data.active_uid]
 
-    def clipboard_key(self, context, paste):
+    def chosen_effects(self, data):
+        effect = active_effect(data)
+        if effect is None:
+            return []
+        picked = self.state.multi_effects if effect.uid in self.state.multi_effects else {effect.uid}
+        return [item.uid for item in effects_in(active_layer(data), effect.target) if item.uid in picked]
+
+    def stack_key(self, context, event):
         obj, data = self.painted()
-        if not paste:
-            return self.copy_layers(obj, data)
+        panel = self.workspace.zones.rects.get('LAYERS')
+        if data is None or panel is None or not panel.contains(*self.pointer) or (self.state.popover is not None and self.state.popover.kind != 'MENU'):
+            return False
+        combo = (event.type, event.ctrl, event.alt, event.shift)
+        if combo == ('V', True, False, False):
+            self.message = self.paste_keyed(context, obj, data)
+        elif combo == ('DEL', False, False, False):
+            self.message = self.remove_selection(context, obj, data)
+        elif combo in EFFECT_KEYS and active_effect(data) is not None:
+            self.effects_act(context, obj, data, EFFECT_KEYS[combo])
+        elif combo == ('C', True, False, False):
+            self.message = self.copy_layers(obj, data)
+        else:
+            return False
+        self.state.popover = None
+        return True
+
+    def paste_keyed(self, context, obj, data):
+        if self.state.effect_clipboard:
+            return actions.paste_copied_effects(context, obj, data, self.state.effect_clipboard)
         return self.paste('PASTE_LAYERS', context, obj)
+
+    def remove_selection(self, context, obj, data):
+        effects = self.chosen_effects(data)
+        if effects:
+            return actions.remove_effects(context, obj, data, effects)
+        if editing_mask(data):
+            return actions.remove_mask(context, obj, data)
+        uids = self.chosen(data)
+        self.state.multi.clear()
+        return actions.delete_layers(context, obj, data, uids) if len(uids) > 1 else actions.delete_layer(context, obj, data)
+
+    def select_mask(self, context, obj, data, uid):
+        self.state.multi.clear()
+        return actions.select_layer(context, obj, data, uid, mask=True)
+
+    def effects_act(self, context, obj, data, key):
+        uids = self.chosen_effects(data)
+        if key == 'EFFECTS_PASTE':
+            self.message = (actions.paste_copied_effects(context, obj, data, self.state.effect_clipboard) if self.state.effect_clipboard
+                            else 'Copy an effect first.')
+        elif key in {'EFFECTS_CUT', 'EFFECTS_COPY'}:
+            self.state.effect_clipboard, self.state.clipboard = actions.capture_effects(data, uids), ()
+            self.message = f'{actions.effect_count(uids)} copied.'
+            if key == 'EFFECTS_CUT':
+                self.message = actions.remove_effects(context, obj, data, uids, 'cut')
+        elif key == 'EFFECTS_DUPLICATE':
+            self.message = actions.duplicate_effects(context, obj, data, uids)
+        elif key == 'EFFECTS_REMOVE':
+            self.message = self.remove_selection(context, obj, data)
+        else:
+            self.message = actions.move_effects(context, obj, data, uids, key.removeprefix('EFFECTS_MOVE.'))
 
     def copy_layers(self, obj, data):
         uids = tuple(self.chosen(data))
         self.state.clipboard = (obj.name, obj.devil_painter.active_set, uids)
+        self.state.effect_clipboard = ()
         return f'Copied {len(uids)} layer{"s" if len(uids) > 1 else ""}.'
 
     def paste(self, key, context, obj):
@@ -1396,17 +1473,17 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
     def select_row(self, context, obj, data, uid, control, double):
         ctrl, shift, _ = self.modifiers
         if shift and data.active_uid:
-            order = [layer.uid for layer, _, effect in layer_rows(data, self.state.collapsed) if effect is None]
+            order = [row.layer.uid for row in stack_rows(data, self.state.collapsed) if row.kind == 'LAYER']
             start, end = sorted((order.index(data.active_uid), order.index(uid))) if data.active_uid in order else (order.index(uid),) * 2
             self.state.multi = set(order[start:end + 1])
-            data.active_uid = uid
+            actions.select_layer(context, obj, data, uid)
             return f'{len(self.state.multi)} layers selected.'
         if ctrl:
             self.state.multi = set(self.chosen(data)) ^ {uid}
             if uid in self.state.multi:
-                data.active_uid = uid
+                actions.select_layer(context, obj, data, uid)
             elif self.state.multi:
-                data.active_uid = next(layer.uid for layer in data.layers if layer.uid in self.state.multi)
+                actions.select_layer(context, obj, data, next(layer.uid for layer in data.layers if layer.uid in self.state.multi))
             return f'{len(self.chosen(data))} layers selected.'
         self.state.multi.clear()
         key = control.key
@@ -1419,6 +1496,27 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         else:
             self.state.drag = ('DRAG_ROW.' + uid, control.rect)
         return message
+
+    def select_effect_row(self, context, obj, data, uid, effect_uid, control):
+        ctrl, shift, _ = self.modifiers
+        self.state.multi.clear()
+        current = active_effect(data)
+        if shift and current is not None:
+            order = [item.uid for item in effects_in(active_layer(data), current.target)]
+            start, end = sorted((order.index(current.uid), order.index(effect_uid)))
+            self.state.multi_effects = set(order[start:end + 1])
+            actions.select_effect(context, obj, data, uid, effect_uid)
+            return f'{len(self.state.multi_effects)} effects selected.'
+        if ctrl and current is not None:
+            self.state.multi_effects = set(self.chosen_effects(data)) ^ {effect_uid}
+            if effect_uid in self.state.multi_effects:
+                actions.select_effect(context, obj, data, uid, effect_uid)
+            elif self.state.multi_effects:
+                actions.select_effect(context, obj, data, uid, next(item.uid for item in active_layer(data).effects if item.uid in self.state.multi_effects))
+            return f'{len(self.chosen_effects(data))} effects selected.'
+        self.state.multi_effects.clear()
+        self.state.drag = (f'DRAG_FX.{uid}.{effect_uid}', control.rect)
+        return actions.select_effect(context, obj, data, uid, effect_uid)
 
     def open_effect_menu(self, key, control, data):
         effect = active_effect(data)
@@ -1454,26 +1552,25 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
 
     def effect_act(self, context, obj, data, key, control):
         effect = active_effect(data)
-        if key in {'ADD_FX_MASK', 'ADD_FX_CONTENT'}:
-            self.state.popover = Popover('MENU', control.rect, items=effect_menu('MASK' if key == 'ADD_FX_MASK' else 'CONTENT'))
-        elif key.startswith('NEW_FX.'):
-            _, target, kind = key.split('.')
-            self.message = actions.add_effect(context, obj, data, kind, target)
+        if key.startswith('ADD_FX.'):
+            kind = key.removeprefix('ADD_FX.')
+            self.message = actions.add_effect(context, obj, data, kind, fitting_target(kind, stack_target(data)))
+        elif key.startswith('EFFECTS_'):
+            self.effects_act(context, obj, data, key)
+        elif key.startswith('FXBLEND_'):
+            effect_uid = key.removeprefix('FXBLEND_')
+            current = find_effect(active_layer(data), effect_uid).blend
+            self.state.popover = Popover('MENU', control.rect, items=tuple((f'SET_ROWBLEND.{effect_uid}.{mode}', label, mode == current) for mode, label, _ in MASK_BLENDS))
+        elif key.startswith('SET_ROWBLEND.'):
+            _, effect_uid, mode = key.split('.')
+            self.message = actions.write_effect(context, obj, data, effect_uid, 'blend', mode, True)
+        elif key.startswith('FXDEL_'):
+            self.message = actions.remove_effects(context, obj, data, [key.split('.')[1]])
         elif key.startswith('FXEYE_'):
             uid, effect_uid = key.removeprefix('FXEYE_').split('.')
             self.message = actions.toggle_effect(context, obj, data, uid, effect_uid)
-        elif key.startswith('FX_OPEN_'):
-            self.state.collapsed ^= {key}
-        elif key == 'FX_ENABLED':
-            self.message = actions.toggle_effect(context, obj, data, data.active_uid, effect.uid)
         elif key == 'FX_CLAMP':
             self.message = actions.edit_effect(context, obj, data, 'clamp', not effect.clamp, True)
-        elif key in {'FX_UP', 'FX_DOWN'}:
-            layer = active_layer(data)
-            index = next(position for position, item in enumerate(layer.effects) if item.uid == effect.uid)
-            self.message = actions.move_effect(context, obj, data, layer.uid, effect.uid, index + (1 if key == 'FX_UP' else -1))
-        elif key == 'FX_DELETE':
-            self.message = actions.delete_effect(context, obj, data)
         elif key in {'FX_BLEND', 'FX_FILTER', 'FX_SOURCE', 'FX_OTHER', 'FX_CHANNEL', 'FX_COMPONENT', 'FX_PROJECTION', 'FX_WRAP', 'FX_FILTERING', 'FX_ANCHOR', 'FX_ANCHOR_CHANNEL'}:
             self.open_effect_menu(key, control, data)
         elif key.startswith('SET_FXPATTERN.'):
@@ -1484,10 +1581,10 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.state.shelf_open, self.state.shelf_tab = True, 'TEXTURES'
             self.message = 'Click a texture in the shelf to fill the effect with it.'
         elif key == 'FX_PICK_ID':
-            self.state.picking = 'id:' + data.active_effect
+            self.state.picking = 'id:' + effect.uid
             self.message = 'Click the model to pick an ID color.'
         elif key == 'FX_ADD_ID':
-            self.state.picking = 'idadd:' + data.active_effect
+            self.state.picking = 'idadd:' + effect.uid
             self.message = 'Click the model to add another ID color.'
         elif key.startswith('FX_REMOVE_ID.'):
             self.message = actions.remove_id_color(context, obj, data, int(key.removeprefix('FX_REMOVE_ID.')))
@@ -1502,8 +1599,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.message = actions.edit_effect(context, obj, data, field, value, True)
         elif control.kind == 'ROW' and key.startswith('FX_'):
             uid, effect_uid = key.removeprefix('FX_').split('.')
-            self.message = actions.select_effect(context, obj, data, uid, effect_uid)
-            self.state.drag = (f'DRAG_FX.{uid}.{effect_uid}', control.rect)
+            self.message = self.select_effect_row(context, obj, data, uid, effect_uid, control)
         else:
             return False
         return True
@@ -1570,7 +1666,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
                      ('COPY_LAYERS', 'Copy', False), ('DUPLICATE_SELECTED', 'Duplicate', False), ('HIDE_SELECTED', 'Hide', False),
                      ('SHOW_SELECTED', 'Show', False)]
             items += [(f'MOVE_SELECTED.{index}', 'Move to ' + item.name, False) for index, item in enumerate(project.sets) if index != project.active_set]
-            items.append(('DELETE_SELECTED', f'Delete {len(uids)} layers', False))
+            items.append(('DELETE_SELECTED', f'Remove {len(uids)} layers', False, 'Del'))
             self.state.popover = Popover('MENU', anchor, items=tuple(items))
             return
         items = [('RENAME', 'Rename', False), ('DUPLICATE', 'Duplicate', False), ('COPY_LAYERS', 'Copy', False), ('ADD_FOLDER', 'New folder above', False),
@@ -1578,9 +1674,12 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         if self.state.clipboard:
             items += [('PASTE_LAYERS', 'Paste layers', False), ('PASTE_MASK', 'Paste mask', False), ('PASTE_EFFECTS', 'Paste effects', False)]
         if layer.kind == 'INSTANCE':
-            items += [('MOVE_UP', 'Move up', False), ('MOVE_DOWN', 'Move down', False), ('DELETE', 'Delete', False)]
+            items += [('MOVE_UP', 'Move up', False), ('MOVE_DOWN', 'Move down', False), ('DELETE', 'Remove', False, 'Del')]
             self.state.popover = Popover('MENU', anchor, items=tuple(items))
             return
+        items += add_effect_items(STACK_ADDS)
+        if self.state.effect_clipboard:
+            items.append(PASTE_ITEM)
         if layer.kind == 'FOLDER':
             items.append(('FLATTEN', 'Flatten folder', False))
         items.append(('EXPORT_LAYER', 'Export flattened', False))
@@ -1601,7 +1700,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             items.append(('MOVE_OUT', 'Move out of folder', False))
         items.append(('SAVE_SMART', 'Save as smart material', False))
         items += [(f'MOVE_TO_SET.{index}', 'Move to ' + item.name, False) for index, item in enumerate(project.sets) if index != project.active_set]
-        items += [('MOVE_UP', 'Move up', False), ('MOVE_DOWN', 'Move down', False), ('DELETE', 'Delete', False)]
+        items += [('MOVE_UP', 'Move up', False), ('MOVE_DOWN', 'Move down', False), ('DELETE', 'Remove', False, 'Del')]
         self.state.popover = Popover('MENU', anchor, items=tuple(items))
 
     def begin_text(self, key, text):
@@ -1823,6 +1922,14 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             return format_number(self.scene.view_settings.exposure), lambda text: parse_number(text, EXPOSURE_RANGE[0], EXPOSURE_RANGE[1]), lambda context, value: setattr(self.scene.view_settings, 'exposure', value)
         if key == 'CM_GAMMA':
             return format_number(self.scene.view_settings.gamma), lambda text: parse_number(text, GAMMA_RANGE[0], GAMMA_RANGE[1]), lambda context, value: setattr(self.scene.view_settings, 'gamma', value)
+        if key.startswith('FXOPACITY_') and data is not None:
+            effect_uid = key.removeprefix('FXOPACITY_')
+            layer = active_layer(data)
+            effect = find_effect(layer, effect_uid) if layer is not None else None
+            if effect is None:
+                return None
+            return (format_number(effect.opacity * 100, decimals=2), lambda text: parse_number(text, 0.0, 1.0, scale=100.0, units=('%',)),
+                    lambda context, value: setattr(self, 'message', actions.write_effect(context, obj, data, effect_uid, 'opacity', value, True)))
         if key.startswith('FX_') and key.removeprefix('FX_') in FX_RANGES and data is not None:
             effect = active_effect(data)
             if effect is None:
@@ -2130,6 +2237,9 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
             self.track_drop(key)
             if release:
                 self.finish_drop(context, key)
+        elif key.startswith('FXOPACITY_') and data is not None:
+            message = actions.write_effect(context, obj, data, key.removeprefix('FXOPACITY_'), 'opacity', x, release)
+            self.message = message or self.message
         elif key.startswith('FX_') and key.removeprefix('FX_') in FX_RANGES and data is not None:
             field = key.removeprefix('FX_')
             top, floor = FX_RANGES[field]
@@ -2818,22 +2928,22 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         elif key in {'ADD_PAINT', 'ADD_FILL', 'ADD_FOLDER'}:
             self.message = actions.add_layer(context, obj, data, key.removeprefix('ADD_'))
         elif key in {'DELETE', 'DELETE_LAYER'}:
-            self.message = actions.delete_layer(context, obj, data)
+            self.message = self.remove_selection(context, obj, data)
         elif key in MOVES:
             self.message = actions.move_layer(context, obj, data, MOVES[key])
         elif key.startswith('USE.'):
             self.message = actions.toggle_slot(context, obj, data, key.removeprefix('USE.'))
         elif key in {'ADD_MASK_WHITE', 'ADD_MASK_BLACK'}:
             self.message = actions.add_mask(context, obj, data, key == 'ADD_MASK_WHITE')
-        elif key == 'REMOVE_MASK':
+        elif key == 'REMOVE_MASK' or key.startswith('MASKDEL_'):
             self.message = actions.remove_mask(context, obj, data)
+        elif key.startswith('MASKROW_'):
+            self.message = self.select_mask(context, obj, data, key.removeprefix('MASKROW_'))
         elif key.startswith('MASKTHUMB_'):
             uid = key.removeprefix('MASKTHUMB_')
-            self.message = actions.select_layer(context, obj, data, uid, mask=True)
+            self.message = self.select_mask(context, obj, data, uid)
             if self.modifiers[2]:
                 self.message = actions.set_solo(context, obj, data, '' if data.solo == 'mask:' + uid else 'mask:' + uid)
-        elif key in {'SELECT_LAYER', 'SELECT_MASK'}:
-            self.message = actions.set_target(context, obj, data, 'MASK' if key == 'SELECT_MASK' else 'CONTENT')
         return None
 
     def shelf_item(self, key):
@@ -2962,8 +3072,7 @@ class DEVIL_PAINTER_OT_editor(bpy.types.Operator):
         if item.kind == 'FILTER':
             if layer is None or layer.kind == 'INSTANCE':
                 return 'Select a layer to filter.'
-            target = 'MASK' if editing_mask(data) and not FILTER[item.payload].color_only else 'CONTENT'
-            actions.add_effect(context, obj, data, 'FILTER', target)
+            actions.add_effect(context, obj, data, 'FILTER', fitting_target('FILTER', stack_target(data), FILTER[item.payload].color_only))
             return actions.edit_effect(context, obj, data, 'filter', item.payload, True)
         if item.kind == 'PACK':
             packs.open_pack(item.payload)

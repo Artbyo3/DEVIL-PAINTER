@@ -2,12 +2,14 @@ from .filters import FILTER
 from .masks import GENERATOR, GENERATOR_FIELDS
 
 EFFECT_KINDS = (('PAINT', 'Paint', ('MASK', 'CONTENT')), ('FILL', 'Fill', ('MASK', 'CONTENT')), ('LEVELS', 'Levels', ('MASK', 'CONTENT')),
-                ('FILTER', 'Filter', ('MASK', 'CONTENT')), ('COMPARE', 'Compare mask', ('MASK',)), ('ANCHOR', 'Anchor', ('MASK',)),
-                ('ID_COLOR', 'ID color', ('MASK',)), ('GENERATOR', 'Generator', ('MASK', 'CONTENT')))
+                ('FILTER', 'Filter', ('MASK', 'CONTENT')), ('COMPARE', 'Compare', ('MASK',)), ('ANCHOR', 'Anchor', ('MASK',)),
+                ('ID_COLOR', 'Color selection', ('MASK',)), ('GENERATOR', 'Generator', ('MASK', 'CONTENT')))
 CONTENT_KINDS = frozenset(key for key, _, targets in EFFECT_KINDS if 'CONTENT' in targets)
 CONTENT_SOURCES = frozenset({'PAINT', 'FILL', 'GENERATOR'})
 ANCHORED_KINDS = frozenset({'GENERATOR', 'FILTER'})
 EFFECT_LABEL = {key: label for key, label, _ in EFFECT_KINDS}
+STACK_ADDS = ('PAINT', 'FILL', 'GENERATOR', 'FILTER', 'LEVELS', 'COMPARE', 'ID_COLOR', 'ANCHOR')
+ROW_ADDS = ('PAINT', 'FILL', 'GENERATOR', 'LEVELS', 'COMPARE', 'FILTER', 'ID_COLOR', 'ANCHOR')
 EFFECT_ICONS = {'PAINT': 'PAINT', 'FILL': 'FILL', 'LEVELS': 'SETTINGS', 'FILTER': 'BLUR', 'COMPARE': 'SHAPE', 'ANCHOR': 'PIN', 'ID_COLOR': 'EYEDROPPER', 'GENERATOR': 'GENERATOR'}
 MASK_BLENDS = (('MIX', 'Replace', 3), ('MINIMUM', 'Darken', 4), ('MULTIPLY', 'Multiply', 0), ('BURN', 'Color burn', 7), ('MAXIMUM', 'Lighten', 5),
                ('SCREEN', 'Screen', 8), ('DODGE', 'Color dodge', 9), ('ADD', 'Linear dodge (Add)', 1), ('OVERLAY', 'Overlay', 10),
@@ -24,8 +26,28 @@ EFFECT_FIELDS = ('kind', 'target', 'enabled', 'blend', 'opacity', 'source', 'val
                  'color', 'color_b', 'other', 'channel', 'anchor', 'anchor_channel', 'anchor_weight', 'clamp', 'levels_component', 'projection', 'tiling', 'offset_u', 'offset_v', 'triplanar_blend', 'wrap', 'filtering') + COMPONENT_FIELDS + GENERATOR_FIELDS
 
 
+def effects_in(layer, target):
+    return [effect for effect in layer.effects if effect.target == target]
+
+
 def mask_effects(layer):
-    return [effect for effect in layer.effects if effect.target == 'MASK']
+    return effects_in(layer, 'MASK')
+
+
+def has_mask(layer):
+    return layer.mask is not None or bool(mask_effects(layer))
+
+
+def fitting_target(kind, wanted, color_only=False):
+    if wanted == 'CONTENT':
+        return 'CONTENT' if kind in CONTENT_KINDS else 'MASK'
+    return 'CONTENT' if kind == 'FILTER' and color_only else 'MASK'
+
+
+def uses_blend(effect):
+    if effect.target == 'MASK':
+        return not (effect.kind == 'FILTER' and FILTER[effect.filter].sampling)
+    return effect.kind in CONTENT_SOURCES
 
 
 def find_effect(layer, uid):

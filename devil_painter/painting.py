@@ -1,6 +1,6 @@
 import bpy
 from . import compositing
-from .document import active_layer, active_tile, paint_target
+from .document import active_layer, active_tile, editing_content, paint_target
 from .tiles import variant
 
 BRUSH_LIBRARY = 'brushes/essentials_brushes-mesh_texture.blend/Brush/'
@@ -64,7 +64,7 @@ def active_tool(context):
 
 def uses_stroke_buffer(context, data):
     layer = active_layer(data)
-    return (layer is not None and layer.kind == 'PAINT' and data.target == 'CONTENT' and data.stroke is not None and data.quick_mask is None and not data.bake_paint
+    return (layer is not None and layer.kind == 'PAINT' and editing_content(data) and data.stroke is not None and data.quick_mask is None and not data.bake_paint
             and active_tool(context) in BUFFER_TOOLS)
 
 

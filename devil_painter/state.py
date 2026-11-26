@@ -76,7 +76,9 @@ class WorkspaceState:
     picking: str = ''
     binding: str = ''
     multi: set = field(default_factory=set)
+    multi_effects: set = field(default_factory=set)
     clipboard: tuple = ()
+    effect_clipboard: tuple = ()
     drop: tuple = ()
     geo_pick: str = ''
     bake_keys: set = field(default_factory=lambda: {'ao', 'curvature', 'thickness', 'position', 'world_normal', 'id'})

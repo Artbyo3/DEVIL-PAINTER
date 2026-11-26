@@ -1,6 +1,6 @@
 import bpy
 from .blending import BLEND_MODES, CHANNEL, CHANNELS, FOLDER_BLENDS, STORED_BLENDS
-from .effects import EFFECT_KINDS, FILL_PROJECTIONS, LEVEL_COMPONENTS, MASK_BLENDS
+from .effects import EFFECT_KINDS, FILL_PROJECTIONS, LEVEL_COMPONENTS, MASK_BLENDS, find_effect, has_mask
 from .filters import FILTERS
 from .masks import BREAKUPS, GENERATOR, GENERATORS, LAYER_GENERATOR_FIELDS
 from .procedural import PATTERNS
@@ -220,8 +220,7 @@ class DEVIL_PAINTER_PG_texture_set(bpy.types.PropertyGroup):
     channels: bpy.props.CollectionProperty(type=DEVIL_PAINTER_PG_channel)
     layers: bpy.props.CollectionProperty(type=DEVIL_PAINTER_PG_layer)
     active_uid: bpy.props.StringProperty()
-    target: bpy.props.EnumProperty(items=(('CONTENT', 'Content', ''), ('MASK', 'Mask', ''), ('EFFECT', 'Effect', '')))
-    active_effect: bpy.props.StringProperty()
+    active_row: bpy.props.StringProperty()
     solo: bpy.props.StringProperty()
     isolate: bpy.props.StringProperty()
     material: bpy.props.PointerProperty(type=bpy.types.Material)
@@ -455,16 +454,29 @@ def active_layer(data):
     return find_layer(data, data.active_uid)
 
 
+def mask_row(layer):
+    return layer.uid + '.mask'
+
+
 def editing_mask(data):
     layer = active_layer(data)
-    return layer is not None and data.target == 'MASK' and layer.mask is not None
+    return layer is not None and data.active_row == mask_row(layer) and has_mask(layer)
 
 
 def active_effect(data):
     layer = active_layer(data)
-    if layer is None or data.target != 'EFFECT':
-        return None
-    return next((effect for effect in layer.effects if effect.uid == data.active_effect), None)
+    return find_effect(layer, data.active_row) if layer is not None else None
+
+
+def editing_content(data):
+    return active_layer(data) is not None and active_effect(data) is None and not editing_mask(data)
+
+
+def stack_target(data):
+    effect = active_effect(data)
+    if effect is not None:
+        return effect.target
+    return 'MASK' if editing_mask(data) else 'CONTENT'
 
 
 def paint_target(data):
@@ -478,9 +490,9 @@ def paint_target(data):
     effect = active_effect(data)
     if effect is not None:
         return effect.image if effect.kind == 'PAINT' else None
-    if editing_mask(data) or layer.kind != 'PAINT':
+    if editing_mask(data):
         return layer.mask
-    return layer.image
+    return layer.image if layer.kind == 'PAINT' else None
 
 
 def adopt_layer_generator(data, layer):
